@@ -13,7 +13,7 @@ export default async function VoorspellingenPage() {
     .select(`
       id, kickoff_at, stage, match_number,
       home_team:teams!matches_home_team_id_fkey(id, name, flag_url, group_name),
-      away_team:teams!matches_away_team_id_fkey(id, name, flag_url)
+      away_team:teams!matches_away_team_id_fkey(id, name, flag_url, group_name)
     `)
     .eq('stage', 'group')
     .order('kickoff_at')
