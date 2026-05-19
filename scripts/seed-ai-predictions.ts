@@ -669,7 +669,7 @@ async function seedAiPredictions() {
         match_id:            m.id,
         home_score:          pred.homeScore,
         away_score:          pred.awayScore,
-        match_analyse:             pred.analyse,
+        match_analyse:       pred.match_analyse,
         sleutelspeler_thuis: pred.sleutelspelerThuis,
         sleutelspeler_uit:   pred.sleutelspelerUit,
         kans_thuis:          pred.kansThuis,
