@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 
 type AdminResult = { ok: true } | { ok: false; error: string }
 
@@ -241,10 +242,16 @@ export async function autoFillGroupResults(): Promise<AdminResult> {
 
 // ─── Demo: clear all group match results and reset prediction points ───────────
 export async function clearAllGroupResults(): Promise<AdminResult> {
-  const { supabase } = await assertAdmin()
-  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+  // Verify admin via session client, then use service role to bypass RLS.
+  // The DB trigger only fires when result_entered goes false→true, so clearing
+  // never triggers automatic recalculation — we must do it manually with a
+  // client that can write other users' rows.
+  const { supabase: sessionClient } = await assertAdmin()
+  if (!sessionClient) return { ok: false, error: 'Geen toegang.' }
 
-  const { data: groupMatches } = await supabase
+  const db = createServiceClient()
+
+  const { data: groupMatches } = await db
     .from('matches')
     .select('id')
     .eq('stage', 'group')
@@ -253,24 +260,20 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
 
   const matchIds = groupMatches.map((m) => m.id)
 
-  await supabase
+  await db
     .from('matches')
     .update({ home_score: null, away_score: null, result_entered: false })
     .in('id', matchIds)
 
-  const { data: affectedPreds } = await supabase
-    .from('predictions')
-    .select('user_id')
-    .in('match_id', matchIds)
-    .not('points_awarded', 'is', null)
-
-  await supabase
+  await db
     .from('predictions')
     .update({ points_awarded: null })
     .in('match_id', matchIds)
 
-  const userIds = [...new Set((affectedPreds ?? []).map((p) => p.user_id))]
-  await recalcPouleScores(supabase, userIds)
+  await db
+    .from('poule_scores')
+    .update({ total_pts: 0, exact_hits: 0, correct_results: 0 })
+    .not('user_id', 'is', null)
 
   revalidatePath('/admin')
   revalidatePath('/voorspellingen')
