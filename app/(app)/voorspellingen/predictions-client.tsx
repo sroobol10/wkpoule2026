@@ -324,15 +324,15 @@ function MatchRow({ match, score, pts, locked, onScoreChange }: MatchRowProps) {
       </div>
 
       {/* AI toggle button */}
-      <div className="px-5 pt-2 pb-4">
+      <div className="px-5 pt-4 pb-4">
         <button
           onClick={handleAiToggle}
-          className={`flex items-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors ${
+          className={`flex items-center justify-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors w-full ${
             showAi ? 'text-wk-blue' : 'text-wk-muted hover:text-wk-soft'
           }`}
         >
           <span className="text-[11px]">⚡</span>
-          AI analyse
+          AI voorspelling
           <svg
             className={`w-3 h-3 transition-transform ${showAi ? 'rotate-180' : ''}`}
             fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -392,24 +392,27 @@ function AiPredictionPanel({
   const pUit    = 100 - pThuis - pGelijk
 
   return (
-    <div className="mt-3 rounded-lg bg-wk-bg2 border border-wk-blue/20 overflow-hidden">
+    <div className="mt-3 rounded-lg bg-wk-bg2 border border-wk-blue/20 overflow-hidden md:max-w-lg md:mx-auto">
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-wk-blue/5">
         <span className="text-[11px]">⚡</span>
-        <span className="font-mono text-[10px] text-wk-blue tracking-[0.14em] uppercase font-bold">AI Analyse</span>
+        <span className="font-mono text-[10px] text-wk-blue tracking-[0.14em] uppercase font-bold">AI Voorspelling</span>
         <span className="ml-auto font-mono text-[9px] text-wk-muted tracking-widest uppercase">Op basis van FIFA-ranking & statistieken</span>
       </div>
 
       <div className="px-4 py-3 space-y-4">
         {/* Predicted score */}
-        <div className="flex items-center justify-center gap-4">
-          <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase text-right flex-1">{homeName}</span>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="font-display text-xl text-wk-gold">{state.homeScore}</span>
-            <span className="font-mono text-sm text-wk-muted">–</span>
-            <span className="font-display text-xl text-wk-gold">{state.awayScore}</span>
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase text-right">{homeName}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="font-display text-xl text-wk-gold">{state.homeScore}</span>
+              <span className="font-mono text-sm text-wk-muted">–</span>
+              <span className="font-display text-xl text-wk-gold">{state.awayScore}</span>
+            </div>
+            <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase">{awayName}</span>
           </div>
-          <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase flex-1">{awayName}</span>
+          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.18em] uppercase">Voorspeld resultaat</p>
         </div>
 
         {/* Win probability bar */}
