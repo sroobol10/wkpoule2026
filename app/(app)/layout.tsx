@@ -26,7 +26,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
       <div className="md:pl-56 pb-20 md:pb-0 min-h-screen">
         {/* Header banner */}
-        <div className="relative h-40 md:h-52 w-full overflow-hidden">
+        <div className="relative h-40 md:h-80 w-full overflow-hidden">
           <Image
             src="/worldcup.jpeg"
             alt="WK 2026"

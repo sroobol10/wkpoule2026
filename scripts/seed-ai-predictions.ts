@@ -633,8 +633,8 @@ async function seedAiPredictions() {
     .from('matches')
     .select(`
       id,
-      home_team:home_team_id ( name ),
-      away_team:away_team_id ( name )
+      home_team:teams!matches_home_team_id_fkey ( name ),
+      away_team:teams!matches_away_team_id_fkey ( name )
     `)
     .eq('stage', 'group')
 
@@ -650,8 +650,8 @@ async function seedAiPredictions() {
   let missing = 0
 
   for (const m of matches) {
-    const homeNl = (m.home_team as { name: string } | null)?.name ?? ''
-    const awayNl = (m.away_team as { name: string } | null)?.name ?? ''
+    const homeNl = (m.home_team as unknown as { name: string } | null)?.name ?? ''
+    const awayNl = (m.away_team as unknown as { name: string } | null)?.name ?? ''
     const homeEn = NL_TO_EN[homeNl] ?? homeNl
     const awayEn = NL_TO_EN[awayNl] ?? awayNl
     const key = `${homeEn} vs ${awayEn}`
