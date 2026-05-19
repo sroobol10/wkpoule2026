@@ -14,7 +14,6 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/voorspellingen', label: 'Voorspellingen' },
   { href: '/knockout',       label: 'Knockout' },
   { href: '/bonusvragen',    label: 'Bonusvragen' },
-  { href: '/poules',         label: 'Poules' },
   { href: '/profiel',        label: 'Profiel' },
   { href: '/admin',          label: 'Admin', adminOnly: true },
 ]
