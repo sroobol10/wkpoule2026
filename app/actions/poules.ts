@@ -24,20 +24,19 @@ export async function createPoule(
   if (name.length > 50) return { ok: false, error: 'Naam mag maximaal 50 tekens zijn.' }
 
   const invite_code = generateCode()
+  const poule_id = crypto.randomUUID()
 
-  const { data: poule, error } = await supabase
+  const { error } = await supabase
     .from('poules')
-    .insert({ name, invite_code, creator_id: user.id, is_general: false })
-    .select('id')
-    .single()
+    .insert({ id: poule_id, name, invite_code, creator_id: user.id, is_general: false })
 
-  if (error || !poule) return { ok: false, error: 'Aanmaken mislukt.' }
+  if (error) return { ok: false, error: 'Aanmaken mislukt.' }
 
   // Add creator as member
-  await supabase.from('poule_members').insert({ poule_id: poule.id, user_id: user.id })
+  await supabase.from('poule_members').insert({ poule_id, user_id: user.id })
 
   revalidatePath('/poules')
-  redirect(`/poules/${poule.id}`)
+  redirect(`/poules/${poule_id}`)
 }
 
 export async function joinPoule(inviteCode: string): Promise<SaveResult> {
