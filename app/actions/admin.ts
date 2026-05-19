@@ -192,3 +192,88 @@ export async function setKnockoutResult(
   revalidatePath('/knockout')
   return { ok: true }
 }
+
+// ─── Demo: auto-fill all unfilled group matches with random scores ─────────────
+export async function autoFillGroupResults(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { data: matches } = await supabase
+    .from('matches')
+    .select('id')
+    .eq('stage', 'group')
+    .eq('result_entered', false)
+
+  if (!matches || matches.length === 0) return { ok: true }
+
+  const affectedUserIds = new Set<string>()
+
+  for (const match of matches) {
+    const homeScore = Math.floor(Math.random() * 5)
+    const awayScore = Math.floor(Math.random() * 5)
+
+    await supabase
+      .from('matches')
+      .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
+      .eq('id', match.id)
+
+    const { data: preds } = await supabase
+      .from('predictions')
+      .select('id, user_id, predicted_home, predicted_away')
+      .eq('match_id', match.id)
+
+    if (preds && preds.length > 0) {
+      for (const pred of preds) {
+        const pts = calcMatchPoints(homeScore, awayScore, pred.predicted_home, pred.predicted_away)
+        await supabase.from('predictions').update({ points_awarded: pts }).eq('id', pred.id)
+        affectedUserIds.add(pred.user_id)
+      }
+    }
+  }
+
+  await recalcPouleScores(supabase, [...affectedUserIds])
+
+  revalidatePath('/admin')
+  revalidatePath('/voorspellingen')
+  revalidatePath('/poules')
+  return { ok: true }
+}
+
+// ─── Demo: clear all group match results and reset prediction points ───────────
+export async function clearAllGroupResults(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { data: groupMatches } = await supabase
+    .from('matches')
+    .select('id')
+    .eq('stage', 'group')
+
+  if (!groupMatches) return { ok: false, error: 'Ophalen mislukt.' }
+
+  const matchIds = groupMatches.map((m) => m.id)
+
+  await supabase
+    .from('matches')
+    .update({ home_score: null, away_score: null, result_entered: false })
+    .in('id', matchIds)
+
+  const { data: affectedPreds } = await supabase
+    .from('predictions')
+    .select('user_id')
+    .in('match_id', matchIds)
+    .not('points_awarded', 'is', null)
+
+  await supabase
+    .from('predictions')
+    .update({ points_awarded: null })
+    .in('match_id', matchIds)
+
+  const userIds = [...new Set((affectedPreds ?? []).map((p) => p.user_id))]
+  await recalcPouleScores(supabase, userIds)
+
+  revalidatePath('/admin')
+  revalidatePath('/voorspellingen')
+  revalidatePath('/poules')
+  return { ok: true }
+}

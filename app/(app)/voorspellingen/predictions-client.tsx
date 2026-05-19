@@ -14,6 +14,9 @@ type Match = {
   id: string
   kickoff_at: string
   match_number: number | null
+  home_score: number | null
+  away_score: number | null
+  result_entered: boolean
   home_team: Team | null
   away_team: Team | null
 }
@@ -255,71 +258,92 @@ function MatchRow({ match, score, pts, locked, onScoreChange }: MatchRowProps) {
           )}
         </div>
 
-        {/* Match row */}
-        <div className="flex items-center gap-3">
-          {/* Home team */}
-          <div className="flex flex-1 items-center gap-2 justify-end">
-            <span className="text-sm font-semibold text-wk-text text-right leading-tight">
-              {match.home_team?.name}
-            </span>
-            {match.home_team?.flag_url && (
-              <Image
-                src={match.home_team.flag_url}
-                alt={match.home_team.name}
-                width={28}
-                height={20}
-                className="rounded-sm object-cover shrink-0 w-7 h-5"
-              />
-            )}
+        {/* Match row: teams en score in één flex-rij zodat items-center werkt */}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex items-center gap-2 w-full">
+            {/* Home team */}
+            <div className="flex-1 flex items-center gap-2 justify-end">
+              <span className="text-sm font-semibold text-wk-text text-right leading-tight">
+                {match.home_team?.name}
+              </span>
+              {match.home_team?.flag_url && (
+                <Image
+                  src={match.home_team.flag_url}
+                  alt={match.home_team.name}
+                  width={28}
+                  height={20}
+                  className="rounded-sm object-cover shrink-0 w-7 h-5"
+                />
+              )}
+            </div>
+
+            {/* Midden: einduitslag of invoervelden */}
+            <div className="shrink-0">
+              {match.result_entered ? (
+                <div className="flex items-center gap-1">
+                  <span className="w-10 text-center font-display text-2xl text-wk-text">{match.home_score}</span>
+                  <span className="font-mono text-base text-wk-muted">–</span>
+                  <span className="w-10 text-center font-display text-2xl text-wk-text">{match.away_score}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    disabled={locked}
+                    value={score?.home ?? ''}
+                    onChange={(e) => onScoreChange(match.id, 'home', e.target.value)}
+                    className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                    placeholder="–"
+                  />
+                  <span className="text-wk-muted font-mono text-sm">:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    disabled={locked}
+                    value={score?.away ?? ''}
+                    onChange={(e) => onScoreChange(match.id, 'away', e.target.value)}
+                    className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                    placeholder="–"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Away team */}
+            <div className="flex-1 flex items-center gap-2">
+              {match.away_team?.flag_url && (
+                <Image
+                  src={match.away_team.flag_url}
+                  alt={match.away_team.name ?? ''}
+                  width={28}
+                  height={20}
+                  className="rounded-sm object-cover shrink-0 w-7 h-5"
+                />
+              )}
+              <span className="text-sm font-semibold text-wk-text leading-tight">
+                {match.away_team?.name}
+              </span>
+            </div>
           </div>
 
-          {/* Score inputs */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <input
-              type="number"
-              min={0}
-              max={99}
-              disabled={locked}
-              value={score?.home ?? ''}
-              onChange={(e) => onScoreChange(match.id, 'home', e.target.value)}
-              className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
-              placeholder="–"
-            />
-            <span className="text-wk-muted font-mono text-sm">:</span>
-            <input
-              type="number"
-              min={0}
-              max={99}
-              disabled={locked}
-              value={score?.away ?? ''}
-              onChange={(e) => onScoreChange(match.id, 'away', e.target.value)}
-              className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
-              placeholder="–"
-            />
-          </div>
-
-          {/* Away team */}
-          <div className="flex flex-1 items-center gap-2">
-            {match.away_team?.flag_url && (
-              <Image
-                src={match.away_team.flag_url}
-                alt={match.away_team.name ?? ''}
-                width={28}
-                height={20}
-                className="rounded-sm object-cover shrink-0 w-7 h-5"
-              />
-            )}
-            <span className="text-sm font-semibold text-wk-text leading-tight">
-              {match.away_team?.name}
-            </span>
-          </div>
-
-          {/* Points badge */}
-          {pts !== null && pts !== undefined && (
-            <span className={`shrink-0 font-mono text-[10px] font-bold px-2 py-1 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
-              {pts} pt
-            </span>
-          )}
+          {/* Punten badge + eigen voorspelling (onder de rij) */}
+          {(pts !== null && pts !== undefined) || (match.result_entered && score) ? (
+            <div className="flex items-center gap-2">
+              {pts !== null && pts !== undefined && (
+                <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
+                  {pts} pt
+                </span>
+              )}
+              {match.result_entered && score && (
+                <span className="font-mono text-[9px] text-wk-muted tracking-[0.1em]">
+                  jouw: {score.home} – {score.away}
+                </span>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
 

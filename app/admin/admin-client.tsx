@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { format } from 'date-fns'
 import { nl } from 'date-fns/locale'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, clearAllGroupResults } from '@/app/actions/admin'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
 type Match = {
@@ -104,6 +104,34 @@ export default function AdminClient({ matches, teams, questions }: Props) {
 
 function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<string, Team> }) {
   const [activeGroup, setActiveGroup] = useState('A')
+  const [isPending, startTransition] = useTransition()
+  const [demoToast, setDemoToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+
+  function showDemoToast(msg: string, ok: boolean) {
+    setDemoToast({ msg, ok })
+    setTimeout(() => setDemoToast(null), 3000)
+  }
+
+  function handleAutoFill() {
+    startTransition(async () => {
+      const result = await autoFillGroupResults()
+      showDemoToast(result.ok ? 'Auto-fill klaar!' : result.error, result.ok)
+    })
+  }
+
+  function handleClearAll() {
+    if (!confirmClear) {
+      setConfirmClear(true)
+      setTimeout(() => setConfirmClear(false), 3000)
+      return
+    }
+    setConfirmClear(false)
+    startTransition(async () => {
+      const result = await clearAllGroupResults()
+      showDemoToast(result.ok ? 'Alles geleegd.' : result.error, result.ok)
+    })
+  }
 
   const groupMatches = matches.filter((m) => {
     const home = m.home_team_id ? teamMap[m.home_team_id] : null
@@ -120,6 +148,33 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
 
   return (
     <div className="space-y-4">
+      {/* Demo toolbar */}
+      <div className="flex items-center justify-end gap-2">
+        {demoToast && (
+          <span className={`font-mono text-[10px] tracking-[0.12em] ${demoToast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+            {demoToast.msg}
+          </span>
+        )}
+        <button
+          onClick={handleAutoFill}
+          disabled={isPending}
+          className="rounded bg-wk-green px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {isPending ? '…' : 'Auto-fill'}
+        </button>
+        <button
+          onClick={handleClearAll}
+          disabled={isPending}
+          className={`rounded border px-3 py-1.5 text-[10px] font-mono tracking-[0.12em] uppercase disabled:opacity-50 transition-colors ${
+            confirmClear
+              ? 'border-wk-red/50 bg-wk-red/10 text-wk-red hover:bg-wk-red/20'
+              : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+          }`}
+        >
+          {confirmClear ? 'Zeker weten?' : 'Leegmaken'}
+        </button>
+      </div>
+
       {/* Group tabs */}
       <div className="flex flex-wrap gap-1.5">
         {GROUPS.map((g) => {

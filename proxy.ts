@@ -32,13 +32,18 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
 
-  // Vernieuw sessie — wrap in try/catch zodat een netwerk-timeout niet hangt
   let user = null
   try {
-    const { data } = await supabase.auth.getUser()
-    user = data.user
+    const { data, error } = await supabase.auth.getUser()
+    if (error) {
+      // Token refresh mislukt (bijv. race condition met andere tab) —
+      // niet uitloggen, laat browser het opnieuw proberen met bijgewerkte cookies.
+      if (!isPublic) return supabaseResponse
+    } else {
+      user = data.user
+    }
   } catch {
-    // Bij fout: gewoon doorgaan zonder auth-redirect
+    // Netwerk-timeout of onverwachte fout — gewoon doorgaan
     return supabaseResponse
   }
 

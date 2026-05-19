@@ -11,7 +11,7 @@ export default async function VoorspellingenPage() {
   const { data: matches } = await supabase
     .from('matches')
     .select(`
-      id, kickoff_at, stage, match_number,
+      id, kickoff_at, stage, match_number, home_score, away_score, result_entered,
       home_team:teams!matches_home_team_id_fkey(id, name, flag_url, group_name),
       away_team:teams!matches_away_team_id_fkey(id, name, flag_url, group_name)
     `)
