@@ -1,26 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@source "../app";
+@source "../components";
+
+@theme {
+  /* Fonts */
+  --font-family-sans:    'Manrope', 'Helvetica Neue', system-ui, sans-serif;
+  --font-family-display: 'Archivo Black', 'Helvetica Neue', system-ui, sans-serif;
+  --font-family-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+  /* Deck colour palette — "stadion" theme */
+  --color-wk-bg:       #0B0E14;
+  --color-wk-bg2:      #11151F;
+  --color-wk-surface:  #161C2A;
+  --color-wk-text:     #F5F2EB;
+  --color-wk-soft:     #C8CCD6;
+  --color-wk-muted:    #7C8398;
+  --color-wk-red:      #E63946;
+  --color-wk-gold:     #F4B92E;
+  --color-wk-blue:     #2D6BE5;
+  --color-wk-green:    #2EA84B;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html { height: 100%; }
+  body {
+    height: 100%;
+    font-family: var(--font-family-sans);
+    background-color: #0B0E14;
+    color: #F5F2EB;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #0B0E14; }
+  ::-webkit-scrollbar-thumb { background: #7C8398; border-radius: 3px; }
+  /* Number inputs — hide arrows */
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+  input[type=number] { appearance: textfield; }
 }
