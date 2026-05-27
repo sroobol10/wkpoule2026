@@ -12,7 +12,7 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/voorspellingen', label: 'Voorspellen', icon: IconClipboard },
+  { href: '/voorspellingen', label: 'Groepsfase', icon: IconClipboard },
   { href: '/knockout',       label: 'Knockout',    icon: IconTrophy },
   { href: '/bonusvragen',    label: 'Bonus',        icon: IconQuestion },
   { href: '/poules',         label: 'Poules',       icon: IconUsers },

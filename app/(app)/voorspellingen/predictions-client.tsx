@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import Image from 'next/image'
 import { format } from 'date-fns'
 import { nl } from 'date-fns/locale'
@@ -52,7 +52,9 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
   })
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [showScoring, setShowScoring] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const autoSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   const now = new Date()
 
@@ -67,10 +69,15 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
 
   function setScore(matchId: string, side: 'home' | 'away', val: string) {
     const num = val.replace(/\D/g, '').slice(0, 2)
-    setScores((prev) => ({
-      ...prev,
-      [matchId]: { ...prev[matchId], [side]: num },
-    }))
+    const current = scores[matchId] ?? { home: '', away: '' }
+    const newScore = { ...current, [side]: num }
+    setScores((prev) => ({ ...prev, [matchId]: newScore }))
+    if (newScore.home !== '' && newScore.away !== '') {
+      clearTimeout(autoSaveTimers.current[matchId])
+      autoSaveTimers.current[matchId] = setTimeout(() => {
+        savePredictions([{ matchId, home: Number(newScore.home), away: Number(newScore.away) }])
+      }, 1500)
+    }
   }
 
   function saveGroup() {
@@ -92,25 +99,68 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
     })
   }
 
+  function computeAutoFillPicks(): Record<string, [string | null, string | null, string | null]> {
+    const result: Record<string, [string | null, string | null, string | null]> = {}
+    const thirds: Array<{ group: string; teamId: string; points: number; gd: number; gf: number }> = []
+
+    for (const group of GROUPS) {
+      const gm = matches.filter((m) => m.home_team?.group_name === group)
+      const st: Record<string, { points: number; gd: number; gf: number }> = {}
+
+      for (const m of gm) {
+        if (m.home_team) st[m.home_team.id] = st[m.home_team.id] ?? { points: 0, gd: 0, gf: 0 }
+        if (m.away_team) st[m.away_team.id] = st[m.away_team.id] ?? { points: 0, gd: 0, gf: 0 }
+      }
+
+      for (const m of gm) {
+        const s = scores[m.id]
+        if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
+        const h = Number(s.home), aw = Number(s.away)
+        st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - aw
+        st[m.away_team.id].gf += aw; st[m.away_team.id].gd += aw - h
+        if (h > aw) st[m.home_team.id].points += 3
+        else if (h < aw) st[m.away_team.id].points += 3
+        else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
+      }
+
+      const sorted = Object.entries(st)
+        .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+      result[group] = [sorted[0]?.[0] ?? null, sorted[1]?.[0] ?? null, sorted[2]?.[0] ?? null]
+      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], ...sorted[2][1] })
+    }
+
+    const best8 = new Set(
+      [...thirds]
+        .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf)
+        .slice(0, 8)
+        .map((t) => t.group)
+    )
+    for (const group of GROUPS) {
+      if (!best8.has(group)) result[group] = [result[group][0], result[group][1], null]
+    }
+
+    return result
+  }
+
   const advancementCount = advancement.length
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Fase 01 · Vooraf invullen</p>
-          <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Voorspellingen</h1>
+          <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Groepsfase</h1>
           <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
             {filledCount} / {matches.length} wedstrijden ingevuld
           </p>
         </div>
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 rounded border border-white/20 bg-wk-surface px-4 py-2 text-sm font-mono font-medium text-wk-soft hover:border-wk-gold/50 hover:text-wk-gold transition-colors tracking-[0.12em] uppercase text-xs"
+          className="flex items-center gap-2 rounded border border-white/20 bg-wk-surface px-4 py-2 font-mono font-medium text-wk-soft hover:border-wk-gold/50 hover:text-wk-gold transition-colors tracking-[0.12em] uppercase text-xs"
         >
           <span>⚽</span>
-          Knockoutfase ({advancementCount}/32)
+          Wie gaan door? ({advancementCount}/32)
           {advancementCount < 32 && (
             <span className="ml-1 inline-flex items-center rounded-full bg-wk-gold/10 border border-wk-gold/30 px-2 py-0.5 text-[10px] font-mono text-wk-gold tracking-widest uppercase">
               Onvolledig
@@ -125,6 +175,39 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
           className="h-full bg-wk-green rounded-full transition-all"
           style={{ width: `${(filledCount / matches.length) * 100}%` }}
         />
+      </div>
+
+      {/* Scoring info */}
+      <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+        <button
+          onClick={() => setShowScoring((v) => !v)}
+          className="w-full flex items-center justify-between px-5 py-3 text-left"
+        >
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Puntentelling</span>
+          <svg className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {showScoring && (
+          <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
+            {[
+              { label: 'Exacte uitslag',              pts: '5 pt' },
+              { label: 'Correct resultaat (W/G/V)',   pts: '2 pt' },
+              { label: 'Correcte doorstoot per team', pts: '1 pt' },
+              { label: 'KO-ronde winnaar',             pts: '3 pt' },
+              { label: 'Bonusvraag (voor toernooi)',  pts: '5 pt' },
+              { label: 'Bonusvraag (dagelijks)',       pts: '2 pt' },
+            ].map(({ label, pts }) => (
+              <div key={label} className="flex items-center justify-between gap-4">
+                <span className="font-mono text-[10px] text-wk-soft tracking-[0.1em]">{label}</span>
+                <span className="font-mono text-xs font-bold text-wk-gold shrink-0">{pts}</span>
+              </div>
+            ))}
+            <p className="font-mono text-[9px] text-wk-muted tracking-[0.1em] pt-2 border-t border-white/5">
+              Exacte uitslag = 5 pt (inclusief de 2 pt voor correct resultaat)
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Group tabs */}
@@ -208,6 +291,7 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
         <GroupAdvancementModal
           teams={teams}
           initialAdvancement={advancement}
+          autoFillPicks={computeAutoFillPicks()}
           onClose={() => setShowModal(false)}
           onSave={async (selections) => {
             const result = await saveGroupAdvancement(selections)

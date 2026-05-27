@@ -10,6 +10,7 @@ type AdvancementEntry = { team_id: string; predicted_position: number }
 type Props = {
   teams: Team[]
   initialAdvancement: AdvancementEntry[]
+  autoFillPicks?: Record<string, PicksTuple>
   onClose: () => void
   onSave: (selections: { teamId: string; position: number }[]) => Promise<SaveResult>
 }
@@ -37,12 +38,17 @@ function buildInitialState(teams: Team[], advancement: AdvancementEntry[]) {
   return { groupPicks }
 }
 
-export default function GroupAdvancementModal({ teams, initialAdvancement, onClose, onSave }: Props) {
+export default function GroupAdvancementModal({ teams, initialAdvancement, autoFillPicks, onClose, onSave }: Props) {
   const [activeTab, setActiveTab] = useState<string>('A')
   const { groupPicks: init } = buildInitialState(teams, initialAdvancement)
   const [groupPicks, setGroupPicks] = useState<Record<string, PicksTuple>>(init)
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  function applyAutoFill() {
+    if (!autoFillPicks) return
+    setGroupPicks(autoFillPicks)
+  }
 
   // Deduplicate by name in case the seed created duplicates
   const teamsByGroup = (g: string) => {
@@ -108,15 +114,24 @@ export default function GroupAdvancementModal({ teams, initialAdvancement, onClo
       <div className="relative z-10 w-full md:max-w-2xl bg-wk-surface border border-white/10 rounded-t-2xl md:rounded-2xl shadow-2xl flex flex-col max-h-[92dvh]">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+        <div className="flex items-start justify-between px-5 py-4 border-b border-white/10 shrink-0">
           <div>
             <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-0.5">Fase 01 · Knockoutfase</p>
             <h2 className="font-display text-lg text-wk-text uppercase leading-none">Wie gaat door?</h2>
             <p className="font-mono text-[10px] text-wk-muted mt-1 tracking-[0.12em]">
               Kies per groep de 1e, 2e en 3e plaats
             </p>
+            {autoFillPicks && (
+              <button
+                onClick={applyAutoFill}
+                className="mt-3 flex items-center gap-1.5 rounded border border-wk-green/40 bg-wk-green/10 px-3 py-1.5 font-mono text-[10px] text-wk-green hover:bg-wk-green/20 transition-colors tracking-[0.12em] uppercase"
+              >
+                <span>⚡</span>
+                Auto-invullen op basis van mijn scores
+              </button>
+            )}
           </div>
-          <button onClick={onClose} className="p-1.5 text-wk-muted hover:text-wk-soft transition-colors rounded hover:bg-white/5">
+          <button onClick={onClose} className="p-1.5 text-wk-muted hover:text-wk-soft transition-colors rounded hover:bg-white/5 shrink-0 mt-0.5">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
