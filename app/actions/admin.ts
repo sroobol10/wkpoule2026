@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { KO_POINTS } from '@/lib/constants'
 
 type AdminResult = { ok: true } | { ok: false; error: string }
 
@@ -15,17 +16,23 @@ async function assertAdmin() {
   return { supabase, userId: user.id }
 }
 
-// ─── Point system (deck slide 4) ──────────────────────────────────────────────
-// Exact score:           5 pt
-// Correct result:        2 pt
-// Knockout winner:       3 pt
-// Group advancement:     1 pt per team (handled separately)
-// Pre-tournament bonus:  5 pt
-// Daily bonus:           2 pt
+// ─── Point system ─────────────────────────────────────────────────────────────
+// Exact score:                               5 pt
+// Correct result + één doelpunttotaal klopt: 3 pt
+// Correct result:                            2 pt
+// Fout resultaat + één doelpunttotaal klopt: 1 pt
+// Fout:                                      0 pt
+// KO winner: zie KO_POINTS (5/15/25/50/100 per ronde)
+// Group advancement: 3 pt per correct eindpositie
 
 function calcMatchPoints(actualHome: number, actualAway: number, predHome: number, predAway: number): number {
   if (actualHome === predHome && actualAway === predAway) return 5
-  if (Math.sign(actualHome - actualAway) === Math.sign(predHome - predAway)) return 2
+  const correctResult = Math.sign(actualHome - actualAway) === Math.sign(predHome - predAway)
+  const homeMatch = predHome === actualHome
+  const awayMatch = predAway === actualAway
+  if (correctResult && (homeMatch || awayMatch)) return 3
+  if (correctResult) return 2
+  if (homeMatch || awayMatch) return 1
   return 0
 }
 
@@ -53,20 +60,26 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
       .eq('user_id', userId)
       .not('points_awarded', 'is', null)
 
+    const { data: advancement } = await supabase
+      .from('group_advancement')
+      .select('points_awarded')
+      .eq('user_id', userId)
+      .not('points_awarded', 'is', null)
+
     const { data: bonuses } = await supabase
       .from('bonus_answers')
       .select('points_awarded')
       .eq('user_id', userId)
       .not('points_awarded', 'is', null)
 
-    const predPts     = (preds         ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const knockoutPts = (knockoutPreds ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const bonusPts    = (bonuses       ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const totalPts    = predPts + knockoutPts + bonusPts
+    const predPts        = (preds         ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const knockoutPts    = (knockoutPreds ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const advancementPts = (advancement   ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const bonusPts       = (bonuses       ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const totalPts       = predPts + knockoutPts + advancementPts + bonusPts
 
-    // exact = 5 pt, correct result = 2 pt
-    const exactHits      = (preds ?? []).filter((r) => r.points_awarded === 5).length
-    const correctResults = (preds ?? []).filter((r) => r.points_awarded === 2).length
+    const exactHits      = (preds ?? []).filter((r) => (r.points_awarded ?? 0) >= 5).length
+    const correctResults = (preds ?? []).filter((r) => r.points_awarded && r.points_awarded >= 2 && r.points_awarded < 5).length
 
     const userPoules = memberships.filter((m) => m.user_id === userId).map((m) => m.poule_id)
     for (const pouleId of userPoules) {
@@ -102,8 +115,15 @@ export async function setMatchResult(
     .eq('match_id', matchId)
 
   if (preds && preds.length > 0) {
+    const { data: jokers } = await supabase
+      .from('jokers')
+      .select('user_id')
+      .eq('match_id', matchId)
+    const jokerUserIds = new Set((jokers ?? []).map((j) => j.user_id))
+
     for (const pred of preds) {
-      const pts = calcMatchPoints(homeScore, awayScore, pred.predicted_home, pred.predicted_away)
+      const base = calcMatchPoints(homeScore, awayScore, pred.predicted_home, pred.predicted_away)
+      const pts  = base * (jokerUserIds.has(pred.user_id) ? 2 : 1)
       await supabase.from('predictions').update({ points_awarded: pts }).eq('id', pred.id)
     }
     await recalcPouleScores(supabase, [...new Set(preds.map((p) => p.user_id))])
@@ -168,14 +188,17 @@ export async function setKnockoutResult(
   const { supabase } = await assertAdmin()
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
-  const { error } = await supabase
+  const { data: match, error } = await supabase
     .from('matches')
     .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
     .eq('id', matchId)
+    .select('stage')
+    .single()
 
-  if (error) return { ok: false, error: 'Opslaan mislukt.' }
+  if (error || !match) return { ok: false, error: 'Opslaan mislukt.' }
 
-  // 3 pt per correct knockout winner pick
+  const pointsForRound = KO_POINTS[match.stage] ?? 0
+
   const { data: preds } = await supabase
     .from('knockout_predictions')
     .select('id, user_id, predicted_winner_id')
@@ -183,7 +206,7 @@ export async function setKnockoutResult(
 
   if (preds && preds.length > 0) {
     for (const pred of preds) {
-      const pts = pred.predicted_winner_id === winnerId ? 3 : 0
+      const pts = pred.predicted_winner_id === winnerId ? pointsForRound : 0
       await supabase.from('knockout_predictions').update({ points_awarded: pts }).eq('id', pred.id)
     }
     await recalcPouleScores(supabase, [...new Set(preds.map((p) => p.user_id))])
@@ -278,5 +301,66 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
   revalidatePath('/admin')
   revalidatePath('/voorspellingen')
   revalidatePath('/poules')
+  return { ok: true }
+}
+
+// ─── Score group advancement for a completed group ─────────────────────────────
+// Roep aan nadat alle 6 groepswedstrijden een resultaat hebben.
+// Berekent de werkelijke eindstand en kent 3 pt toe per correct voorspelde positie.
+export async function scoreGroupAdvancement(group: string): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { data: groupMatches } = await supabase
+    .from('matches')
+    .select('id, home_score, away_score, home_team:teams!home_team_id(id, group_name), away_team:teams!away_team_id(id, group_name)')
+    .eq('stage', 'group')
+    .eq('result_entered', true)
+
+  if (!groupMatches) return { ok: false, error: 'Ophalen mislukt.' }
+
+  type TeamRef = { id: string; group_name: string }
+  const gm = groupMatches.filter((m) => (m.home_team as TeamRef | null)?.group_name === group)
+  if (gm.length === 0) return { ok: false, error: `Geen resultaten voor groep ${group}.` }
+
+  // Werkelijke eindstand
+  const st: Record<string, { points: number; gd: number; gf: number }> = {}
+  for (const m of gm) {
+    const ht = m.home_team as TeamRef | null
+    const at = m.away_team as TeamRef | null
+    if (!ht || !at) continue
+    st[ht.id] ??= { points: 0, gd: 0, gf: 0 }
+    st[at.id] ??= { points: 0, gd: 0, gf: 0 }
+    const h = m.home_score!, a = m.away_score!
+    st[ht.id].gf += h; st[ht.id].gd += h - a
+    st[at.id].gf += a; st[at.id].gd += a - h
+    if (h > a) st[ht.id].points += 3
+    else if (h < a) st[at.id].points += 3
+    else { st[ht.id].points += 1; st[at.id].points += 1 }
+  }
+
+  const sorted = Object.entries(st)
+    .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+  const actualPosition: Record<string, number> = {}
+  sorted.forEach(([teamId], i) => { actualPosition[teamId] = i + 1 })
+
+  // Picks ophalen voor teams in deze groep
+  const { data: picks } = await supabase
+    .from('group_advancement')
+    .select('id, user_id, team_id, predicted_position')
+    .in('team_id', Object.keys(st))
+
+  if (!picks || picks.length === 0) return { ok: true }
+
+  for (const pick of picks) {
+    const pts = (actualPosition[pick.team_id] ?? 99) === pick.predicted_position ? 3 : 0
+    await supabase.from('group_advancement').update({ points_awarded: pts }).eq('id', pick.id)
+  }
+
+  await recalcPouleScores(supabase, [...new Set(picks.map((p) => p.user_id))])
+
+  revalidatePath('/admin')
+  revalidatePath('/poules')
+  revalidatePath('/voorspellingen')
   return { ok: true }
 }

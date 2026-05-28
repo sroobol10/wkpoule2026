@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { format } from 'date-fns'
-import { nl } from 'date-fns/locale'
 import Image from 'next/image'
 import { saveKnockoutPrediction } from '@/app/actions/knockout'
+import { formatInAmsterdam } from '@/lib/format'
 import BracketClient from './bracket-client'
 
 type Match = {
@@ -160,6 +159,17 @@ function LiveSection({
 
   return (
     <div className="space-y-4">
+      {/* Banner */}
+      <div className="flex items-start gap-3 rounded-xl border border-wk-blue/20 bg-wk-blue/5 px-4 py-3">
+        <span className="text-base shrink-0">👆</span>
+        <p className="font-mono text-[10px] text-wk-blue tracking-[0.12em] leading-relaxed">
+          Klik op het land waarvan jij denkt dat het doorgaat naar de volgende ronde
+        </p>
+      </div>
+
+      {/* Scoring */}
+      <KoScoringInfo />
+
       <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
         {predCount} / {matches.length} voorspellingen
       </p>
@@ -248,7 +258,7 @@ function LiveMatchCard({
       <div className="px-5 py-4">
         <div className="flex items-center justify-between mb-3">
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
-            {format(kickoff, 'EEEE d MMM · HH:mm', { locale: nl })}
+            {formatInAmsterdam(match.kickoff_at, 'EEEE d MMM · HH:mm')}
           </p>
           <div className="flex items-center gap-2">
             {pts !== null && pts !== undefined && (
@@ -368,6 +378,47 @@ function TbdSlot() {
     <div className="flex flex-col items-center gap-1.5 px-6 py-3">
       <div className="w-8 h-5 rounded-sm bg-wk-bg2 border border-white/10" />
       <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase">TBD</span>
+    </div>
+  )
+}
+
+// ─── KO scoring info ──────────────────────────────────────────────────────────
+
+const KO_SCORING = [
+  { label: 'Ronde van 32',   pts: '5 pt' },
+  { label: 'Ronde van 16',   pts: '15 pt' },
+  { label: 'Kwartfinale',    pts: '25 pt' },
+  { label: 'Halve finale',   pts: '50 pt' },
+  { label: 'Troostfinale',   pts: '25 pt' },
+  { label: 'Finale',         pts: '100 pt' },
+]
+
+function KoScoringInfo() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-3 text-left"
+      >
+        <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Puntentelling</span>
+        <svg className={`w-3.5 h-3.5 text-wk-muted transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
+          {KO_SCORING.map(({ label, pts }) => (
+            <div key={label} className="flex items-center justify-between gap-4">
+              <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
+              <span className="font-mono text-xs font-bold text-wk-gold shrink-0">{pts}</span>
+            </div>
+          ))}
+          <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
+            Per correct voorspeld land dat doorgaat · hoe verder, hoe meer punten
+          </p>
+        </div>
+      )}
     </div>
   )
 }

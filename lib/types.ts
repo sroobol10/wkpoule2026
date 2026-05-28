@@ -90,6 +90,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          points_awarded: number | null
           predicted_position: number
           team_id: string
           user_id: string
@@ -97,6 +98,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          points_awarded?: number | null
           predicted_position: number
           team_id: string
           user_id: string
@@ -104,6 +106,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          points_awarded?: number | null
           predicted_position?: number
           team_id?: string
           user_id?: string
@@ -118,6 +121,45 @@ export type Database = {
           },
           {
             foreignKeyName: "group_advancement_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jokers: {
+        Row: {
+          created_at: string
+          id: string
+          joker_date: string
+          match_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          joker_date: string
+          match_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          joker_date?: string
+          match_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jokers_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jokers_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"

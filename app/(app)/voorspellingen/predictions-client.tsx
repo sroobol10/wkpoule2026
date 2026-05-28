@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useState, useRef } from 'react'
 import Image from 'next/image'
-import { format } from 'date-fns'
-import { nl } from 'date-fns/locale'
 import { savePredictions, saveGroupAdvancement } from '@/app/actions/predictions'
+import { toggleJoker } from '@/app/actions/jokers'
 import GroupAdvancementModal from '@/components/predictions/group-advancement-modal'
 import { getMatchPrediction } from '@/app/actions/ai-prediction'
+import { formatInAmsterdam } from '@/lib/format'
 import type { AiPrediction } from '@/app/actions/ai-prediction'
 
 type Team = { id: string; name: string; flag_url: string; group_name: string }
@@ -28,17 +28,18 @@ type Props = Readonly<{
   predMap: Record<string, Prediction>
   advancement: AdvancementEntry[]
   teams: Team[]
+  jokerMatchIds: string[]
 }>
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
 
 function ptsBadgeClass(pts: number) {
-  if (pts === 5) return 'bg-wk-green/10 border-wk-green/30 text-wk-green'
-  if (pts > 0)   return 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
+  if (pts >= 5) return 'bg-wk-green/10 border-wk-green/30 text-wk-green'  // exact (5pt) of joker exact (10pt)
+  if (pts > 0)  return 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
   return 'bg-white/5 border-white/10 text-wk-muted'
 }
 
-export default function PredictionsClient({ matches, predMap, advancement, teams }: Props) {
+export default function PredictionsClient({ matches, predMap, advancement, teams, jokerMatchIds }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [scores, setScores] = useState<Record<string, { home: string; away: string }>>(() => {
     const init: Record<string, { home: string; away: string }> = {}
@@ -50,11 +51,39 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
     }
     return init
   })
-  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [showScoring, setShowScoring] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [jokerSet, setJokerSet] = useState<Set<string>>(() => new Set(jokerMatchIds))
   const autoSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+  async function handleJokerToggle(matchId: string) {
+    const result = await toggleJoker(matchId)
+    if (!result.ok) return
+
+    const targetDate = (() => {
+      const m = matches.find((x) => x.id === matchId)
+      return m ? formatInAmsterdam(m.kickoff_at, 'yyyy-MM-dd') : null
+    })()
+
+    setJokerSet((prev) => {
+      const next = new Set(prev)
+      if (next.has(matchId)) {
+        next.delete(matchId)
+      } else {
+        // Verwijder ook eventuele joker op een andere wedstrijd dezelfde dag
+        if (targetDate) {
+          for (const m of matches) {
+            if (m.id !== matchId && formatInAmsterdam(m.kickoff_at, 'yyyy-MM-dd') === targetDate) {
+              next.delete(m.id)
+            }
+          }
+        }
+        next.add(matchId)
+      }
+      return next
+    })
+  }
 
   const now = new Date()
 
@@ -74,29 +103,14 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
     setScores((prev) => ({ ...prev, [matchId]: newScore }))
     if (newScore.home !== '' && newScore.away !== '') {
       clearTimeout(autoSaveTimers.current[matchId])
-      autoSaveTimers.current[matchId] = setTimeout(() => {
-        savePredictions([{ matchId, home: Number(newScore.home), away: Number(newScore.away) }])
+      setSaveStatus('idle')
+      autoSaveTimers.current[matchId] = setTimeout(async () => {
+        setSaveStatus('saving')
+        const result = await savePredictions([{ matchId, home: Number(newScore.home), away: Number(newScore.away) }])
+        setSaveStatus(result.ok ? 'saved' : 'error')
+        setTimeout(() => setSaveStatus('idle'), 2000)
       }, 1500)
     }
-  }
-
-  function saveGroup() {
-    const toSave = groupMatches
-      .filter((m) => {
-        const s = scores[m.id]
-        return s?.home !== '' && s?.away !== '' && s !== undefined
-      })
-      .map((m) => ({
-        matchId: m.id,
-        home: Number(scores[m.id].home),
-        away: Number(scores[m.id].away),
-      }))
-
-    startTransition(async () => {
-      const result = await savePredictions(toSave)
-      setToast({ msg: result.ok ? 'Opgeslagen!' : result.error, ok: result.ok })
-      setTimeout(() => setToast(null), 3000)
-    })
   }
 
   function computeAutoFillPicks(): Record<string, [string | null, string | null, string | null]> {
@@ -191,20 +205,21 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
         {showScoring && (
           <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
             {[
-              { label: 'Exacte uitslag',              pts: '5 pt' },
-              { label: 'Correct resultaat (W/G/V)',   pts: '2 pt' },
-              { label: 'Correcte doorstoot per team', pts: '1 pt' },
-              { label: 'KO-ronde winnaar',             pts: '3 pt' },
-              { label: 'Bonusvraag (voor toernooi)',  pts: '5 pt' },
-              { label: 'Bonusvraag (dagelijks)',       pts: '2 pt' },
+              { label: 'Exacte uitslag',                        pts: '5 pt' },
+              { label: 'Correct resultaat (W/G/V)',             pts: '2 pt' },
+              { label: 'Correct resultaat + één doelpunttotaal', pts: '3 pt' },
+              { label: 'Fout resultaat + één doelpunttotaal',   pts: '1 pt' },
+              { label: 'Correcte eindpositie in de groep',      pts: '3 pt' },
+              { label: 'Bonusvraag (voor toernooi)',            pts: '5 pt' },
+              { label: 'Bonusvraag (dagelijks)',                pts: '2 pt' },
             ].map(({ label, pts }) => (
               <div key={label} className="flex items-center justify-between gap-4">
-                <span className="font-mono text-[10px] text-wk-soft tracking-[0.1em]">{label}</span>
+                <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
                 <span className="font-mono text-xs font-bold text-wk-gold shrink-0">{pts}</span>
               </div>
             ))}
-            <p className="font-mono text-[9px] text-wk-muted tracking-[0.1em] pt-2 border-t border-white/5">
-              Exacte uitslag = 5 pt (inclusief de 2 pt voor correct resultaat)
+            <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
+              Exacte uitslag = 5 pt · joker verdubbelt de punten van die wedstrijd
             </p>
           </div>
         )}
@@ -259,32 +274,36 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
                 score={score}
                 pts={pts}
                 locked={locked}
+                hasJoker={jokerSet.has(match.id)}
                 onScoreChange={setScore}
+                onJokerToggle={handleJokerToggle}
               />
             )
           })}
         </div>
 
-        {/* Save button */}
-        <div className="px-5 py-4 border-t border-white/10 flex justify-end">
-          <button
-            onClick={saveGroup}
-            disabled={isPending}
-            className="rounded bg-wk-green px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-          >
-            {isPending ? 'Opslaan…' : 'Groep opslaan'}
-          </button>
+        {/* Auto-save status */}
+        <div className="px-5 py-3 border-t border-white/10 flex justify-end items-center min-h-11">
+          {saveStatus === 'saving' && (
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase animate-pulse">Opslaan…</span>
+          )}
+          {saveStatus === 'saved' && (
+            <span className="font-mono text-[10px] text-wk-green tracking-[0.14em] uppercase">✓ Automatisch opgeslagen</span>
+          )}
+          {saveStatus === 'error' && (
+            <span className="font-mono text-[10px] text-wk-red tracking-[0.14em] uppercase">Fout bij opslaan</span>
+          )}
         </div>
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed bottom-24 md:bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl px-5 py-3 text-sm font-mono font-semibold shadow-lg text-white tracking-[0.12em] uppercase transition-all ${
-          toast.ok ? 'bg-wk-green' : 'bg-wk-red'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+      {/* Inline group standings */}
+      <GroupStandingsInline
+        group={activeGroup}
+        groupMatches={groupMatches}
+        scores={scores}
+        teams={teams}
+        advancementPicks={computeAutoFillPicks()[activeGroup] ?? [null, null, null]}
+      />
 
       {/* Advancement modal */}
       {showModal && (
@@ -311,17 +330,22 @@ type MatchRowProps = {
   score: { home: string; away: string } | undefined
   pts: number | null | undefined
   locked: boolean
+  hasJoker: boolean
   onScoreChange: (matchId: string, side: 'home' | 'away', val: string) => void
+  onJokerToggle: (matchId: string) => void
 }
 
-function MatchRow({ match, score, pts, locked, onScoreChange }: MatchRowProps) {
+function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerToggle }: MatchRowProps) {
   const [showAi, setShowAi] = useState(false)
   const [aiState, setAiState] = useState<AiPrediction | 'loading' | 'error' | null>(null)
+
+  const isExcludedDay = formatInAmsterdam(match.kickoff_at, 'yyyy-MM-dd') === '2026-06-11'
+  const jokerable = !locked && !isExcludedDay
 
   async function handleAiToggle() {
     if (showAi) { setShowAi(false); return }
     setShowAi(true)
-    if (aiState !== null) return  // already loaded or loading
+    if (aiState !== null) return
     setAiState('loading')
     const result = await getMatchPrediction(match.id)
     setAiState(result.ok ? result.prediction : 'error')
@@ -333,12 +357,28 @@ function MatchRow({ match, score, pts, locked, onScoreChange }: MatchRowProps) {
       <div className="px-5 pt-4 pb-0">
         <div className="flex items-center justify-center gap-2 mb-3">
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
-            {format(new Date(match.kickoff_at), 'EEEE d MMMM · HH:mm', { locale: nl })}
+            {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
           </p>
           {locked && (
             <span className="font-mono text-[10px] text-wk-gold tracking-[0.12em] uppercase border border-wk-gold/30 rounded-full px-2 py-0.5">
               🔒 Gesloten
             </span>
+          )}
+          {jokerable && (
+            <button
+              onClick={() => onJokerToggle(match.id)}
+              title={hasJoker ? 'Joker uitzetten' : 'Joker inzetten (verdubbelt punten)'}
+              className={`font-mono text-[11px] transition-all rounded-full px-2 py-0.5 border ${
+                hasJoker
+                  ? 'text-wk-gold border-wk-gold/50 bg-wk-gold/10'
+                  : 'text-wk-muted border-white/10 hover:text-wk-gold hover:border-wk-gold/30'
+              }`}
+            >
+              ★
+            </button>
+          )}
+          {hasJoker && locked && (
+            <span className="font-mono text-[10px] text-wk-gold tracking-widest">★ Joker</span>
           )}
         </div>
 
@@ -422,7 +462,7 @@ function MatchRow({ match, score, pts, locked, onScoreChange }: MatchRowProps) {
                 </span>
               )}
               {match.result_entered && score && (
-                <span className="font-mono text-[9px] text-wk-muted tracking-[0.1em]">
+                <span className="font-mono text-[9px] text-wk-muted tracking-widest">
                   jouw: {score.home} – {score.away}
                 </span>
               )}
@@ -551,6 +591,96 @@ function AiPredictionPanel({
             <p className="text-xs text-wk-text leading-snug">{state.sleutelspelerUit}</p>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Inline group standings ───────────────────────────────────────────────────
+
+function GroupStandingsInline({
+  group,
+  groupMatches,
+  scores,
+  teams,
+  advancementPicks,
+}: {
+  group: string
+  groupMatches: Match[]
+  scores: Record<string, { home: string; away: string }>
+  teams: Team[]
+  advancementPicks: [string | null, string | null, string | null]
+}) {
+  const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
+
+  const st: Record<string, { points: number; gd: number; gf: number }> = {}
+  for (const m of groupMatches) {
+    if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 }
+    if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 }
+  }
+
+  let hasAnyScore = false
+  for (const m of groupMatches) {
+    const s = scores[m.id]
+    if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
+    hasAnyScore = true
+    const h = Number(s.home), a = Number(s.away)
+    st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a
+    st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h
+    if (h > a) st[m.home_team.id].points += 3
+    else if (h < a) st[m.away_team.id].points += 3
+    else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
+  }
+
+  const sorted = Object.entries(st)
+    .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+
+  const advancingIds = new Set(advancementPicks.filter(Boolean) as string[])
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+      <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+        <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+          Voorspelde stand groep {group}
+        </span>
+        {!hasAnyScore && (
+          <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest uppercase italic">
+            Vul wedstrijden in
+          </span>
+        )}
+      </div>
+      <div className="divide-y divide-white/5">
+        {sorted.map(([teamId, stat], i) => {
+          const team = teamMap[teamId]
+          if (!team) return null
+          const advances = advancingIds.has(teamId)
+          const pos = i + 1
+          return (
+            <div key={teamId} className="flex items-center gap-3 px-5 py-2.5">
+              <span className={`font-mono text-xs w-4 shrink-0 text-center ${pos <= 2 ? 'text-wk-green font-bold' : 'text-wk-muted'}`}>
+                {pos}
+              </span>
+              {team.flag_url && (
+                <Image src={team.flag_url} alt={team.name} width={22} height={15}
+                  className="rounded-sm object-cover shrink-0" />
+              )}
+              <span className="flex-1 text-xs font-semibold text-wk-text truncate">{team.name}</span>
+              {hasAnyScore && (
+                <>
+                  <span className="font-mono text-[10px] text-wk-muted w-6 text-center">{stat.points}pt</span>
+                  <span className="font-mono text-[10px] text-wk-muted w-8 text-right">
+                    {stat.gd > 0 ? `+${stat.gd}` : stat.gd}
+                  </span>
+                  <span className={`font-mono text-[9px] tracking-widest uppercase shrink-0 w-20 text-right ${
+                    advances ? 'text-wk-green' : pos === 3 ? 'text-wk-gold' : 'text-wk-muted'
+                  }`}>
+                    {advances ? '→ Door' : pos === 3 ? 'Eventueel' : '✗ Uit'}
+                  </span>
+                </>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

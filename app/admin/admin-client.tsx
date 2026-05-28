@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { format } from 'date-fns'
-import { nl } from 'date-fns/locale'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, clearAllGroupResults } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, clearAllGroupResults, scoreGroupAdvancement } from '@/app/actions/admin'
+import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
 type Match = {
@@ -107,6 +106,7 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
   const [isPending, startTransition] = useTransition()
   const [demoToast, setDemoToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [advToast, setAdvToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   function showDemoToast(msg: string, ok: boolean) {
     setDemoToast({ msg, ok })
@@ -133,10 +133,20 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
     })
   }
 
+  function handleScoreAdvancement() {
+    startTransition(async () => {
+      const result = await scoreGroupAdvancement(activeGroup)
+      setAdvToast({ msg: result.ok ? `Eindposities groep ${activeGroup} gescoord!` : result.error, ok: result.ok })
+      setTimeout(() => setAdvToast(null), 4000)
+    })
+  }
+
   const groupMatches = matches.filter((m) => {
     const home = m.home_team_id ? teamMap[m.home_team_id] : null
     return home?.group_name === activeGroup
   })
+
+  const groupComplete = groupMatches.length > 0 && groupMatches.every((m) => m.result_entered)
 
   const doneByGroup = (g: string) => {
     const gm = matches.filter((m) => {
@@ -210,6 +220,32 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
             <MatchResultRow key={match.id} match={match} teamMap={teamMap} knockout={false} />
           ))}
         </div>
+
+        {/* Score eindposities — alleen zichtbaar als alle 6 wedstrijden zijn ingevoerd */}
+        {groupComplete && (
+          <div className="px-5 py-4 border-t border-white/10 flex items-center justify-between gap-3">
+            <div>
+              <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">Eindposities scoren</p>
+              <p className="font-mono text-[9px] text-wk-muted/60 tracking-widest mt-0.5">
+                Kent 3 pt toe per correct voorspelde eindpositie in groep {activeGroup}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {advToast && (
+                <span className={`font-mono text-[10px] tracking-[0.12em] ${advToast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+                  {advToast.msg}
+                </span>
+              )}
+              <button
+                onClick={handleScoreAdvancement}
+                disabled={isPending}
+                className="rounded bg-wk-gold/10 border border-wk-gold/30 px-4 py-2 text-[10px] font-mono font-semibold text-wk-gold tracking-[0.12em] uppercase hover:bg-wk-gold/20 disabled:opacity-50 transition-colors"
+              >
+                {isPending ? '…' : 'Score eindposities'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -265,7 +301,6 @@ function MatchResultRow({
 
   const homeName = homeTeam?.name ?? 'TBD'
   const awayName = awayTeam?.name ?? 'TBD'
-  const kickoff  = new Date(match.kickoff_at)
 
   return (
     <div className="px-5 py-3.5">
@@ -278,7 +313,7 @@ function MatchResultRow({
         {/* Teams + score */}
         <div className="flex-1 min-w-0">
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.10em] mb-1">
-            {format(kickoff, 'd MMM · HH:mm', { locale: nl })}
+            {formatInAmsterdam(match.kickoff_at, 'd MMM · HH:mm')}
           </p>
           <div className="flex items-center gap-2">
             <span className="text-sm text-wk-text truncate flex-1 text-right">{homeName}</span>

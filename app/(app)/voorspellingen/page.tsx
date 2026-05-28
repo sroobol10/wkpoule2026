@@ -38,9 +38,17 @@ export default async function VoorspellingenPage() {
     .order('group_name')
     .order('name')
 
+  // Jokers van deze gebruiker
+  const { data: jokers } = await supabase
+    .from('jokers')
+    .select('match_id')
+    .eq('user_id', user.id)
+
   const predMap = Object.fromEntries(
     (predictions ?? []).map((p) => [p.match_id, p])
   )
+
+  const jokerMatchIds = (jokers ?? []).map((j) => j.match_id)
 
   return (
     <PredictionsClient
@@ -48,6 +56,7 @@ export default async function VoorspellingenPage() {
       predMap={predMap}
       advancement={advancement ?? []}
       teams={teams ?? []}
+      jokerMatchIds={jokerMatchIds}
     />
   )
 }

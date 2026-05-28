@@ -10,12 +10,13 @@ export default async function PoulesPage() {
 
   const { data: memberships } = await supabase
     .from('poule_members')
-    .select('poule_id, poules(id, name, invite_code, is_general, creator_id)')
+    .select('poule_id, poules(id, name, invite_code, is_general, creator_id, creator:profiles!creator_id(is_admin))')
     .eq('user_id', user.id)
 
+  type PouleRow = { id: string; name: string; invite_code: string; is_general: boolean; creator_id: string | null; creator: { is_admin: boolean } | null }
   const poules = (memberships ?? [])
-    .map((m) => m.poules as { id: string; name: string; invite_code: string; is_general: boolean; creator_id: string | null } | null)
-    .filter(Boolean) as { id: string; name: string; invite_code: string; is_general: boolean; creator_id: string | null }[]
+    .map((m) => m.poules as PouleRow | null)
+    .filter(Boolean) as PouleRow[]
 
   const pouleIds = poules.map((p) => p.id)
   const { data: memberCounts } = pouleIds.length > 0
@@ -52,7 +53,7 @@ export default async function PoulesPage() {
       {general && (
         <section>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-2">Algemeen</p>
-          <PouleCard poule={general} memberCount={countMap[general.id] ?? 0} isOwner={false} />
+          <PouleCard poule={general} memberCount={countMap[general.id] ?? 0} isOwner={false} isOfficial={true} />
         </section>
       )}
 
@@ -67,6 +68,7 @@ export default async function PoulesPage() {
                 poule={poule}
                 memberCount={countMap[poule.id] ?? 0}
                 isOwner={poule.creator_id === user.id}
+                isOfficial={poule.creator?.is_admin === true}
               />
             ))}
           </div>
@@ -86,10 +88,12 @@ function PouleCard({
   poule,
   memberCount,
   isOwner,
+  isOfficial,
 }: Readonly<{
   poule: { id: string; name: string; invite_code: string; is_general: boolean }
   memberCount: number
   isOwner: boolean
+  isOfficial: boolean
 }>) {
   return (
     <Link
@@ -102,6 +106,11 @@ function PouleCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="font-semibold text-wk-text truncate">{poule.name}</p>
+          {isOfficial && (
+            <span className="shrink-0 font-mono text-[9px] text-wk-gold border border-wk-gold/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
+              Ennovate
+            </span>
+          )}
           {isOwner && (
             <span className="shrink-0 font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
               Eigenaar
