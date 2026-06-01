@@ -5,7 +5,6 @@ import Image from 'next/image'
 import { format } from 'date-fns'
 import { nl } from 'date-fns/locale'
 import { saveBonusAnswer } from '@/app/actions/bonus'
-import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 
 type Question = {
   id: string
@@ -22,6 +21,7 @@ type Props = {
   questions: Question[]
   answerMap: Record<string, AnswerEntry>
   teams: Team[]
+  anyMatchPlayed?: boolean
 }
 
 // Vragen waarbij een landkeuze getoond wordt i.p.v. vrije tekst
@@ -36,7 +36,7 @@ function isTeamQuestion(question: string) {
   )
 }
 
-export default function BonusvragenClient({ questions, answerMap, teams }: Props) {
+export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false }: Props) {
   const preTournament = questions.filter((q) => q.type === 'pre_tournament')
   const daily = questions.filter((q) => q.type === 'daily')
   const answeredCount = questions.filter((q) => answerMap[q.id]?.answer).length
@@ -69,6 +69,7 @@ export default function BonusvragenClient({ questions, answerMap, teams }: Props
                 existingAnswer={answerMap[q.id] ?? null}
                 accentClass="text-wk-red"
                 teams={isTeamQuestion(q.question) ? teams : []}
+                tournamentStarted={anyMatchPlayed}
               />
             ))}
           </div>
@@ -113,11 +114,13 @@ function QuestionCard({
   existingAnswer,
   accentClass,
   teams,
+  tournamentStarted = false,
 }: {
   question: Question
   existingAnswer: AnswerEntry | null
   accentClass: string
-  teams: Team[]  // non-empty = show team picker
+  teams: Team[]
+  tournamentStarted?: boolean
 }) {
   const [answer, setAnswer] = useState(existingAnswer?.answer ?? '')
   const [isPending, startTransition] = useTransition()
@@ -127,8 +130,7 @@ function QuestionCard({
   const [search, setSearch] = useState('')
 
   const deadline = question.unlock_date ? new Date(question.unlock_date) : null
-  const tournamentStarted = new Date() >= GROUP_STAGE_DEADLINE
-  // Pre-tournament vragen gaan op slot zodra het toernooi begint
+  // Pre-tournament vragen gaan op slot zodra het toernooi begint (eerste wedstrijd gespeeld)
   const closed = question.type === 'pre_tournament'
     ? tournamentStarted
     : (deadline ? deadline <= new Date() : false)

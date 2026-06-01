@@ -2,8 +2,6 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
-
 export type SaveResult = { ok: true } | { ok: false; error: string }
 
 export async function saveBonusAnswer(
@@ -22,9 +20,16 @@ export async function saveBonusAnswer(
 
   if (!question) return { ok: false, error: 'Vraag niet gevonden.' }
 
-  // Pre-tournament vragen gaan op slot bij start toernooi
-  if (question.type === 'pre_tournament' && new Date() >= GROUP_STAGE_DEADLINE) {
-    return { ok: false, error: 'De deadline voor pre-tournament vragen is verstreken.' }
+  // Pre-tournament vragen gaan op slot zodra de eerste wedstrijd gespeeld is
+  if (question.type === 'pre_tournament') {
+    const { count } = await supabase
+      .from('matches')
+      .select('id', { count: 'exact', head: true })
+      .eq('stage', 'group')
+      .eq('result_entered', true)
+    if ((count ?? 0) > 0) {
+      return { ok: false, error: 'De deadline voor pre-tournament vragen is verstreken.' }
+    }
   }
 
   if (question.unlock_date && new Date(question.unlock_date) <= new Date()) {

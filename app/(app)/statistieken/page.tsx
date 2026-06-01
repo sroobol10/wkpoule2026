@@ -8,8 +8,13 @@ export default async function StatistiekenPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const tournamentStarted = new Date() >= GROUP_STAGE_DEADLINE
-  const now = new Date().toISOString()
+  // Toernooi "gestart" zodra er minimaal één groepswedstrijd gespeeld is
+  const { count: playedCount } = await supabase
+    .from('matches')
+    .select('id', { count: 'exact', head: true })
+    .eq('stage', 'group')
+    .eq('result_entered', true)
+  const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
 
   // ── Totaal deelnemers (op basis van algemene poule) ──────────────────────
   const { count: totalDeelnemers } = await supabase
@@ -75,7 +80,7 @@ export default async function StatistiekenPage() {
       away_team:teams!matches_away_team_id_fkey(name, flag_url, group_name)
     `)
     .eq('stage', 'group')
-    .lte('kickoff_at', now)
+    .eq('result_entered', true)
     .order('kickoff_at')
 
   type TeamRef = { name: string; flag_url: string; group_name: string }

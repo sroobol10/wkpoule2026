@@ -9,6 +9,14 @@ export default async function BonusvragenPage() {
 
   const now = new Date().toISOString()
 
+  // Toernooi gestart zodra er minimaal één groepswedstrijd gespeeld is
+  const { count: playedCount } = await supabase
+    .from('matches')
+    .select('id', { count: 'exact', head: true })
+    .eq('stage', 'group')
+    .eq('result_entered', true)
+  const anyMatchPlayed = (playedCount ?? 0) > 0
+
   const { data: questions } = await supabase
     .from('bonus_questions')
     .select('id, question, description, type, unlock_date, correct_answer_set')
@@ -40,6 +48,7 @@ export default async function BonusvragenPage() {
       questions={visibleQuestions}
       answerMap={answerMap}
       teams={teams ?? []}
+      anyMatchPlayed={anyMatchPlayed}
     />
   )
 }
