@@ -21,12 +21,17 @@ type Match = {
 }
 type Prediction = { predicted_home: number; predicted_away: number; points_awarded: number | null }
 
+type PouleEntry = { userId: string; username: string; totalPts: number; rankChange: number | null }
+type PouleStanding = { pouleId: string; pouleName: string; isGeneral: boolean; entries: PouleEntry[] }
+
 type Props = Readonly<{
   matches: Match[]
   predMap: Record<string, Prediction>
   advancement: { team_id: string; predicted_position: number }[]
   teams: Team[]
   jokerMatchIds: string[]
+  pouleStandings: PouleStanding[]
+  currentUserId: string
 }>
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
@@ -37,7 +42,7 @@ function ptsBadgeClass(pts: number) {
   return 'bg-white/5 border-white/10 text-wk-muted'
 }
 
-export default function PredictionsClient({ matches, predMap, jokerMatchIds }: Props) {
+export default function PredictionsClient({ matches, predMap, jokerMatchIds, pouleStandings, currentUserId }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [scores, setScores] = useState<Record<string, { home: string; away: string }>>(() => {
     const init: Record<string, { home: string; away: string }> = {}
@@ -186,143 +191,280 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds }: P
 
   const advancementPicks = computeAdvancementPicks()
 
+  const standingsPanel = (
+    <GroupStandingsInline
+      group={activeGroup}
+      groupMatches={groupMatches}
+      scores={scores}
+      advancementPicks={advancementPicks[activeGroup] ?? [null, null, null]}
+    />
+  )
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Fase 01 · Vooraf invullen</p>
-          <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Groepsfase</h1>
-          <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
-            {filledCount} / {matches.length} wedstrijden ingevuld
-          </p>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-wk-green rounded-full transition-all"
-          style={{ width: `${(filledCount / matches.length) * 100}%` }}
-        />
-      </div>
-
-      {/* Scoring info */}
-      <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
-        <button
-          onClick={() => setShowScoring((v) => !v)}
-          className="w-full flex items-center justify-between px-5 py-3 text-left"
-        >
-          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Puntentelling</span>
-          <svg className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {showScoring && (
-          <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
-            {[
-              { label: 'Exacte uitslag',                        pts: '5 pt' },
-              { label: 'Correct resultaat (W/G/V)',             pts: '2 pt' },
-              { label: 'Correct resultaat + één doelpunttotaal', pts: '3 pt' },
-              { label: 'Fout resultaat + één doelpunttotaal',   pts: '1 pt' },
-              { label: 'Correcte eindpositie in de groep',      pts: '3 pt' },
-              { label: 'Bonusvraag (voor toernooi)',            pts: '5 pt' },
-              { label: 'Bonusvraag (dagelijks)',                pts: '2 pt' },
-            ].map(({ label, pts }) => (
-              <div key={label} className="flex items-center justify-between gap-4">
-                <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
-                <span className="font-mono text-xs font-bold text-wk-gold shrink-0">{pts}</span>
-              </div>
-            ))}
-            <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-              De inzet van een joker zorgt voor een verdubbeling van het aantal punten behaald in deze wedstrijd.
+    <div className="md:grid md:grid-cols-3 md:gap-6 md:items-start">
+      {/* 2/3: voorspellingen + controls */}
+      <div className="space-y-6 md:col-span-2">
+        {/* Header */}
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Fase 01 · Vooraf invullen</p>
+            <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Groepsfase</h1>
+            <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
+              {filledCount} / {matches.length} wedstrijden ingevuld
             </p>
           </div>
-        )}
-      </div>
-
-      {/* Group tabs */}
-      <div className="flex flex-wrap gap-1.5">
-        {GROUPS.map((g) => {
-          const gMatches = matches.filter((m) => m.home_team?.group_name === g)
-          const filled = gMatches.filter((m) => scores[m.id]?.home !== undefined && scores[m.id]?.home !== '').length
-          const groupJoker = gMatches.some((m) => jokerSet.has(m.id))
-          return (
-            <button
-              key={g}
-              onClick={() => setActiveGroup(g)}
-              className={`relative rounded px-3 py-1.5 text-xs font-mono font-bold tracking-[0.14em] uppercase transition-colors ${
-                activeGroup === g
-                  ? 'bg-wk-surface border border-wk-gold/50 text-wk-gold'
-                  : 'bg-wk-bg2 border border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
-              }`}
-            >
-              {g}
-              {filled === gMatches.length && gMatches.length > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-wk-green text-white text-[7px] font-mono">✓</span>
-              )}
-              {groupJoker && !(filled === gMatches.length && gMatches.length > 0) && (
-                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-wk-gold text-black text-[7px] font-mono">★</span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Matches for active group */}
-      <div className="bg-wk-surface rounded-xl border border-white/10 overflow-hidden">
-        {/* Group header */}
-        <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-display text-sm text-wk-text uppercase tracking-wide">Groep {activeGroup}</span>
-          </div>
-          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-            {groupMatches.filter((m) => scores[m.id]?.home !== undefined && scores[m.id]?.home !== '').length}/{groupMatches.length} ingevuld
-          </span>
         </div>
 
-        <div className="divide-y divide-white/5">
-          {groupMatches.map((match) => {
-            const locked = new Date(match.kickoff_at) <= now
-            const score = scores[match.id]
-            const pts = predMap[match.id]?.points_awarded
+        {/* Progress bar */}
+        <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-wk-green rounded-full transition-all"
+            style={{ width: `${(filledCount / matches.length) * 100}%` }}
+          />
+        </div>
 
+        {/* Scoring info */}
+        <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+          <button
+            onClick={() => setShowScoring((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 text-left"
+          >
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Puntentelling</span>
+            <svg className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showScoring && (
+            <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
+              {[
+                { label: 'Exacte uitslag',                        pts: '5 pt' },
+                { label: 'Correct resultaat (W/G/V)',             pts: '2 pt' },
+                { label: 'Correct resultaat + één doelpunttotaal', pts: '3 pt' },
+                { label: 'Fout resultaat + één doelpunttotaal',   pts: '1 pt' },
+                { label: 'Correcte eindpositie in de groep',      pts: '3 pt' },
+                { label: 'Bonusvraag (voor toernooi)',            pts: '5 pt' },
+                { label: 'Bonusvraag (dagelijks)',                pts: '2 pt' },
+              ].map(({ label, pts }) => (
+                <div key={label} className="flex items-center justify-between gap-4">
+                  <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
+                  <span className="font-mono text-xs font-bold text-wk-gold shrink-0">{pts}</span>
+                </div>
+              ))}
+              <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
+                De inzet van een joker zorgt voor een verdubbeling van het aantal punten behaald in deze wedstrijd.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Group tabs */}
+        <div className="flex flex-wrap gap-1.5">
+          {GROUPS.map((g) => {
+            const gMatches = matches.filter((m) => m.home_team?.group_name === g)
+            const filled = gMatches.filter((m) => scores[m.id]?.home !== undefined && scores[m.id]?.home !== '').length
+            const groupJoker = gMatches.some((m) => jokerSet.has(m.id))
             return (
-              <MatchRow
-                key={match.id}
-                match={match}
-                score={score}
-                pts={pts}
-                locked={locked}
-                hasJoker={jokerSet.has(match.id)}
-                onScoreChange={setScore}
-                onJokerToggle={handleJokerToggle}
-              />
+              <button
+                key={g}
+                onClick={() => setActiveGroup(g)}
+                className={`relative rounded px-3 py-1.5 text-xs font-mono font-bold tracking-[0.14em] uppercase transition-colors ${
+                  activeGroup === g
+                    ? 'bg-wk-surface border border-wk-gold/50 text-wk-gold'
+                    : 'bg-wk-bg2 border border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+                }`}
+              >
+                {g}
+                {filled === gMatches.length && gMatches.length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-wk-green text-white text-[7px] font-mono">✓</span>
+                )}
+                {groupJoker && !(filled === gMatches.length && gMatches.length > 0) && (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-wk-gold text-black text-[7px] font-mono">★</span>
+                )}
+              </button>
             )
           })}
         </div>
 
-        {/* Auto-save status */}
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end items-center min-h-11">
-          {saveStatus === 'saving' && (
-            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase animate-pulse">Opslaan…</span>
-          )}
-          {saveStatus === 'saved' && (
-            <span className="font-mono text-[10px] text-wk-green tracking-[0.14em] uppercase">✓ Automatisch opgeslagen</span>
-          )}
-          {saveStatus === 'error' && (
-            <span className="font-mono text-[10px] text-wk-red tracking-[0.14em] uppercase">Fout bij opslaan</span>
+        {/* Matches for active group */}
+        <div className="bg-wk-surface rounded-xl border border-white/10 overflow-hidden">
+          <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
+            <span className="font-display text-sm text-wk-text uppercase tracking-wide">Groep {activeGroup}</span>
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+              {groupMatches.filter((m) => scores[m.id]?.home !== undefined && scores[m.id]?.home !== '').length}/{groupMatches.length} ingevuld
+            </span>
+          </div>
+
+          <div className="divide-y divide-white/5">
+            {groupMatches.map((match) => {
+              const locked = new Date(match.kickoff_at) <= now
+              const score = scores[match.id]
+              const pts = predMap[match.id]?.points_awarded
+              return (
+                <MatchRow
+                  key={match.id}
+                  match={match}
+                  score={score}
+                  pts={pts}
+                  locked={locked}
+                  hasJoker={jokerSet.has(match.id)}
+                  onScoreChange={setScore}
+                  onJokerToggle={handleJokerToggle}
+                />
+              )
+            })}
+          </div>
+
+          <div className="px-5 py-3 border-t border-white/10 flex justify-end items-center min-h-11">
+            {saveStatus === 'saving' && (
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase animate-pulse">Opslaan…</span>
+            )}
+            {saveStatus === 'saved' && (
+              <span className="font-mono text-[10px] text-wk-green tracking-[0.14em] uppercase">✓ Automatisch opgeslagen</span>
+            )}
+            {saveStatus === 'error' && (
+              <span className="font-mono text-[10px] text-wk-red tracking-[0.14em] uppercase">Fout bij opslaan</span>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile: groepstand + tussenstand onder de wedstrijden */}
+        <div className="md:hidden space-y-6">
+          {standingsPanel}
+          {pouleStandings.length > 0 && (
+            <PouleMiniLeaderboard poules={pouleStandings} currentUserId={currentUserId} />
           )}
         </div>
       </div>
 
-      {/* Inline group standings */}
-      <GroupStandingsInline
-        group={activeGroup}
-        groupMatches={groupMatches}
-        scores={scores}
-        advancementPicks={advancementPicks[activeGroup] ?? [null, null, null]}
-      />
+      {/* 1/3: groepstand + tussenstand (sticky sidebar, desktop only) */}
+      <aside className="hidden md:block md:col-span-1">
+        <div className="sticky top-6 space-y-4">
+          {standingsPanel}
+          {pouleStandings.length > 0 && (
+            <PouleMiniLeaderboard poules={pouleStandings} currentUserId={currentUserId} />
+          )}
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+// ─── Poule mini-leaderboard ───────────────────────────────────────────────────
+
+function PouleMiniLeaderboard({
+  poules,
+  currentUserId,
+}: {
+  poules: PouleStanding[]
+  currentUserId: string
+}) {
+  const [activeIdx, setActiveIdx] = useState(0)
+  const active = poules[activeIdx] ?? poules[0]
+  const TOP = 8
+  const top = active.entries.slice(0, TOP)
+  const userRank = active.entries.findIndex((e) => e.userId === currentUserId)
+  const userInTop = userRank >= 0 && userRank < TOP
+  const userEntry = active.entries[userRank]
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+      {/* Header + tabs */}
+      <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
+        <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase shrink-0">Tussenstand</span>
+        {poules.length > 1 ? (
+          <div className="flex flex-wrap gap-1">
+            {poules.map((p, i) => (
+              <button
+                key={p.pouleId}
+                onClick={() => setActiveIdx(i)}
+                className={`rounded px-2 py-0.5 font-mono text-[9px] tracking-widest uppercase border transition-colors max-w-[120px] truncate ${
+                  i === activeIdx
+                    ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
+                    : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+                }`}
+                title={p.pouleName}
+              >
+                {p.isGeneral ? 'Algemeen' : p.pouleName}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="font-mono text-[10px] text-wk-muted truncate">{active.pouleName}</span>
+        )}
+      </div>
+
+      {active.entries.length === 0 ? (
+        <div className="px-5 py-4 text-center font-mono text-[10px] text-wk-muted tracking-widest">
+          Nog geen punten gescoord
+        </div>
+      ) : (
+        <div className="divide-y divide-white/5">
+          {top.map((entry, i) => (
+            <MiniLeaderboardRow
+              key={entry.userId}
+              rank={i + 1}
+              entry={entry}
+              isCurrentUser={entry.userId === currentUserId}
+            />
+          ))}
+          {!userInTop && userEntry && userRank >= 0 && (
+            <>
+              <div className="px-5 py-1">
+                <span className="block border-t border-dashed border-white/10" />
+              </div>
+              <MiniLeaderboardRow
+                rank={userRank + 1}
+                entry={userEntry}
+                isCurrentUser
+              />
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="px-5 py-2.5 border-t border-white/10">
+        <a
+          href={`/poules/${active.pouleId}`}
+          className="font-mono text-[9px] text-wk-muted hover:text-wk-gold tracking-widest uppercase transition-colors"
+        >
+          Volledig klassement →
+        </a>
+      </div>
+    </div>
+  )
+}
+
+function MiniLeaderboardRow({
+  rank,
+  entry,
+  isCurrentUser,
+}: {
+  rank: number
+  entry: PouleEntry
+  isCurrentUser: boolean
+}) {
+  const medals = ['🥇', '🥈', '🥉']
+  return (
+    <div className={`flex items-center gap-3 px-5 py-2.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
+      <div className="w-5 text-center shrink-0">
+        {rank <= 3
+          ? <span className="text-xs">{medals[rank - 1]}</span>
+          : <span className="font-mono text-[10px] text-wk-muted">{rank}</span>
+        }
+      </div>
+      <div className="w-6 text-center shrink-0">
+        {entry.rankChange === null || entry.rankChange === 0
+          ? <span className="font-mono text-[9px] text-wk-muted/30">–</span>
+          : entry.rankChange > 0
+            ? <span className="font-mono text-[9px] font-bold text-wk-green">↑{entry.rankChange}</span>
+            : <span className="font-mono text-[9px] font-bold text-wk-red">↓{Math.abs(entry.rankChange)}</span>
+        }
+      </div>
+      <span className={`flex-1 text-xs truncate ${isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-text'}`}>
+        {entry.username}
+      </span>
+      <span className="font-display text-sm text-wk-gold shrink-0">{entry.totalPts}</span>
+      <span className="font-mono text-[9px] text-wk-muted shrink-0">pt</span>
     </div>
   )
 }
