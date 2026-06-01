@@ -818,6 +818,58 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
   return { ok: true }
 }
 
+// ─── Verwijder alle KO-wedstrijden en reset bijbehorende punten ───────────────
+export async function clearKoResults(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const KO_STAGES = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
+
+  // Haal KO-match-IDs op
+  const { data: koMatches } = await supabase
+    .from('matches')
+    .select('id')
+    .in('stage', KO_STAGES)
+
+  if (!koMatches?.length) return { ok: false, error: 'Geen KO-wedstrijden gevonden.' }
+
+  const koMatchIds = koMatches.map((m) => m.id)
+
+  // Reset knockout_predictions punten
+  const { error: koPredErr } = await supabase
+    .from('knockout_predictions')
+    .update({ points_awarded: null })
+    .in('match_id', koMatchIds)
+  if (koPredErr) return { ok: false, error: `KO-voorspellingen: ${koPredErr.message}` }
+
+  // Reset bracket_predictions punten (alle slots)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: bracketErr } = await (supabase as any)
+    .from('bracket_predictions')
+    .update({ points_awarded: null })
+    .not('slot', 'is', null)
+  if (bracketErr) return { ok: false, error: `Bracket: ${bracketErr.message}` }
+
+  // Verwijder alle KO-wedstrijden (CASCADE verwijdert knockout_predictions ook)
+  const { error: matchErr } = await supabase
+    .from('matches')
+    .delete()
+    .in('stage', KO_STAGES)
+  if (matchErr) return { ok: false, error: `KO-wedstrijden verwijderen: ${matchErr.message}` }
+
+  // Herbereken klassement (KO-punten zijn nu 0)
+  const { data: affectedMembers } = await supabase
+    .from('poule_members')
+    .select('user_id')
+  const userIds = [...new Set((affectedMembers ?? []).map((m) => m.user_id))]
+  if (userIds.length > 0) await recalcPouleScores(supabase, userIds)
+
+  revalidatePath('/admin')
+  revalidatePath('/knockout')
+  revalidatePath('/poules')
+  return { ok: true }
+}
+
 // ─── Herscore bracket-voorspellingen met het nieuwe doorstroom-model ──────────
 export async function rescoreBracket(): Promise<AdminResult> {
   const { supabase } = await assertAdmin()

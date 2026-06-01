@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
@@ -686,6 +686,15 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
     })
   }
 
+  function handleClearKo() {
+    startTransition(async () => {
+      const result = await clearKoResults()
+      setToast({ msg: result.ok ? 'KO-fase verwijderd. Draai npm run ko:create voor een nieuwe simulatie.' : result.error, ok: result.ok })
+      setTimeout(() => setToast(null), 6000)
+      if (result.ok) router.refresh()
+    })
+  }
+
   if (availableStages.length === 0) {
     return (
       <div className="space-y-4">
@@ -750,6 +759,13 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
           className="rounded bg-wk-gold/10 border border-wk-gold/30 px-3 py-1.5 text-[10px] font-mono font-semibold text-wk-gold tracking-[0.12em] uppercase hover:bg-wk-gold/20 disabled:opacity-50 transition-colors"
         >
           {isPending ? '…' : 'Herscore bracket'}
+        </button>
+        <button
+          onClick={handleClearKo}
+          disabled={isPending}
+          className="rounded border border-wk-red/30 px-3 py-1.5 text-[10px] font-mono text-wk-red tracking-[0.12em] uppercase hover:bg-wk-red/10 disabled:opacity-50 transition-colors"
+        >
+          {isPending ? '…' : 'KO leegmaken'}
         </button>
       </div>
       {availableStages.map((stage) => {
