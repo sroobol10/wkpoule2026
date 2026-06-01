@@ -33,7 +33,6 @@ export async function createPoule(
 
   if (error) return { ok: false, error: 'Aanmaken mislukt.' }
 
-  // Add creator as member
   await supabase.from('poule_members').insert({ poule_id, user_id: user.id })
 
   revalidatePath('/poules')
@@ -47,31 +46,41 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
 
   const code = inviteCode.trim().toUpperCase()
 
-  // Gebruik service-client: RLS blokkeert anders de lookup voor niet-leden
+  // Service-client: omzeilt RLS zodat niet-leden de poule kunnen opzoeken
   const db = createServiceClient()
-  const { data: poule } = await db
+  const { data: poule, error: pouleErr } = await db
     .from('poules')
     .select('id, name, is_general')
     .eq('invite_code', code)
-    .single()
+    .maybeSingle()
 
-  if (!poule) return { ok: false, error: 'Ongeldige uitnodigingscode.' }
+  if (pouleErr) return { ok: false, error: `Fout bij opzoeken: ${pouleErr.message}` }
+  if (!poule)   return { ok: false, error: 'Ongeldige uitnodigingscode.' }
 
-  // Check already member
-  const { data: existing } = await supabase
+  // Check al lid — service-client zodat RLS de query niet blokkeert
+  const { data: existing } = await db
     .from('poule_members')
     .select('id')
     .eq('poule_id', poule.id)
     .eq('user_id', user.id)
-    .single()
+    .maybeSingle()
 
   if (existing) return { ok: false, error: 'Je bent al lid van deze poule.' }
 
-  const { error } = await supabase
+  // Inschrijven — service-client zodat de insert niet door RLS wordt geblokkeerd
+  const { error: insertErr } = await db
     .from('poule_members')
     .insert({ poule_id: poule.id, user_id: user.id })
 
-  if (error) return { ok: false, error: 'Deelnemen mislukt.' }
+  if (insertErr) return { ok: false, error: `Deelnemen mislukt: ${insertErr.message}` }
+
+  // Voeg ook toe aan poule_scores zodat het klassement direct klopt
+  await db
+    .from('poule_scores')
+    .upsert(
+      { poule_id: poule.id, user_id: user.id, total_pts: 0, exact_hits: 0, correct_results: 0 },
+      { onConflict: 'poule_id,user_id' }
+    )
 
   revalidatePath('/poules')
   return { ok: true }
