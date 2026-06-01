@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 
 export type SaveResult = { ok: true } | { ok: false; error: string }
 
@@ -45,7 +46,10 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
 
   const code = inviteCode.trim().toUpperCase()
-  const { data: poule } = await supabase
+
+  // Gebruik service-client: RLS blokkeert anders de lookup voor niet-leden
+  const db = createServiceClient()
+  const { data: poule } = await db
     .from('poules')
     .select('id, name, is_general')
     .eq('invite_code', code)
