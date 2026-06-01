@@ -217,13 +217,25 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
 
   const advancementPicks = computeAdvancementPicks()
 
+  const hasActualResults = groupMatches.some((m) => m.result_entered)
+
   const standingsPanel = (
-    <GroupStandingsInline
-      group={activeGroup}
-      groupMatches={groupMatches}
-      scores={scores}
-      advancementPicks={advancementPicks[activeGroup] ?? [null, null, null]}
-    />
+    <div className="space-y-3">
+      {/* Huidige stand — alleen tonen als er al uitslagen zijn */}
+      {hasActualResults && (
+        <ActualGroupStandingsInline
+          group={activeGroup}
+          groupMatches={groupMatches}
+        />
+      )}
+      {/* Voorspelde stand */}
+      <GroupStandingsInline
+        group={activeGroup}
+        groupMatches={groupMatches}
+        scores={scores}
+        advancementPicks={advancementPicks[activeGroup] ?? [null, null, null]}
+      />
+    </div>
   )
 
   return (
@@ -771,6 +783,85 @@ function AiPredictionPanel({
 }
 
 // ─── Inline group standings ───────────────────────────────────────────────────
+
+// ─── Actuele groepsstand (op basis van werkelijke uitslagen) ─────────────────
+
+function ActualGroupStandingsInline({
+  group,
+  groupMatches,
+}: {
+  group: string
+  groupMatches: Match[]
+}) {
+  const teamMap: Record<string, Team> = {}
+  for (const m of groupMatches) {
+    if (m.home_team) teamMap[m.home_team.id] = m.home_team
+    if (m.away_team) teamMap[m.away_team.id] = m.away_team
+  }
+
+  const st: Record<string, { points: number; gd: number; gf: number; played: number }> = {}
+  for (const m of groupMatches) {
+    if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0, played: 0 }
+    if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0, played: 0 }
+  }
+
+  let playedCount = 0
+  for (const m of groupMatches) {
+    if (!m.result_entered || m.home_score == null || m.away_score == null) continue
+    if (!m.home_team || !m.away_team) continue
+    playedCount++
+    const h = m.home_score, a = m.away_score
+    st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a; st[m.home_team.id].played++
+    st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h; st[m.away_team.id].played++
+    if (h > a) st[m.home_team.id].points += 3
+    else if (h < a) st[m.away_team.id].points += 3
+    else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
+  }
+
+  if (playedCount === 0) return null
+
+  const sorted = Object.entries(st)
+    .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+      <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+        <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+          Huidige stand groep {group}
+        </span>
+        <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest">
+          {playedCount}/{groupMatches.length} gespeeld
+        </span>
+      </div>
+      <div className="divide-y divide-white/5">
+        {sorted.map(([teamId, stat], i) => {
+          const team = teamMap[teamId]
+          if (!team) return null
+          const pos = i + 1
+          return (
+            <div key={teamId} className="flex items-center gap-3 px-5 py-2">
+              <span className={`font-mono text-xs w-4 shrink-0 text-center ${pos <= 2 ? 'text-wk-green font-bold' : 'text-wk-muted'}`}>
+                {pos}
+              </span>
+              {team.flag_url && (
+                <Image src={team.flag_url} alt={team.name} width={20} height={14}
+                  className="rounded-sm object-cover shrink-0" style={{ width: 20, height: 14 }} />
+              )}
+              <span className="flex-1 text-xs font-semibold text-wk-text truncate">{team.name}</span>
+              <span className="font-mono text-[10px] text-wk-muted w-5 text-center">{stat.played}</span>
+              <span className="font-mono text-[10px] font-bold text-wk-gold w-5 text-center">{stat.points}</span>
+              <span className="font-mono text-[10px] text-wk-muted w-8 text-right">
+                {stat.gd > 0 ? `+${stat.gd}` : stat.gd}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Voorspelde groepsstand ───────────────────────────────────────────────────
 
 function GroupStandingsInline({
   group,

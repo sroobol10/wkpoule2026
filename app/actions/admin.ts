@@ -818,6 +818,100 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
   return { ok: true }
 }
 
+// ─── KO-wedstrijden aanmaken vanuit admin (zonder npm script) ────────────────
+export async function createKoMatches(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const KO_STAGES = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
+
+  // Check of KO-matches al bestaan
+  const { data: existing } = await supabase
+    .from('matches')
+    .select('id')
+    .in('stage', KO_STAGES)
+    .limit(1)
+  if (existing && existing.length > 0) {
+    return { ok: false, error: 'KO-wedstrijden bestaan al. Gebruik "KO leegmaken" eerst.' }
+  }
+
+  // Bereken groepsstanden vanuit werkelijke resultaten
+  const { data: groupMatches } = await supabase
+    .from('matches')
+    .select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(group_name)')
+    .eq('stage', 'group')
+
+  type Stats = { pts: number; gd: number; gf: number }
+  const standings: Record<string, Record<string, Stats>> = {}
+
+  for (const m of groupMatches ?? []) {
+    if (!m.result_entered || m.home_score == null || m.away_score == null) continue
+    const group = (m.home_team as { group_name: string } | null)?.group_name
+    if (!group || !m.home_team_id || !m.away_team_id) continue
+    if (!standings[group]) standings[group] = {}
+    if (!standings[group][m.home_team_id]) standings[group][m.home_team_id] = { pts: 0, gd: 0, gf: 0 }
+    if (!standings[group][m.away_team_id]) standings[group][m.away_team_id] = { pts: 0, gd: 0, gf: 0 }
+    const h = m.home_score, a = m.away_score
+    standings[group][m.home_team_id].gf += h; standings[group][m.home_team_id].gd += h - a
+    standings[group][m.away_team_id].gf += a; standings[group][m.away_team_id].gd += a - h
+    if (h > a) standings[group][m.home_team_id].pts += 3
+    else if (h < a) standings[group][m.away_team_id].pts += 3
+    else { standings[group][m.home_team_id].pts += 1; standings[group][m.away_team_id].pts += 1 }
+  }
+
+  const sortedGroups: Record<string, string[]> = {}
+  const thirds: { group: string; teamId: string; pts: number; gd: number; gf: number }[] = []
+
+  for (const [g, teams] of Object.entries(standings)) {
+    const sorted = Object.entries(teams)
+      .sort(([, x], [, y]) => y.pts - x.pts || y.gd - x.gd || y.gf - x.gf)
+      .map(([id]) => id)
+    sortedGroups[g] = sorted
+    if (sorted[2]) {
+      const st = teams[sorted[2]]
+      thirds.push({ group: g, teamId: sorted[2], ...st })
+    }
+  }
+
+  const best8 = [...thirds]
+    .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf)
+    .slice(0, 8)
+  const best8Groups = best8.map((t) => t.group).sort()
+  const thirdAssignment = assignThirdPlaceSlots(best8Groups)
+  const thirdTeamBySlot: Record<number, string> = {}
+  for (const [slot, group] of Object.entries(thirdAssignment)) {
+    const teamId = sortedGroups[group]?.[2]
+    if (teamId) thirdTeamBySlot[Number(slot)] = teamId
+  }
+
+  function resolveTeam(seed: string): string | null {
+    if (seed.startsWith('3_')) return thirdTeamBySlot[parseInt(seed.slice(2))] ?? null
+    const pos = parseInt(seed[0]) - 1
+    const group = seed[1]
+    return sortedGroups[group]?.[pos] ?? null
+  }
+
+  const { KO_KICKOFFS } = await import('@/lib/bracket')
+
+  const rows = BRACKET.map((bm) => ({
+    match_number: bm.slot,
+    stage:        bm.stage,
+    kickoff_at:   KO_KICKOFFS[bm.slot],
+    home_team_id: bm.stage === 'r32' ? resolveTeam(bm.homeSeed) : null,
+    away_team_id: bm.stage === 'r32' ? resolveTeam(bm.awaySeed) : null,
+  }))
+
+  const CHUNK = 10
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const { error } = await supabase.from('matches').insert(rows.slice(i, i + CHUNK))
+    if (error) return { ok: false, error: `Wedstrijden aanmaken: ${error.message}` }
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/knockout')
+  return { ok: true }
+}
+
 // ─── Verwijder alle KO-wedstrijden en reset bijbehorende punten ───────────────
 export async function clearKoResults(): Promise<AdminResult> {
   const { supabase } = await assertAdmin()

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
@@ -686,10 +686,19 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
     })
   }
 
+  function handleCreateKoMatches() {
+    startTransition(async () => {
+      const result = await createKoMatches()
+      setToast({ msg: result.ok ? 'KO-wedstrijden aangemaakt!' : result.error, ok: result.ok })
+      setTimeout(() => setToast(null), 5000)
+      if (result.ok) router.refresh()
+    })
+  }
+
   function handleClearKo() {
     startTransition(async () => {
       const result = await clearKoResults()
-      setToast({ msg: result.ok ? 'KO-fase verwijderd. Draai npm run ko:create voor een nieuwe simulatie.' : result.error, ok: result.ok })
+      setToast({ msg: result.ok ? 'KO-fase verwijderd. Klik "Maak KO-wedstrijden aan" voor een nieuwe simulatie.' : result.error, ok: result.ok })
       setTimeout(() => setToast(null), 6000)
       if (result.ok) router.refresh()
     })
@@ -719,12 +728,19 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
             {isPending ? '…' : 'Simuleer volledige KO'}
           </button>
         </div>
-        <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center">
+        <div className="bg-wk-surface border border-white/10 rounded-xl p-6 text-center space-y-4">
           <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
-            Nog geen knockoutwedstrijden aangemaakt.
+            Geen KO-wedstrijden aangemaakt.
           </p>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] mt-2 opacity-60">
-            Maak ze aan via: <code className="text-wk-gold">npm run ko:create</code>
+          <button
+            onClick={handleCreateKoMatches}
+            disabled={isPending}
+            className="rounded bg-wk-green px-4 py-2 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {isPending ? '…' : 'Maak KO-wedstrijden aan'}
+          </button>
+          <p className="font-mono text-[9px] text-wk-muted/50 tracking-widest">
+            Vereist dat alle groepsuitslagen zijn ingevoerd
           </p>
         </div>
       </div>
