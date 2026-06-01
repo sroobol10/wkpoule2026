@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { createServiceClient } from '@/lib/supabase/service'
 
 export type SaveResult = { ok: true } | { ok: false; error: string }
 
@@ -46,7 +45,7 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
 
   const code = inviteCode.trim().toUpperCase()
 
-  // SECURITY DEFINER-functie in de DB: omzeilt RLS zonder service role key
+  // SECURITY DEFINER-functie omzeilt RLS voor de lookup (geen service key nodig)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: rows, error: fnErr } = await (supabase as any)
     .rpc('find_poule_by_invite_code', { invite_code_param: code })
@@ -57,10 +56,8 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
   const poule = (rows as PouleRow[] | null)?.[0] ?? null
   if (!poule) return { ok: false, error: 'Ongeldige uitnodigingscode.' }
 
-  // Service-client voor member-check en insert (bypast RLS volledig)
-  const db = createServiceClient()
-
-  const { data: existing } = await db
+  // Member-check: RLS blokkeert SELECT voor niet-leden → maybeSingle geeft null → correct
+  const { data: existing } = await supabase
     .from('poule_members')
     .select('id')
     .eq('poule_id', poule.id)
@@ -69,14 +66,15 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
 
   if (existing) return { ok: false, error: 'Je bent al lid van deze poule.' }
 
-  const { error: insertErr } = await db
+  // INSERT: RLS-policy staat dit toe (user_id = auth.uid())
+  const { error: insertErr } = await supabase
     .from('poule_members')
     .insert({ poule_id: poule.id, user_id: user.id })
 
   if (insertErr) return { ok: false, error: `Deelnemen mislukt: ${insertErr.message}` }
 
-  // Zorg dat nieuwe deelnemer direct in het klassement verschijnt
-  await db
+  // Zorg dat de nieuwe deelnemer direct in het klassement verschijnt
+  await supabase
     .from('poule_scores')
     .upsert(
       { poule_id: poule.id, user_id: user.id, total_pts: 0, exact_hits: 0, correct_results: 0 },
