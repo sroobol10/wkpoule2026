@@ -59,9 +59,14 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
   const [jokerSet, setJokerSet] = useState<Set<string>>(() => new Set(jokerMatchIds))
   const autoSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
-  // Bereken poulestanden o.b.v. huidige scores (alle posities 1–4, per groep)
+  // Bereken doorstroom-picks voor saveGroupAdvancement:
+  // - Positie 1 en 2 voor alle groepen (altijd door)
+  // - Positie 3 voor de beste 8 nummers 3 (cross-groep vergelijking)
+  // Exact dit formaat verwacht de bracket-client (pos12 === 24 && pos3 === 8)
   function computeGroupStandings(): { teamId: string; position: number }[] {
     const picks: { teamId: string; position: number }[] = []
+    const thirds: { group: string; teamId: string; points: number; gd: number; gf: number }[] = []
+
     for (const group of GROUPS) {
       const gm = matches.filter((m) => m.home_team?.group_name === group)
       const st: Record<string, { points: number; gd: number; gf: number }> = {}
@@ -82,10 +87,21 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
         else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
       }
       if (!hasScore) continue
+
       const sorted = Object.entries(st)
         .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
-      sorted.forEach(([teamId], i) => picks.push({ teamId, position: i + 1 }))
+
+      if (sorted[0]) picks.push({ teamId: sorted[0][0], position: 1 })
+      if (sorted[1]) picks.push({ teamId: sorted[1][0], position: 2 })
+      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], ...sorted[2][1] })
     }
+
+    // Sla positie 3 op voor de beste 8 nummers 3 (zodat bracket pos3Count === 8 krijgt)
+    const best8 = [...thirds]
+      .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf)
+      .slice(0, 8)
+    for (const t of best8) picks.push({ teamId: t.teamId, position: 3 })
+
     return picks
   }
 
