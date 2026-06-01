@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
@@ -677,6 +677,15 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
     })
   }
 
+  function handleRescoreBracket() {
+    startTransition(async () => {
+      const result = await rescoreBracket()
+      setToast({ msg: result.ok ? 'Bracket herscoord!' : result.error, ok: result.ok })
+      setTimeout(() => setToast(null), 4000)
+      if (result.ok) router.refresh()
+    })
+  }
+
   if (availableStages.length === 0) {
     return (
       <div className="space-y-4">
@@ -734,6 +743,13 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
           className="rounded bg-wk-green px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
           {isPending ? '…' : 'Simuleer volledige KO'}
+        </button>
+        <button
+          onClick={handleRescoreBracket}
+          disabled={isPending}
+          className="rounded bg-wk-gold/10 border border-wk-gold/30 px-3 py-1.5 text-[10px] font-mono font-semibold text-wk-gold tracking-[0.12em] uppercase hover:bg-wk-gold/20 disabled:opacity-50 transition-colors"
+        >
+          {isPending ? '…' : 'Herscore bracket'}
         </button>
       </div>
       {availableStages.map((stage) => {

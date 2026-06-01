@@ -62,19 +62,42 @@ export default async function KnockoutPage() {
     .select('slot, predicted_team_id, points_awarded')
     .eq('user_id', user.id)
 
-  // Werkelijke KO-uitslagen voor feedback in de bracket
-  const { data: koResults } = await supabase
+  // Teams die daadwerkelijk naar de volgende ronde zijn doorgestoten
+  // Sleutel = de ronde waaruit ze komen (r32 → wie staat in r16, etc.)
+  const { data: koMatches } = await supabase
     .from('matches')
-    .select('match_number, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .select('match_number, stage, home_team_id, away_team_id, home_score, away_score, result_entered')
     .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
-    .eq('result_entered', true)
 
-  // slot → werkelijke winnaar-ID
+  // slot → werkelijke winnaar (voor weergave in de bracket)
   const actualWinners: Record<number, string> = {}
-  for (const m of koResults ?? []) {
-    if (m.match_number && m.home_score !== null && m.away_score !== null && m.home_team_id && m.away_team_id) {
+  for (const m of koMatches ?? []) {
+    if (m.result_entered && m.match_number && m.home_score !== null && m.away_score !== null && m.home_team_id && m.away_team_id) {
       actualWinners[m.match_number] = m.home_score > m.away_score ? m.home_team_id : m.away_team_id
     }
+  }
+
+  // stage → teams die DEZE ronde halen (= advanced FROM previous stage)
+  const teamsInStage: Record<string, Set<string>> = {}
+  for (const m of koMatches ?? []) {
+    if (!m.home_team_id || !m.away_team_id) continue
+    if (!teamsInStage[m.stage]) teamsInStage[m.stage] = new Set()
+    teamsInStage[m.stage].add(m.home_team_id)
+    teamsInStage[m.stage].add(m.away_team_id)
+  }
+
+  // Wie is kampioen en wie werd 3e?
+  const finalWinner = actualWinners[104] ?? null   // slot 104 = Finale
+  const thirdWinner = actualWinners[103] ?? null   // slot 103 = Troostfinale
+
+  // advancedFromStage[r32] = teams die R32 overleefden = teams in R16
+  const advancedFromStage: Record<string, string[]> = {
+    r32:         [...(teamsInStage['r16']         ?? [])],
+    r16:         [...(teamsInStage['qf']          ?? [])],
+    qf:          [...(teamsInStage['sf']          ?? [])],
+    sf:          [...(teamsInStage['final']       ?? []), ...(teamsInStage['third_place'] ?? [])],
+    final:       finalWinner ? [finalWinner] : [],
+    third_place: thirdWinner ? [thirdWinner] : [],
   }
 
   return (
@@ -87,6 +110,7 @@ export default async function KnockoutPage() {
       bracketPicks={bracketPicks ?? []}
       groupStageStartsAt={firstGroupMatch?.kickoff_at ?? null}
       actualWinners={actualWinners}
+      advancedFromStage={advancedFromStage}
     />
   )
 }

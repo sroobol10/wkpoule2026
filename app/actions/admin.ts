@@ -17,31 +17,70 @@ async function assertAdmin() {
   return { supabase, userId: user.id }
 }
 
-// ─── Bracket-voorspellingen scoren voor één KO-wedstrijd ─────────────────────
-async function scoreBracketPicksForMatch(
+// ─── Bracket-scoring: ronde-gebaseerd (doorgestoten ploegen) ─────────────────
+// Scoort alle bracket-picks voor 'stage' op basis van welke ploegen
+// daadwerkelijk doorgaan naar de volgende ronde — ongeacht het specifieke slot.
+async function scoreBracketAdvancement(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  matchId: string,
-  stage: string,
-  winnerId: string
+  stage: string
 ): Promise<string[]> {
-  const pointsForRound = KO_POINTS[stage] ?? 0
-  if (pointsForRound === 0) return []
+  const pointsForStage = KO_POINTS[stage] ?? 0
+  if (pointsForStage === 0) return []
 
-  const { data: match } = await supabase
-    .from('matches').select('match_number').eq('id', matchId).single()
-  if (!match?.match_number) return []
+  // Verzamel de doorgestoten teams voor deze ronde
+  let advancedTeams: Set<string>
 
+  if (stage === 'final' || stage === 'third_place') {
+    // Final / troostfinale: de winnaar is de enige die "doorgaat" (= kampioen / 3e plek)
+    const { data: m } = await supabase
+      .from('matches')
+      .select('home_team_id, away_team_id, home_score, away_score')
+      .eq('stage', stage)
+      .eq('result_entered', true)
+      .maybeSingle()
+    if (!m || m.home_score == null || m.away_score == null) return []
+    const winner = m.home_score > m.away_score ? m.home_team_id! : m.away_team_id!
+    advancedTeams = new Set([winner])
+  } else {
+    // Andere rondes: kijk welke ploegen DEELNEMEN aan de VOLGENDE ronde
+    const nextStageMap: Record<string, string[]> = {
+      r32: ['r16'],
+      r16: ['qf'],
+      qf:  ['sf'],
+      sf:  ['final', 'third_place'],
+    }
+    const nextStages = nextStageMap[stage] ?? []
+    if (nextStages.length === 0) return []
+
+    const { data: nextMatches } = await supabase
+      .from('matches')
+      .select('home_team_id, away_team_id')
+      .in('stage', nextStages)
+      .not('home_team_id', 'is', null)
+      .not('away_team_id', 'is', null)
+
+    advancedTeams = new Set<string>()
+    for (const m of nextMatches ?? []) {
+      if (m.home_team_id) advancedTeams.add(m.home_team_id)
+      if (m.away_team_id) advancedTeams.add(m.away_team_id)
+    }
+  }
+
+  if (advancedTeams.size === 0) return []
+
+  // Haal alle bracket-picks op voor slots in deze ronde
+  const slotsInStage = BRACKET.filter((b) => b.stage === stage).map((b) => b.slot)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: picks } = await (supabase as any)
     .from('bracket_predictions')
     .select('id, user_id, predicted_team_id')
-    .eq('slot', match.match_number)
+    .in('slot', slotsInStage)
 
   if (!picks?.length) return []
 
   const affectedUsers: string[] = []
   for (const pick of picks as { id: string; user_id: string; predicted_team_id: string }[]) {
-    const pts = pick.predicted_team_id === winnerId ? pointsForRound : 0
+    const pts = advancedTeams.has(pick.predicted_team_id) ? pointsForStage : 0
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (supabase as any)
       .from('bracket_predictions')
@@ -305,8 +344,9 @@ export async function setKnockoutResult(
     }
   }
 
-  // Bracket-voorspellingen (pre-toernooi) ook scoren
-  const bracketUsers = await scoreBracketPicksForMatch(supabase, matchId, match.stage, winnerId)
+  // Bracket-voorspellingen: score alle picks voor deze ronde o.b.v. doorgestoten ploegen
+  // (ronde-gebaseerd: slot is niet relevant, puur welke teams de ronde halen)
+  const bracketUsers = await scoreBracketAdvancement(supabase, match.stage)
   bracketUsers.forEach((u) => affectedUsers.add(u))
 
   if (affectedUsers.size > 0) {
@@ -778,6 +818,29 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
   return { ok: true }
 }
 
+// ─── Herscore bracket-voorspellingen met het nieuwe doorstroom-model ──────────
+export async function rescoreBracket(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const stages = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
+  const affectedUserIds = new Set<string>()
+
+  for (const stage of stages) {
+    const users = await scoreBracketAdvancement(supabase, stage)
+    users.forEach((u) => affectedUserIds.add(u))
+  }
+
+  if (affectedUserIds.size > 0) {
+    await recalcPouleScores(supabase, [...affectedUserIds])
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/knockout')
+  revalidatePath('/poules')
+  return { ok: true }
+}
+
 // ─── Simuleer volledige KO-fase in één klik ───────────────────────────────────
 // Vult alle rondes achter elkaar: R32 → R16 → KF → HF → Finale
 // Vereist dat ko:create al gedraaid heeft (KO-wedstrijden bestaan in DB).
@@ -839,15 +902,17 @@ export async function simulateFullKo(): Promise<AdminResult> {
         }
       }
 
-      // Bracket-voorspellingen (pre-toernooi picks) scoren
-      const bracketUsers = await scoreBracketPicksForMatch(supabase, match.id, match.stage, winnerId)
-      bracketUsers.forEach((u) => affectedUserIds.add(u))
-
       totalFilled++
     }
 
-    // Teams toewijzen voor volgende ronde na het invullen van deze ronde
+    // Huidige ronde volledig → teams volgende ronde toewijzen
+    const currentStage = open[0].stage
     await assignNextKoRoundTeams()
+
+    // Bracket-scoring: nu de volgende ronde teams bekend zijn, score de picks voor de huidige ronde
+    // (ronde-gebaseerd: welke ploegen gaan door ongeacht slot)
+    const bracketUsers = await scoreBracketAdvancement(supabase, currentStage)
+    bracketUsers.forEach((u) => affectedUserIds.add(u))
   }
 
   if (totalFilled > 0) {

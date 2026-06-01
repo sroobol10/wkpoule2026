@@ -17,6 +17,7 @@ type Props = {
   bracketPicks: BracketPickEntry[]
   locked: boolean
   actualWinners?: Record<number, string>
+  advancedFromStage?: Record<string, string[]>
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -112,7 +113,7 @@ function getDownstreamSlots(changedSlot: number): number[] {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {} }: Props) {
+export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {} }: Props) {
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
   // Build advancement map: group -> pos -> teamId
@@ -258,6 +259,8 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
       <div className="space-y-3">
         {BRACKET.filter((m) => m.stage === activeStage).map((matchDef) => {
           const m = bracket[matchDef.slot]
+          // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
+          const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
           return (
             <BracketMatchCard
               key={matchDef.slot}
@@ -267,6 +270,8 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               isPending={isPending}
               onPick={(teamId) => pickWinner(m.slot, teamId)}
               actualWinnerId={actualWinners[matchDef.slot] ?? null}
+              advancedTeams={advancedSet}
+              stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
               pts={ptsPerSlot[matchDef.slot] ?? null}
             />
           )
@@ -285,6 +290,8 @@ function BracketMatchCard({
   isPending,
   onPick,
   actualWinnerId,
+  advancedTeams,
+  stageHasResults,
   pts,
 }: {
   match: ResolvedMatch
@@ -293,16 +300,18 @@ function BracketMatchCard({
   isPending: boolean
   onPick: (teamId: string) => void
   actualWinnerId: string | null
+  advancedTeams: Set<string>
+  stageHasResults: boolean
   pts: number | null
 }) {
   const homeTeam = match.home ? teamMap[match.home] : null
   const awayTeam = match.away ? teamMap[match.away] : null
   const bothKnown = !!homeTeam && !!awayTeam
 
-  const isPlayed = !!actualWinnerId
   const userPick = match.winner
-  const isCorrect = isPlayed && userPick && userPick === actualWinnerId
-  const isWrong   = isPlayed && userPick && userPick !== actualWinnerId
+  // Correct = jouw pick staat in de teams die deze ronde halen (ongeacht slot)
+  const isCorrect = stageHasResults && !!userPick && advancedTeams.has(userPick)
+  const isWrong   = stageHasResults && !!userPick && !advancedTeams.has(userPick)
 
   return (
     <div className={`bg-wk-surface border rounded-xl overflow-hidden ${
@@ -349,6 +358,8 @@ function BracketMatchCard({
               team={homeTeam}
               selected={match.winner === homeTeam.id}
               isActualWinner={actualWinnerId === homeTeam.id}
+              advanced={advancedTeams.has(homeTeam.id)}
+              stageHasResults={stageHasResults}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(homeTeam.id)}
@@ -360,6 +371,8 @@ function BracketMatchCard({
               team={awayTeam}
               selected={match.winner === awayTeam.id}
               isActualWinner={actualWinnerId === awayTeam.id}
+              advanced={advancedTeams.has(awayTeam.id)}
+              stageHasResults={stageHasResults}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(awayTeam.id)}
@@ -375,29 +388,34 @@ function TeamBtn({
   team,
   selected,
   isActualWinner,
+  advanced,
+  stageHasResults,
   disabled,
   isPending,
   onClick,
 }: {
   team: Team
   selected: boolean
-  isActualWinner: boolean
+  isActualWinner: boolean   // won this specific match (for display)
+  advanced: boolean         // reached the next round (for scoring)
+  stageHasResults: boolean  // is this stage concluded?
   disabled: boolean
   isPending: boolean
   onClick: () => void
 }) {
-  // Kleur: correct (groen) > fout (rood/muted) > pick (goud) > neutraal
+  const pickCorrect = selected && stageHasResults && advanced
+  const pickWrong   = selected && stageHasResults && !advanced
+
   let colorClass: string
-  if (isActualWinner && selected) {
+  if (pickCorrect) {
     colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'
-  } else if (isActualWinner && !selected) {
-    // Werkelijke winnaar, maar niet de pick van de gebruiker
-    colorClass = 'border-wk-gold/40 bg-wk-gold/5 text-wk-gold'
-  } else if (!isActualWinner && selected && disabled) {
-    // Verkeerde pick (match gespeeld, dit team verloor)
-    colorClass = 'border-wk-red/30 bg-wk-red/5 text-wk-muted line-through'
+  } else if (pickWrong) {
+    colorClass = 'border-wk-red/30 bg-wk-red/5 text-wk-muted'
   } else if (selected) {
     colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
+  } else if (stageHasResults && advanced && !selected) {
+    // Doorgegaan, maar niet de pick van de gebruiker
+    colorClass = 'border-wk-gold/30 bg-wk-bg2 text-wk-soft'
   } else {
     colorClass = 'border-white/10 bg-wk-bg2 text-wk-soft'
   }
@@ -417,20 +435,20 @@ function TeamBtn({
         height={20}
         className="w-8 h-5 object-cover rounded-sm"
       />
-      <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight">
+      <span className={`font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight ${pickWrong ? 'line-through opacity-60' : ''}`}>
         {team.name}
       </span>
-      {isActualWinner && selected && (
+      {pickCorrect && (
         <span className="font-mono text-[9px] tracking-widest uppercase text-wk-green">✓ Correct</span>
       )}
-      {isActualWinner && !selected && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">Uitslag</span>
+      {pickWrong && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-red">✗ Uitgeschakeld</span>
       )}
-      {!isActualWinner && selected && !disabled && (
+      {!stageHasResults && selected && (
         <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">★ Mijn keuze</span>
       )}
-      {!isActualWinner && selected && disabled && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-red">✗ Fout</span>
+      {stageHasResults && advanced && !selected && isActualWinner && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-muted">Uitslag</span>
       )}
     </button>
   )
