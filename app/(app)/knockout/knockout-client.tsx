@@ -100,12 +100,15 @@ export default function KnockoutClient({
 
       {/* Bracket tab */}
       {activeTab === 'bracket' && (
-        <BracketClient
-          teams={allTeams}
-          advancement={advancement}
-          bracketPicks={bracketPicks}
-          locked={bracketLocked}
-        />
+        <>
+          <KoScoringInfo />
+          <BracketClient
+            teams={allTeams}
+            advancement={advancement}
+            bracketPicks={bracketPicks}
+            locked={bracketLocked}
+          />
+        </>
       )}
 
       {/* Live tab */}
@@ -139,17 +142,20 @@ function LiveSection({
 
   if (matches.length === 0) {
     return (
-      <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center space-y-3">
-        <div className="w-12 h-12 rounded-full bg-wk-gold/10 border border-wk-gold/20 flex items-center justify-center mx-auto">
-          <svg className="w-6 h-6 text-wk-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+      <div className="space-y-4">
+        <KoScoringInfo />
+        <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-wk-gold/10 border border-wk-gold/20 flex items-center justify-center mx-auto">
+            <svg className="w-6 h-6 text-wk-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <p className="font-display text-base text-wk-text uppercase">Nog niet beschikbaar</p>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+            De knockoutfase start na de groepsfase · juli 2026
+          </p>
         </div>
-        <p className="font-display text-base text-wk-text uppercase">Nog niet beschikbaar</p>
-        <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-          De knockoutfase start na de groepsfase · juli 2026
-        </p>
       </div>
     )
   }

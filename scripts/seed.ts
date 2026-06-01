@@ -102,7 +102,7 @@ const TEAMS: { nameNl: string; nameEn: string; code: string; group: string }[] =
 // Tijdzones: MDT=UTC-6, CDT=UTC-5, EDT=UTC-4, PDT=UTC-7
 const MATCHES: { n: number; home: string; away: string; kickoffUtc: string; group: string }[] = [
   // ── Groep A ──
-  { n:  1, home: 'Mexico',         away: 'South Africa',   kickoffUtc: '2026-06-12T01:00:00Z', group: 'A' }, // Azteca   19:00 MDT jun 11
+  { n:  1, home: 'Mexico',         away: 'South Africa',   kickoffUtc: '2026-06-11T19:00:00Z', group: 'A' }, // Azteca   21:00 CEST jun 11
   { n:  2, home: 'South Korea',    away: 'Czech Republic', kickoffUtc: '2026-06-13T00:00:00Z', group: 'A' }, // Akron    18:00 MDT jun 12
   { n: 25, home: 'Czech Republic', away: 'South Africa',   kickoffUtc: '2026-06-18T20:00:00Z', group: 'A' }, // Atlanta  16:00 EDT
   { n: 28, home: 'Mexico',         away: 'South Korea',    kickoffUtc: '2026-06-20T01:00:00Z', group: 'A' }, // Akron    19:00 MDT jun 19

@@ -4,7 +4,6 @@ import { useState, useRef } from 'react'
 import Image from 'next/image'
 import { savePredictions, saveGroupAdvancement } from '@/app/actions/predictions'
 import { toggleJoker } from '@/app/actions/jokers'
-import GroupAdvancementModal from '@/components/predictions/group-advancement-modal'
 import { getMatchPrediction } from '@/app/actions/ai-prediction'
 import { formatInAmsterdam } from '@/lib/format'
 import type { AiPrediction } from '@/app/actions/ai-prediction'
@@ -21,12 +20,11 @@ type Match = {
   away_team: Team | null
 }
 type Prediction = { predicted_home: number; predicted_away: number; points_awarded: number | null }
-type AdvancementEntry = { team_id: string; predicted_position: number }
 
 type Props = Readonly<{
   matches: Match[]
   predMap: Record<string, Prediction>
-  advancement: AdvancementEntry[]
+  advancement: { team_id: string; predicted_position: number }[]
   teams: Team[]
   jokerMatchIds: string[]
 }>
@@ -34,12 +32,12 @@ type Props = Readonly<{
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
 
 function ptsBadgeClass(pts: number) {
-  if (pts >= 5) return 'bg-wk-green/10 border-wk-green/30 text-wk-green'  // exact (5pt) of joker exact (10pt)
+  if (pts >= 5) return 'bg-wk-green/10 border-wk-green/30 text-wk-green'
   if (pts > 0)  return 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
   return 'bg-white/5 border-white/10 text-wk-muted'
 }
 
-export default function PredictionsClient({ matches, predMap, advancement, teams, jokerMatchIds }: Props) {
+export default function PredictionsClient({ matches, predMap, jokerMatchIds }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [scores, setScores] = useState<Record<string, { home: string; away: string }>>(() => {
     const init: Record<string, { home: string; away: string }> = {}
@@ -51,30 +49,96 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
     }
     return init
   })
-  const [showModal, setShowModal] = useState(false)
   const [showScoring, setShowScoring] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [jokerSet, setJokerSet] = useState<Set<string>>(() => new Set(jokerMatchIds))
   const autoSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
+  // Bereken poulestanden o.b.v. huidige scores (alle posities 1–4, per groep)
+  function computeGroupStandings(): { teamId: string; position: number }[] {
+    const picks: { teamId: string; position: number }[] = []
+    for (const group of GROUPS) {
+      const gm = matches.filter((m) => m.home_team?.group_name === group)
+      const st: Record<string, { points: number; gd: number; gf: number }> = {}
+      for (const m of gm) {
+        if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 }
+        if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 }
+      }
+      let hasScore = false
+      for (const m of gm) {
+        const s = scores[m.id]
+        if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
+        hasScore = true
+        const h = Number(s.home), a = Number(s.away)
+        st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a
+        st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h
+        if (h > a) st[m.home_team.id].points += 3
+        else if (h < a) st[m.away_team.id].points += 3
+        else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
+      }
+      if (!hasScore) continue
+      const sorted = Object.entries(st)
+        .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+      sorted.forEach(([teamId], i) => picks.push({ teamId, position: i + 1 }))
+    }
+    return picks
+  }
+
+  // Bereken beste 8 nummers 3 voor KO-weergave (posities 1–3 per groep)
+  function computeAdvancementPicks(): Record<string, [string | null, string | null, string | null]> {
+    const result: Record<string, [string | null, string | null, string | null]> = {}
+    const thirds: Array<{ group: string; teamId: string; points: number; gd: number; gf: number }> = []
+
+    for (const group of GROUPS) {
+      const gm = matches.filter((m) => m.home_team?.group_name === group)
+      const st: Record<string, { points: number; gd: number; gf: number }> = {}
+      for (const m of gm) {
+        if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 }
+        if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 }
+      }
+      for (const m of gm) {
+        const s = scores[m.id]
+        if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
+        const h = Number(s.home), aw = Number(s.away)
+        st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - aw
+        st[m.away_team.id].gf += aw; st[m.away_team.id].gd += aw - h
+        if (h > aw) st[m.home_team.id].points += 3
+        else if (h < aw) st[m.away_team.id].points += 3
+        else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
+      }
+      const sorted = Object.entries(st)
+        .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+      result[group] = [sorted[0]?.[0] ?? null, sorted[1]?.[0] ?? null, sorted[2]?.[0] ?? null]
+      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], ...sorted[2][1] })
+    }
+
+    const best8 = new Set(
+      [...thirds]
+        .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf)
+        .slice(0, 8)
+        .map((t) => t.group)
+    )
+    for (const group of GROUPS) {
+      if (!best8.has(group)) result[group] = [result[group][0], result[group][1], null]
+    }
+    return result
+  }
+
   async function handleJokerToggle(matchId: string) {
     const result = await toggleJoker(matchId)
     if (!result.ok) return
 
-    const targetDate = (() => {
-      const m = matches.find((x) => x.id === matchId)
-      return m ? formatInAmsterdam(m.kickoff_at, 'yyyy-MM-dd') : null
-    })()
+    const targetGroup = matches.find((x) => x.id === matchId)?.home_team?.group_name ?? null
 
     setJokerSet((prev) => {
       const next = new Set(prev)
       if (next.has(matchId)) {
         next.delete(matchId)
       } else {
-        // Verwijder ook eventuele joker op een andere wedstrijd dezelfde dag
-        if (targetDate) {
+        // Verwijder bestaande joker voor een andere wedstrijd in dezelfde groep
+        if (targetGroup) {
           for (const m of matches) {
-            if (m.id !== matchId && formatInAmsterdam(m.kickoff_at, 'yyyy-MM-dd') === targetDate) {
+            if (m.id !== matchId && m.home_team?.group_name === targetGroup) {
               next.delete(m.id)
             }
           }
@@ -107,56 +171,20 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
       autoSaveTimers.current[matchId] = setTimeout(async () => {
         setSaveStatus('saving')
         const result = await savePredictions([{ matchId, home: Number(newScore.home), away: Number(newScore.away) }])
+        if (result.ok) {
+          // Auto-save groepsstand als doorstroom-voorspelling
+          const standingPicks = computeGroupStandings()
+          if (standingPicks.length > 0) {
+            saveGroupAdvancement(standingPicks).catch(() => {})
+          }
+        }
         setSaveStatus(result.ok ? 'saved' : 'error')
         setTimeout(() => setSaveStatus('idle'), 2000)
       }, 1500)
     }
   }
 
-  function computeAutoFillPicks(): Record<string, [string | null, string | null, string | null]> {
-    const result: Record<string, [string | null, string | null, string | null]> = {}
-    const thirds: Array<{ group: string; teamId: string; points: number; gd: number; gf: number }> = []
-
-    for (const group of GROUPS) {
-      const gm = matches.filter((m) => m.home_team?.group_name === group)
-      const st: Record<string, { points: number; gd: number; gf: number }> = {}
-
-      for (const m of gm) {
-        if (m.home_team) st[m.home_team.id] = st[m.home_team.id] ?? { points: 0, gd: 0, gf: 0 }
-        if (m.away_team) st[m.away_team.id] = st[m.away_team.id] ?? { points: 0, gd: 0, gf: 0 }
-      }
-
-      for (const m of gm) {
-        const s = scores[m.id]
-        if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
-        const h = Number(s.home), aw = Number(s.away)
-        st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - aw
-        st[m.away_team.id].gf += aw; st[m.away_team.id].gd += aw - h
-        if (h > aw) st[m.home_team.id].points += 3
-        else if (h < aw) st[m.away_team.id].points += 3
-        else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1 }
-      }
-
-      const sorted = Object.entries(st)
-        .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
-      result[group] = [sorted[0]?.[0] ?? null, sorted[1]?.[0] ?? null, sorted[2]?.[0] ?? null]
-      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], ...sorted[2][1] })
-    }
-
-    const best8 = new Set(
-      [...thirds]
-        .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf)
-        .slice(0, 8)
-        .map((t) => t.group)
-    )
-    for (const group of GROUPS) {
-      if (!best8.has(group)) result[group] = [result[group][0], result[group][1], null]
-    }
-
-    return result
-  }
-
-  const advancementCount = advancement.length
+  const advancementPicks = computeAdvancementPicks()
 
   return (
     <div className="space-y-6">
@@ -169,18 +197,6 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
             {filledCount} / {matches.length} wedstrijden ingevuld
           </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 rounded border border-white/20 bg-wk-surface px-4 py-2 font-mono font-medium text-wk-soft hover:border-wk-gold/50 hover:text-wk-gold transition-colors tracking-[0.12em] uppercase text-xs"
-        >
-          <span>⚽</span>
-          Wie gaan door? ({advancementCount}/32)
-          {advancementCount < 32 && (
-            <span className="ml-1 inline-flex items-center rounded-full bg-wk-gold/10 border border-wk-gold/30 px-2 py-0.5 text-[10px] font-mono text-wk-gold tracking-widest uppercase">
-              Onvolledig
-            </span>
-          )}
-        </button>
       </div>
 
       {/* Progress bar */}
@@ -219,7 +235,7 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
               </div>
             ))}
             <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-              Exacte uitslag = 5 pt · joker verdubbelt de punten van die wedstrijd
+              De inzet van een joker zorgt voor een verdubbeling van het aantal punten behaald in deze wedstrijd.
             </p>
           </div>
         )}
@@ -230,6 +246,7 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
         {GROUPS.map((g) => {
           const gMatches = matches.filter((m) => m.home_team?.group_name === g)
           const filled = gMatches.filter((m) => scores[m.id]?.home !== undefined && scores[m.id]?.home !== '').length
+          const groupJoker = gMatches.some((m) => jokerSet.has(m.id))
           return (
             <button
               key={g}
@@ -243,6 +260,9 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
               {g}
               {filled === gMatches.length && gMatches.length > 0 && (
                 <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-wk-green text-white text-[7px] font-mono">✓</span>
+              )}
+              {groupJoker && !(filled === gMatches.length && gMatches.length > 0) && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-wk-gold text-black text-[7px] font-mono">★</span>
               )}
             </button>
           )
@@ -301,29 +321,13 @@ export default function PredictionsClient({ matches, predMap, advancement, teams
         group={activeGroup}
         groupMatches={groupMatches}
         scores={scores}
-        teams={teams}
-        advancementPicks={computeAutoFillPicks()[activeGroup] ?? [null, null, null]}
+        advancementPicks={advancementPicks[activeGroup] ?? [null, null, null]}
       />
-
-      {/* Advancement modal */}
-      {showModal && (
-        <GroupAdvancementModal
-          teams={teams}
-          initialAdvancement={advancement}
-          autoFillPicks={computeAutoFillPicks()}
-          onClose={() => setShowModal(false)}
-          onSave={async (selections) => {
-            const result = await saveGroupAdvancement(selections)
-            if (result.ok) setShowModal(false)
-            return result
-          }}
-        />
-      )}
     </div>
   )
 }
 
-// ─── Match row with AI prediction ─────────────────────────────────────────────
+// ─── Match row ─────────────────────────────────────────────────────────────────
 
 type MatchRowProps = {
   match: Match
@@ -339,8 +343,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
   const [showAi, setShowAi] = useState(false)
   const [aiState, setAiState] = useState<AiPrediction | 'loading' | 'error' | null>(null)
 
-  const isExcludedDay = formatInAmsterdam(match.kickoff_at, 'yyyy-MM-dd') === '2026-06-11'
-  const jokerable = !locked && !isExcludedDay
+  const jokerable = !locked
 
   async function handleAiToggle() {
     if (showAi) { setShowAi(false); return }
@@ -353,7 +356,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
 
   return (
     <div>
-      {/* Date row */}
+      {/* Date + joker row */}
       <div className="px-5 pt-4 pb-0">
         <div className="flex items-center justify-center gap-2 mb-3">
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
@@ -364,25 +367,30 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
               🔒 Gesloten
             </span>
           )}
-          {jokerable && (
-            <button
-              onClick={() => onJokerToggle(match.id)}
-              title={hasJoker ? 'Joker uitzetten' : 'Joker inzetten (verdubbelt punten)'}
-              className={`font-mono text-[11px] transition-all rounded-full px-2 py-0.5 border ${
-                hasJoker
-                  ? 'text-wk-gold border-wk-gold/50 bg-wk-gold/10'
-                  : 'text-wk-muted border-white/10 hover:text-wk-gold hover:border-wk-gold/30'
-              }`}
-            >
-              ★
-            </button>
-          )}
           {hasJoker && locked && (
             <span className="font-mono text-[10px] text-wk-gold tracking-widest">★ Joker</span>
           )}
         </div>
 
-        {/* Match row: teams en score in één flex-rij zodat items-center werkt */}
+        {/* Joker toggle — prominenter, eigen rij */}
+        {jokerable && (
+          <div className="flex justify-center mb-3">
+            <button
+              onClick={() => onJokerToggle(match.id)}
+              title={hasJoker ? 'Joker uitzetten' : 'Joker inzetten (verdubbelt punten)'}
+              className={`flex items-center gap-1.5 font-mono text-xs font-bold transition-all rounded-full px-3 py-1 border ${
+                hasJoker
+                  ? 'text-wk-gold border-wk-gold/60 bg-wk-gold/15 shadow-[0_0_8px_rgba(var(--color-wk-gold-raw),0.2)]'
+                  : 'text-wk-muted border-white/15 bg-wk-bg2 hover:text-wk-gold hover:border-wk-gold/40 hover:bg-wk-gold/5'
+              }`}
+            >
+              <span className="text-sm">★</span>
+              <span className="tracking-[0.12em] uppercase">Joker</span>
+            </button>
+          </div>
+        )}
+
+        {/* Match row */}
         <div className="flex flex-col items-center gap-1.5">
           <div className="flex items-center gap-2 w-full">
             {/* Home team */}
@@ -401,7 +409,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
               )}
             </div>
 
-            {/* Midden: einduitslag of invoervelden */}
+            {/* Score */}
             <div className="shrink-0">
               {match.result_entered ? (
                 <div className="flex items-center gap-1">
@@ -453,7 +461,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
             </div>
           </div>
 
-          {/* Punten badge + eigen voorspelling (onder de rij) */}
+          {/* Punten badge */}
           {(pts !== null && pts !== undefined) || (match.result_entered && score) ? (
             <div className="flex items-center gap-2">
               {pts !== null && pts !== undefined && (
@@ -471,7 +479,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
         </div>
       </div>
 
-      {/* AI toggle button */}
+      {/* AI toggle */}
       <div className="px-5 pt-4 pb-4">
         <button
           onClick={handleAiToggle}
@@ -541,7 +549,6 @@ function AiPredictionPanel({
 
   return (
     <div className="mt-3 rounded-lg bg-wk-bg2 border border-wk-blue/20 overflow-hidden md:max-w-lg md:mx-auto">
-      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 bg-wk-blue/5">
         <span className="text-[11px]">⚡</span>
         <span className="font-mono text-[10px] text-wk-blue tracking-[0.14em] uppercase font-bold">AI Voorspelling</span>
@@ -549,7 +556,6 @@ function AiPredictionPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4">
-        {/* Predicted score */}
         <div className="flex flex-col items-center gap-1">
           <div className="flex items-center gap-3">
             <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase text-right">{homeName}</span>
@@ -563,7 +569,6 @@ function AiPredictionPanel({
           <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.18em] uppercase">Voorspeld resultaat</p>
         </div>
 
-        {/* Win probability bar */}
         <div>
           <div className="flex h-2 w-full rounded-full overflow-hidden gap-px">
             <div className="bg-wk-blue rounded-l-full transition-all" style={{ width: `${pThuis}%` }} />
@@ -577,10 +582,8 @@ function AiPredictionPanel({
           </div>
         </div>
 
-        {/* Analysis */}
         <p className="text-xs text-wk-soft leading-relaxed">{state.analyse}</p>
 
-        {/* Key players */}
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded bg-wk-surface border border-white/5 px-3 py-2">
             <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mb-1">Sleutelspeler</p>
@@ -602,21 +605,24 @@ function GroupStandingsInline({
   group,
   groupMatches,
   scores,
-  teams,
   advancementPicks,
 }: {
   group: string
   groupMatches: Match[]
   scores: Record<string, { home: string; away: string }>
-  teams: Team[]
   advancementPicks: [string | null, string | null, string | null]
 }) {
-  const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
-
   const st: Record<string, { points: number; gd: number; gf: number }> = {}
   for (const m of groupMatches) {
     if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 }
     if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 }
+  }
+
+  // Build a quick team lookup from the matches themselves
+  const teamMap: Record<string, Team> = {}
+  for (const m of groupMatches) {
+    if (m.home_team) teamMap[m.home_team.id] = m.home_team
+    if (m.away_team) teamMap[m.away_team.id] = m.away_team
   }
 
   let hasAnyScore = false
@@ -635,7 +641,8 @@ function GroupStandingsInline({
   const sorted = Object.entries(st)
     .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
 
-  const advancingIds = new Set(advancementPicks.filter(Boolean) as string[])
+  // Nummer 3 die door is, op basis van beste-8-berekening
+  const advancingThird = advancementPicks[2]
 
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
@@ -653,8 +660,31 @@ function GroupStandingsInline({
         {sorted.map(([teamId, stat], i) => {
           const team = teamMap[teamId]
           if (!team) return null
-          const advances = advancingIds.has(teamId)
           const pos = i + 1
+
+          // Bepaal doorstroom-status
+          let statusLabel: string
+          let statusClass: string
+          if (pos <= 2) {
+            statusLabel = '→ Door'
+            statusClass = 'text-wk-green'
+          } else if (pos === 3) {
+            if (advancingThird === teamId) {
+              statusLabel = '→ Door'
+              statusClass = 'text-wk-green'
+            } else if (hasAnyScore) {
+              // Op basis van huidige berekening niet in beste 8
+              statusLabel = 'Eventueel'
+              statusClass = 'text-wk-red/70'
+            } else {
+              statusLabel = 'Eventueel'
+              statusClass = 'text-wk-gold'
+            }
+          } else {
+            statusLabel = '✗ Uit'
+            statusClass = 'text-wk-muted'
+          }
+
           return (
             <div key={teamId} className="flex items-center gap-3 px-5 py-2.5">
               <span className={`font-mono text-xs w-4 shrink-0 text-center ${pos <= 2 ? 'text-wk-green font-bold' : 'text-wk-muted'}`}>
@@ -671,10 +701,8 @@ function GroupStandingsInline({
                   <span className="font-mono text-[10px] text-wk-muted w-8 text-right">
                     {stat.gd > 0 ? `+${stat.gd}` : stat.gd}
                   </span>
-                  <span className={`font-mono text-[9px] tracking-widest uppercase shrink-0 w-20 text-right ${
-                    advances ? 'text-wk-green' : pos === 3 ? 'text-wk-gold' : 'text-wk-muted'
-                  }`}>
-                    {advances ? '→ Door' : pos === 3 ? 'Eventueel' : '✗ Uit'}
+                  <span className={`font-mono text-[9px] tracking-widest uppercase shrink-0 w-20 text-right ${statusClass}`}>
+                    {statusLabel}
                   </span>
                 </>
               )}

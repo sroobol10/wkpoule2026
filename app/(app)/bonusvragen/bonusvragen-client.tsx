@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { format } from 'date-fns'
 import { nl } from 'date-fns/locale'
 import { saveBonusAnswer } from '@/app/actions/bonus'
+import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 
 type Question = {
   id: string
@@ -119,7 +120,11 @@ function QuestionCard({
   const [search, setSearch] = useState('')
 
   const deadline = question.unlock_date ? new Date(question.unlock_date) : null
-  const closed   = deadline ? deadline <= new Date() : false
+  const tournamentStarted = new Date() >= GROUP_STAGE_DEADLINE
+  // Pre-tournament vragen gaan op slot zodra het toernooi begint
+  const closed = question.type === 'pre_tournament'
+    ? tournamentStarted
+    : (deadline ? deadline <= new Date() : false)
   const pts      = existingAnswer?.points_awarded
   const isTeam   = teams.length > 0
 

@@ -27,7 +27,7 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
 
   const { data: scores } = await supabase
     .from('poule_scores')
-    .select('user_id, total_pts, exact_hits, correct_results')
+    .select('user_id, total_pts, exact_hits, correct_results, rank_change')
     .eq('poule_id', id)
     .order('total_pts', { ascending: false })
 
@@ -43,7 +43,7 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
     if (p) profileMap[p.id] = p
   }
 
-  type ScoreRow = { user_id: string; total_pts: number; exact_hits: number; correct_results: number }
+  type ScoreRow = { user_id: string; total_pts: number; exact_hits: number; correct_results: number; rank_change: number | null }
   const scoreMap: Record<string, ScoreRow> = {}
   for (const s of scores ?? []) scoreMap[s.user_id] = s
 
@@ -134,6 +134,9 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                     <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">{score.correct_results}× resultaat</span>
                   </div>
 
+                  {/* Rang-wijziging pijltje */}
+                  <RankBadge change={score.rank_change} />
+
                   {/* Points */}
                   <div className="shrink-0 text-right">
                     <span className="font-display text-lg text-wk-gold">{score.total_pts}</span>
@@ -156,5 +159,25 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Rangswijziging-pijltje ───────────────────────────────────────────────────
+
+function RankBadge({ change }: { change: number | null }) {
+  if (change === null || change === 0) {
+    return <span className="font-mono text-[10px] text-wk-muted w-8 text-center shrink-0">–</span>
+  }
+  if (change > 0) {
+    return (
+      <span className="font-mono text-[10px] font-bold text-wk-green w-8 text-center shrink-0 tracking-tighter">
+        ↑{change}
+      </span>
+    )
+  }
+  return (
+    <span className="font-mono text-[10px] font-bold text-wk-red w-8 text-center shrink-0 tracking-tighter">
+      ↓{Math.abs(change)}
+    </span>
   )
 }

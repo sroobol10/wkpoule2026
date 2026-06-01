@@ -47,6 +47,23 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
 
   if (!memberships || memberships.length === 0) return
 
+  const affectedPouleIds = [...new Set(memberships.map((m) => m.poule_id))]
+
+  // Snapshot huidige rangschikking per poule (vóór de update)
+  const oldRankMap: Record<string, Record<string, number>> = {}
+  for (const pouleId of affectedPouleIds) {
+    const { data: cur } = await supabase
+      .from('poule_scores')
+      .select('user_id, total_pts')
+      .eq('poule_id', pouleId)
+      .order('total_pts', { ascending: false })
+    if (cur) {
+      oldRankMap[pouleId] = {}
+      cur.forEach((s, i) => { oldRankMap[pouleId][s.user_id] = i + 1 })
+    }
+  }
+
+  // Herbereken punten per gebruiker
   for (const userId of userIds) {
     const { data: preds } = await supabase
       .from('predictions')
@@ -89,6 +106,29 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
           { user_id: userId, poule_id: pouleId, total_pts: totalPts, exact_hits: exactHits, correct_results: correctResults },
           { onConflict: 'user_id,poule_id' }
         )
+    }
+  }
+
+  // Bereken nieuwe rangschikking en sla rank_change op
+  for (const pouleId of affectedPouleIds) {
+    const { data: updated } = await supabase
+      .from('poule_scores')
+      .select('user_id, total_pts')
+      .eq('poule_id', pouleId)
+      .order('total_pts', { ascending: false })
+    if (!updated) continue
+
+    const oldRanks = oldRankMap[pouleId] ?? {}
+    for (let i = 0; i < updated.length; i++) {
+      const uid = updated[i].user_id
+      const newRank = i + 1
+      const oldRank = oldRanks[uid] ?? null
+      const rankChange = oldRank != null ? oldRank - newRank : null
+      await supabase
+        .from('poule_scores')
+        .update({ rank_change: rankChange })
+        .eq('poule_id', pouleId)
+        .eq('user_id', uid)
     }
   }
 }

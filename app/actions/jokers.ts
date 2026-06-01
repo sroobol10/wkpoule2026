@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { formatInAmsterdam } from '@/lib/format'
 
 type JokerResult = { ok: true } | { ok: false; error: string }
 
@@ -13,7 +12,7 @@ export async function toggleJoker(matchId: string): Promise<JokerResult> {
 
   const { data: match } = await supabase
     .from('matches')
-    .select('kickoff_at')
+    .select('kickoff_at, home_team:teams!matches_home_team_id_fkey(group_name)')
     .eq('id', matchId)
     .single()
 
@@ -22,17 +21,14 @@ export async function toggleJoker(matchId: string): Promise<JokerResult> {
     return { ok: false, error: 'Wedstrijd is al begonnen.' }
   }
 
-  const jokerDate = formatInAmsterdam(match.kickoff_at, 'yyyy-MM-dd')
-
-  if (jokerDate === '2026-06-11') {
-    return { ok: false, error: 'Op 11 juni kan geen joker worden ingezet.' }
-  }
+  const groupName = (match.home_team as { group_name: string } | null)?.group_name
+  if (!groupName) return { ok: false, error: 'Groep niet gevonden.' }
 
   const { data: existing } = await supabase
     .from('jokers')
     .select('id, match_id')
     .eq('user_id', user.id)
-    .eq('joker_date', jokerDate)
+    .eq('group_name', groupName)
     .maybeSingle()
 
   if (existing?.match_id === matchId) {
@@ -40,14 +36,17 @@ export async function toggleJoker(matchId: string): Promise<JokerResult> {
     const { error } = await supabase.from('jokers').delete().eq('id', existing.id)
     if (error) return { ok: false, error: 'Joker verwijderen mislukt.' }
   } else if (existing) {
-    // Andere wedstrijd die dag: joker verplaatsen
-    const { error } = await supabase.from('jokers').update({ match_id: matchId }).eq('id', existing.id)
-    if (error) return { ok: false, error: 'Joker verplaatsen mislukt.' }
-  } else {
-    // Nieuwe joker
+    // Andere wedstrijd in dezelfde groep: joker verplaatsen
     const { error } = await supabase
       .from('jokers')
-      .insert({ user_id: user.id, match_id: matchId, joker_date: jokerDate })
+      .update({ match_id: matchId })
+      .eq('id', existing.id)
+    if (error) return { ok: false, error: 'Joker verplaatsen mislukt.' }
+  } else {
+    // Nieuwe joker voor deze groep
+    const { error } = await supabase
+      .from('jokers')
+      .insert({ user_id: user.id, match_id: matchId, group_name: groupName })
     if (error) return { ok: false, error: 'Joker plaatsen mislukt.' }
   }
 

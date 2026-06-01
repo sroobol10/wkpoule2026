@@ -131,22 +131,22 @@ export type Database = {
       jokers: {
         Row: {
           created_at: string
+          group_name: string
           id: string
-          joker_date: string
           match_id: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          group_name: string
           id?: string
-          joker_date: string
           match_id: string
           user_id: string
         }
         Update: {
           created_at?: string
+          group_name?: string
           id?: string
-          joker_date?: string
           match_id?: string
           user_id?: string
         }
@@ -314,6 +314,7 @@ export type Database = {
           correct_results: number
           exact_hits: number
           poule_id: string
+          rank_change: number | null
           total_pts: number
           updated_at: string
           user_id: string
@@ -322,6 +323,7 @@ export type Database = {
           correct_results?: number
           exact_hits?: number
           poule_id: string
+          rank_change?: number | null
           total_pts?: number
           updated_at?: string
           user_id: string
@@ -330,6 +332,7 @@ export type Database = {
           correct_results?: number
           exact_hits?: number
           poule_id?: string
+          rank_change?: number | null
           total_pts?: number
           updated_at?: string
           user_id?: string

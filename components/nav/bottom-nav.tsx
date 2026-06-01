@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { IconClipboard, IconTrophy, IconQuestion, IconUsers, IconUser, IconShield } from '@/components/icons'
+import { IconClipboard, IconTrophy, IconQuestion, IconUsers, IconUser, IconShield, IconChart } from '@/components/icons'
 
 type NavItem = {
   href: string
@@ -12,12 +12,13 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/voorspellingen', label: 'Groepsfase', icon: IconClipboard },
-  { href: '/knockout',       label: 'Knockout',    icon: IconTrophy },
-  { href: '/bonusvragen',    label: 'Bonus',        icon: IconQuestion },
-  { href: '/poules',         label: 'Poules',       icon: IconUsers },
-  { href: '/profiel',        label: 'Profiel',      icon: IconUser },
-  { href: '/admin',          label: 'Admin',        icon: IconShield, adminOnly: true },
+  { href: '/voorspellingen', label: 'Groep',    icon: IconClipboard },
+  { href: '/knockout',       label: 'Knockout', icon: IconTrophy },
+  { href: '/bonusvragen',    label: 'Bonus',    icon: IconQuestion },
+  { href: '/poules',         label: 'Poules',   icon: IconUsers },
+  { href: '/statistieken',   label: 'Stats',    icon: IconChart },
+  { href: '/profiel',        label: 'Profiel',  icon: IconUser },
+  { href: '/admin',          label: 'Admin',    icon: IconShield, adminOnly: true },
 ]
 
 type Props = Readonly<{ isAdmin: boolean }>
