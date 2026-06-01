@@ -90,6 +90,55 @@ export default async function VoorspellingenPage() {
     })
   )
 
+  // ── Per-groep mini-competitie ─────────────────────────────────────────────
+  // Haal alle groepswedstrijden op met groepsnaam
+  const { data: allGroupMatches } = await supabase
+    .from('matches')
+    .select('id, home_team:teams!matches_home_team_id_fkey(group_name)')
+    .eq('stage', 'group')
+
+  const matchToGroup: Record<string, string> = {}
+  for (const m of allGroupMatches ?? []) {
+    const g = (m.home_team as { group_name: string } | null)?.group_name
+    if (g) matchToGroup[m.id] = g
+  }
+
+  // Haal alle voorspellingen op voor alle deelnemers in de poules
+  const allUserIds = [...new Set(pouleStandings.flatMap((p) => p.entries.map((e) => e.userId)))]
+  const groupMatchIds = Object.keys(matchToGroup)
+
+  const { data: allPreds } = allUserIds.length > 0 && groupMatchIds.length > 0
+    ? await supabase
+        .from('predictions')
+        .select('user_id, match_id, points_awarded')
+        .in('user_id', allUserIds)
+        .in('match_id', groupMatchIds)
+        .not('points_awarded', 'is', null)
+    : { data: [] }
+
+  // Aggregeer: userId → group → pts
+  const userGroupPts: Record<string, Record<string, number>> = {}
+  for (const p of allPreds ?? []) {
+    const group = matchToGroup[p.match_id]
+    if (!group) continue
+    if (!userGroupPts[p.user_id]) userGroupPts[p.user_id] = {}
+    userGroupPts[p.user_id][group] = (userGroupPts[p.user_id][group] ?? 0) + (p.points_awarded ?? 0)
+  }
+
+  // Bouw per-poule, per-groep ranglijst
+  type GroupEntry = { userId: string; username: string; pts: number }
+  const GROUPS_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L']
+
+  const pouleGroupStandings = pouleStandings.map((poule) => {
+    const byGroup: Record<string, GroupEntry[]> = {}
+    for (const group of GROUPS_LIST) {
+      byGroup[group] = poule.entries
+        .map((e) => ({ userId: e.userId, username: e.username, pts: userGroupPts[e.userId]?.[group] ?? 0 }))
+        .sort((a, b) => b.pts - a.pts)
+    }
+    return { pouleId: poule.pouleId, byGroup }
+  })
+
   return (
     <PredictionsClient
       matches={matches ?? []}
@@ -98,6 +147,7 @@ export default async function VoorspellingenPage() {
       teams={teams ?? []}
       jokerMatchIds={jokerMatchIds}
       pouleStandings={pouleStandings}
+      pouleGroupStandings={pouleGroupStandings}
       currentUserId={user.id}
     />
   )
