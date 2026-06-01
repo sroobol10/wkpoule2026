@@ -19,6 +19,7 @@ type Match = {
 type BonusQuestion = {
   id: string
   question: string
+  description: string | null
   type: string
   correct_answer: string | null
   correct_answer_set: boolean
@@ -312,7 +313,7 @@ function MatchResultRow({
 
         {/* Teams + score */}
         <div className="flex-1 min-w-0">
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.10em] mb-1">
+          <p className="font-mono text-[10px] text-wk-muted tracking-widest mb-1">
             {formatInAmsterdam(match.kickoff_at, 'd MMM · HH:mm')}
           </p>
           <div className="flex items-center gap-2">
@@ -436,7 +437,10 @@ function BonusRow({ question }: { question: BonusQuestion }) {
 
   return (
     <div className="px-5 py-4">
-      <p className="text-sm text-wk-text leading-snug mb-3">{question.question}</p>
+      <p className="text-sm font-semibold text-wk-text leading-snug">{question.question}</p>
+      {question.description && (
+        <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 mb-3 leading-relaxed">{question.description}</p>
+      )}
       <div className="flex items-center gap-2">
         {editing ? (
           <>

@@ -11,7 +11,7 @@ export default async function BonusvragenPage() {
 
   const { data: questions } = await supabase
     .from('bonus_questions')
-    .select('id, question, type, unlock_date, correct_answer_set')
+    .select('id, question, description, type, unlock_date, correct_answer_set')
     .order('type')
     .order('unlock_date')
 

@@ -61,6 +61,7 @@ export type Database = {
           correct_answer: string | null
           correct_answer_set: boolean
           created_at: string
+          description: string | null
           id: string
           question: string
           type: string
@@ -70,6 +71,7 @@ export type Database = {
           correct_answer?: string | null
           correct_answer_set?: boolean
           created_at?: string
+          description?: string | null
           id?: string
           question: string
           type: string
@@ -79,6 +81,7 @@ export type Database = {
           correct_answer?: string | null
           correct_answer_set?: boolean
           created_at?: string
+          description?: string | null
           id?: string
           question?: string
           type?: string

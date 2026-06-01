@@ -35,7 +35,7 @@ export default async function AdminPage() {
 
   const { data: questions } = await supabase
     .from('bonus_questions')
-    .select('id, question, type, correct_answer, correct_answer_set')
+    .select('id, question, description, type, correct_answer, correct_answer_set')
     .order('type', { ascending: true })
     .order('created_at', { ascending: true })
 

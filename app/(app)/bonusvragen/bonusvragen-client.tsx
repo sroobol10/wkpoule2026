@@ -10,6 +10,7 @@ import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 type Question = {
   id: string
   question: string
+  description: string | null
   type: string
   unlock_date: string | null
   correct_answer_set: boolean
@@ -161,7 +162,12 @@ function QuestionCard({
 
           {/* Question + pts badge */}
           <div className="flex items-start justify-between gap-3 mb-3">
-            <p className="text-sm font-medium text-wk-text leading-snug flex-1">{question.question}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-wk-text leading-snug">{question.question}</p>
+              {question.description && (
+                <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 leading-relaxed">{question.description}</p>
+              )}
+            </div>
             <div className="shrink-0 flex items-center gap-2">
               {pts !== null && pts !== undefined && (
                 <span className={`font-mono text-[10px] font-bold px-2 py-1 rounded-full border tracking-[0.12em] uppercase ${
