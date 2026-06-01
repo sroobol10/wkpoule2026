@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
@@ -106,6 +107,7 @@ export default function AdminClient({ matches, teams, questions, cardsByMatch }:
 // ─── Group stage tab ──────────────────────────────────────────────────────────
 
 function GroupTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMap: Record<string, Team>; cardsByMatch: Record<string, CardEntry[]> }) {
+  const router = useRouter()
   const [activeGroup, setActiveGroup] = useState('A')
   const [isPending, startTransition] = useTransition()
   const [demoToast, setDemoToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -122,6 +124,7 @@ function GroupTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMa
     startTransition(async () => {
       const result = await autoFillGroupResults()
       showDemoToast(result.ok ? 'Auto-fill klaar!' : result.error, result.ok)
+      if (result.ok) router.refresh()
     })
   }
 
@@ -130,6 +133,7 @@ function GroupTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMa
       const iso = new Date(fillDate + 'T23:59:59Z').toISOString()
       const result = await autoFillGroupResultsUntil(iso)
       showDemoToast(result.ok ? `Auto-fill tot ${fillDate} klaar!` : result.error, result.ok)
+      if (result.ok) router.refresh()
     })
   }
 
@@ -143,6 +147,7 @@ function GroupTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMa
     startTransition(async () => {
       const result = await clearAllGroupResults()
       showDemoToast(result.ok ? 'Alles geleegd.' : result.error, result.ok)
+      if (result.ok) router.refresh()
     })
   }
 
@@ -159,6 +164,7 @@ function GroupTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMa
       const result = await scoreAllGroupAdvancement()
       setAdvToast({ msg: result.ok ? 'Alle eindposities gescoord!' : result.error, ok: result.ok })
       setTimeout(() => setAdvToast(null), 4000)
+      if (result.ok) router.refresh()
     })
   }
 
@@ -648,6 +654,7 @@ function BonusRow({ question }: { question: BonusQuestion }) {
 // ─── Knockout tab ─────────────────────────────────────────────────────────────
 
 function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMap: Record<string, Team>; cardsByMatch: Record<string, CardEntry[]> }) {
+  const router = useRouter()
   const availableStages = KNOCKOUT_STAGES.filter((s) => matches.some((m) => m.stage === s))
   const [isPending, startTransition] = useTransition()
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -657,6 +664,7 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
       const result = await assignNextKoRoundTeams()
       setToast({ msg: result.ok ? 'Volgende ronde ingevuld!' : result.error, ok: result.ok })
       setTimeout(() => setToast(null), 4000)
+      if (result.ok) router.refresh()
     })
   }
 
