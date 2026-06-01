@@ -46,18 +46,20 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
 
   const code = inviteCode.trim().toUpperCase()
 
-  // Service-client: omzeilt RLS zodat niet-leden de poule kunnen opzoeken
+  // SECURITY DEFINER-functie in de DB: omzeilt RLS zonder service role key
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rows, error: fnErr } = await (supabase as any)
+    .rpc('find_poule_by_invite_code', { invite_code_param: code })
+
+  if (fnErr) return { ok: false, error: `Fout bij opzoeken: ${fnErr.message}` }
+
+  type PouleRow = { id: string; name: string; is_general: boolean }
+  const poule = (rows as PouleRow[] | null)?.[0] ?? null
+  if (!poule) return { ok: false, error: 'Ongeldige uitnodigingscode.' }
+
+  // Service-client voor member-check en insert (bypast RLS volledig)
   const db = createServiceClient()
-  const { data: poule, error: pouleErr } = await db
-    .from('poules')
-    .select('id, name, is_general')
-    .eq('invite_code', code)
-    .maybeSingle()
 
-  if (pouleErr) return { ok: false, error: `Fout bij opzoeken: ${pouleErr.message}` }
-  if (!poule)   return { ok: false, error: 'Ongeldige uitnodigingscode.' }
-
-  // Check al lid — service-client zodat RLS de query niet blokkeert
   const { data: existing } = await db
     .from('poule_members')
     .select('id')
@@ -67,14 +69,13 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
 
   if (existing) return { ok: false, error: 'Je bent al lid van deze poule.' }
 
-  // Inschrijven — service-client zodat de insert niet door RLS wordt geblokkeerd
   const { error: insertErr } = await db
     .from('poule_members')
     .insert({ poule_id: poule.id, user_id: user.id })
 
   if (insertErr) return { ok: false, error: `Deelnemen mislukt: ${insertErr.message}` }
 
-  // Voeg ook toe aan poule_scores zodat het klassement direct klopt
+  // Zorg dat nieuwe deelnemer direct in het klassement verschijnt
   await db
     .from('poule_scores')
     .upsert(
