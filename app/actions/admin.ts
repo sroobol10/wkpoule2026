@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { KO_POINTS } from '@/lib/constants'
+import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
 
 type AdminResult = { ok: true } | { ok: false; error: string }
 
@@ -411,5 +412,314 @@ export async function scoreGroupAdvancement(group: string): Promise<AdminResult>
   revalidatePath('/admin')
   revalidatePath('/poules')
   revalidatePath('/voorspellingen')
+  return { ok: true }
+}
+
+// ─── Kaarten opslaan per wedstrijd ────────────────────────────────────────────
+export async function saveMatchCards(
+  matchId: string,
+  homeTeamId: string,
+  awayTeamId: string,
+  homeYellow: number,
+  homeRed: number,
+  awayYellow: number,
+  awayRed: number
+): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { error } = await supabase
+    .from('match_cards')
+    .upsert(
+      [
+        { match_id: matchId, team_id: homeTeamId, yellow_cards: homeYellow, red_cards: homeRed },
+        { match_id: matchId, team_id: awayTeamId, yellow_cards: awayYellow, red_cards: awayRed },
+      ],
+      { onConflict: 'match_id,team_id' }
+    )
+
+  if (error) return { ok: false, error: 'Opslaan mislukt.' }
+  return { ok: true }
+}
+
+// ─── Landgebaseerde bonuspunten toekennen ──────────────────────────────────────
+// Goalgettergigant : goals gescoord per land
+// Desastreuze defensie: tegendoelpunten per land
+// Kaartenkoning    : gele kaart = 1 pt, rode kaart = 2 pt
+export async function awardCountryBonus(questionId: string): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { data: question } = await supabase
+    .from('bonus_questions')
+    .select('question')
+    .eq('id', questionId)
+    .single()
+
+  if (!question) return { ok: false, error: 'Vraag niet gevonden.' }
+
+  const q = question.question.toLowerCase()
+  const teamPoints: Record<string, number> = {}
+
+  if (q.includes('goalgettergigant')) {
+    const { data: matches } = await supabase
+      .from('matches')
+      .select('home_team_id, away_team_id, home_score, away_score')
+      .eq('result_entered', true)
+    for (const m of matches ?? []) {
+      if (m.home_team_id && m.home_score != null)
+        teamPoints[m.home_team_id] = (teamPoints[m.home_team_id] ?? 0) + m.home_score
+      if (m.away_team_id && m.away_score != null)
+        teamPoints[m.away_team_id] = (teamPoints[m.away_team_id] ?? 0) + m.away_score
+    }
+  } else if (q.includes('desastreuze')) {
+    const { data: matches } = await supabase
+      .from('matches')
+      .select('home_team_id, away_team_id, home_score, away_score')
+      .eq('result_entered', true)
+    for (const m of matches ?? []) {
+      if (m.home_team_id && m.away_score != null)
+        teamPoints[m.home_team_id] = (teamPoints[m.home_team_id] ?? 0) + m.away_score
+      if (m.away_team_id && m.home_score != null)
+        teamPoints[m.away_team_id] = (teamPoints[m.away_team_id] ?? 0) + m.home_score
+    }
+  } else if (q.includes('kaartenkoning')) {
+    const { data: cards } = await supabase
+      .from('match_cards')
+      .select('team_id, yellow_cards, red_cards')
+    for (const c of cards ?? []) {
+      teamPoints[c.team_id] = (teamPoints[c.team_id] ?? 0) + c.yellow_cards + c.red_cards * 2
+    }
+  } else {
+    return { ok: false, error: 'Onbekend vraagtype voor landgebaseerde score.' }
+  }
+
+  // Vertaal team-ID naar teamnaam (bonus_answers slaat de naam op)
+  const { data: teams } = await supabase.from('teams').select('id, name')
+  const pointsByName: Record<string, number> = {}
+  for (const t of teams ?? []) {
+    if (teamPoints[t.id] !== undefined) pointsByName[t.name] = teamPoints[t.id]
+  }
+
+  const { data: answers } = await supabase
+    .from('bonus_answers')
+    .select('id, user_id, answer')
+    .eq('question_id', questionId)
+
+  if (!answers?.length) return { ok: true }
+
+  const affectedUserIds = new Set<string>()
+  for (const ans of answers) {
+    const pts = pointsByName[ans.answer.trim()] ?? 0
+    await supabase.from('bonus_answers').update({ points_awarded: pts }).eq('id', ans.id)
+    affectedUserIds.add(ans.user_id)
+  }
+
+  await recalcPouleScores(supabase, [...affectedUserIds])
+
+  revalidatePath('/admin')
+  revalidatePath('/bonusvragen')
+  revalidatePath('/poules')
+  return { ok: true }
+}
+
+// ─── Score alle groepsindeling in één keer ────────────────────────────────────
+export async function scoreAllGroupAdvancement(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
+  const errors: string[] = []
+
+  for (const group of GROUPS) {
+    const result = await scoreGroupAdvancement(group)
+    if (!result.ok) errors.push(`Groep ${group}: ${result.error}`)
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/poules')
+  revalidatePath('/voorspellingen')
+  return errors.length === 0 ? { ok: true } : { ok: false, error: errors.join(' | ') }
+}
+
+// ─── Auto-fill groepswedstrijden tot een bepaalde datum ──────────────────────
+export async function autoFillGroupResultsUntil(isoDate: string): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { data: matches } = await supabase
+    .from('matches')
+    .select('id')
+    .eq('stage', 'group')
+    .eq('result_entered', false)
+    .lte('kickoff_at', isoDate)
+
+  if (!matches || matches.length === 0) {
+    return { ok: false, error: 'Geen wedstrijden gevonden vóór de gekozen datum.' }
+  }
+
+  const affectedUserIds = new Set<string>()
+
+  for (const match of matches) {
+    const homeScore = Math.floor(Math.random() * 5)
+    const awayScore = Math.floor(Math.random() * 5)
+
+    await supabase
+      .from('matches')
+      .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
+      .eq('id', match.id)
+
+    const { data: preds } = await supabase
+      .from('predictions')
+      .select('id, user_id, predicted_home, predicted_away')
+      .eq('match_id', match.id)
+
+    if (preds && preds.length > 0) {
+      const { data: jokers } = await supabase
+        .from('jokers').select('user_id').eq('match_id', match.id)
+      const jokerUserIds = new Set((jokers ?? []).map((j) => j.user_id))
+
+      for (const pred of preds) {
+        const base = calcMatchPoints(homeScore, awayScore, pred.predicted_home, pred.predicted_away)
+        const pts  = base * (jokerUserIds.has(pred.user_id) ? 2 : 1)
+        await supabase.from('predictions').update({ points_awarded: pts }).eq('id', pred.id)
+        affectedUserIds.add(pred.user_id)
+      }
+    }
+  }
+
+  await recalcPouleScores(supabase, [...affectedUserIds])
+
+  revalidatePath('/admin')
+  revalidatePath('/voorspellingen')
+  revalidatePath('/poules')
+  return { ok: true }
+}
+
+// ─── Vul teams in voor de volgende KO-ronde op basis van gespeelde resultaten ─
+export async function assignNextKoRoundTeams(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const db = createServiceClient()
+
+  // Haal alle KO-wedstrijden op
+  const { data: koMatches } = await db
+    .from('matches')
+    .select('id, match_number, stage, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
+    .order('match_number')
+
+  if (!koMatches || koMatches.length === 0) {
+    return { ok: false, error: 'Geen KO-wedstrijden gevonden. Maak ze eerst aan via het script.' }
+  }
+
+  // Bouw een map: slot → match
+  const matchBySlot = Object.fromEntries(koMatches.map((m) => [m.match_number, m]))
+
+  // Bereken groepsfinale-standen voor groep-seeds (1A, 2B etc.)
+  const { data: groupMatches } = await db
+    .from('matches')
+    .select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(group_name)')
+    .eq('stage', 'group')
+    .eq('result_entered', true)
+
+  type GroupStats = { pts: number; gd: number; gf: number }
+  const groupStandings: Record<string, Record<string, GroupStats>> = {}
+
+  for (const m of groupMatches ?? []) {
+    const group = (m.home_team as { group_name: string } | null)?.group_name
+    if (!group || m.home_score == null || m.away_score == null) continue
+    const h = m.home_score, a = m.away_score
+    if (!groupStandings[group]) groupStandings[group] = {}
+    if (!groupStandings[group][m.home_team_id!]) groupStandings[group][m.home_team_id!] = { pts: 0, gd: 0, gf: 0 }
+    if (!groupStandings[group][m.away_team_id!]) groupStandings[group][m.away_team_id!] = { pts: 0, gd: 0, gf: 0 }
+    groupStandings[group][m.home_team_id!].gf += h; groupStandings[group][m.home_team_id!].gd += h - a
+    groupStandings[group][m.away_team_id!].gf += a; groupStandings[group][m.away_team_id!].gd += a - h
+    if (h > a) groupStandings[group][m.home_team_id!].pts += 3
+    else if (h < a) groupStandings[group][m.away_team_id!].pts += 3
+    else { groupStandings[group][m.home_team_id!].pts += 1; groupStandings[group][m.away_team_id!].pts += 1 }
+  }
+
+  // Sorteer per groep
+  const sortedGroups: Record<string, string[]> = {}
+  for (const [g, teams] of Object.entries(groupStandings)) {
+    sortedGroups[g] = Object.entries(teams)
+      .sort(([, x], [, y]) => y.pts - x.pts || y.gd - x.gd || y.gf - x.gf)
+      .map(([id]) => id)
+  }
+
+  // Bepaal beste 8 nummers 3 + slot-toewijzing
+  const thirds = Object.entries(sortedGroups)
+    .filter(([, t]) => t[2])
+    .map(([g, t]) => {
+      const st = groupStandings[g][t[2]]
+      return { group: g, teamId: t[2], ...st }
+    })
+    .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf)
+    .slice(0, 8)
+
+  const best8Groups = thirds.map((t) => t.group).sort()
+  const thirdAssignment = assignThirdPlaceSlots(best8Groups)
+  const thirdTeamBySlot: Record<number, string> = {}
+  for (const [slot, group] of Object.entries(thirdAssignment)) {
+    const teamId = sortedGroups[group]?.[2]
+    if (teamId) thirdTeamBySlot[Number(slot)] = teamId
+  }
+
+  // Resolver: seed → teamId
+  function resolveTeam(seed: string): string | null {
+    if (seed.startsWith('W')) {
+      const slot = parseInt(seed.slice(1))
+      const m = matchBySlot[slot]
+      if (!m?.result_entered || m.home_score == null || m.away_score == null) return null
+      return m.home_score > m.away_score ? m.home_team_id : m.away_team_id
+    }
+    if (seed.startsWith('L')) {
+      const slot = parseInt(seed.slice(1))
+      const m = matchBySlot[slot]
+      if (!m?.result_entered || m.home_score == null || m.away_score == null) return null
+      return m.home_score > m.away_score ? m.away_team_id : m.home_team_id
+    }
+    if (seed.startsWith('3_')) {
+      const slot = parseInt(seed.slice(2))
+      return thirdTeamBySlot[slot] ?? null
+    }
+    // '1A', '2B' etc.
+    const pos = parseInt(seed[0]) - 1
+    const group = seed[1]
+    return sortedGroups[group]?.[pos] ?? null
+  }
+
+  // Vind de eerste ronde met null-teams en vul die in
+  const stageOrder = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
+  let updated = 0
+
+  for (const stage of stageOrder) {
+    const stageMatches = BRACKET.filter((bm) => bm.stage === stage)
+    const needsTeams = stageMatches.filter((bm) => {
+      const m = matchBySlot[bm.slot]
+      return m && (!m.home_team_id || !m.away_team_id)
+    })
+
+    if (needsTeams.length === 0) continue
+
+    for (const bm of needsTeams) {
+      const homeId = resolveTeam(bm.homeSeed)
+      const awayId = resolveTeam(bm.awaySeed)
+      if (!homeId || !awayId) continue
+
+      const m = matchBySlot[bm.slot]
+      await db.from('matches').update({ home_team_id: homeId, away_team_id: awayId }).eq('id', m.id)
+      updated++
+    }
+
+    if (updated > 0) break // verwerk één ronde per keer
+  }
+
+  if (updated === 0) return { ok: false, error: 'Geen teams om in te vullen. Controleer of de vorige ronde volledig gespeeld is.' }
+
+  revalidatePath('/admin')
+  revalidatePath('/knockout')
   return { ok: true }
 }

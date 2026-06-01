@@ -9,6 +9,7 @@
     "lint": "eslint",
     "seed": "npx tsx --env-file=.env.local scripts/seed.ts",
     "bonus:reset": "npx tsx scripts/reset-bonus.ts",
+    "ko:create": "npx tsx scripts/create-ko-matches.ts",
     "seed:ai": "npx tsx --env-file=.env.local scripts/seed-ai-predictions.ts"
   },
   "dependencies": {

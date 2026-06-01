@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import AdminClient from './admin-client'
 
-const KNOCKOUT_STAGES = ['round_of_32', 'round_of_16', 'quarter_final', 'semi_final', 'third_place', 'final']
+const KNOCKOUT_STAGES = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
 
 export default async function AdminPage() {
   const supabase = await createClient()
@@ -38,6 +38,23 @@ export default async function AdminPage() {
     .select('id, question, description, type, correct_answer, correct_answer_set')
     .order('type', { ascending: true })
     .order('created_at', { ascending: true })
+
+  // Bestaande kaartdata per wedstrijd
+  const matchIds = (matches ?? []).map((m) => m.id)
+  const { data: cards } = matchIds.length > 0
+    ? await supabase
+        .from('match_cards')
+        .select('match_id, team_id, yellow_cards, red_cards')
+        .in('match_id', matchIds)
+    : { data: [] }
+
+  // Gegroepeerd per wedstrijd
+  type CardRow = { match_id: string; team_id: string; yellow_cards: number; red_cards: number }
+  const cardsByMatch: Record<string, CardRow[]> = {}
+  for (const c of cards ?? []) {
+    if (!cardsByMatch[c.match_id]) cardsByMatch[c.match_id] = []
+    cardsByMatch[c.match_id].push(c)
+  }
 
   return (
     <div className="min-h-screen bg-wk-bg">
@@ -75,6 +92,7 @@ export default async function AdminPage() {
           matches={matches ?? []}
           teams={teams ?? []}
           questions={questions ?? []}
+          cardsByMatch={cardsByMatch}
         />
       </main>
     </div>

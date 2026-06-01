@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, clearAllGroupResults, scoreGroupAdvancement } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
@@ -25,26 +25,29 @@ type BonusQuestion = {
   correct_answer_set: boolean
 }
 
+type CardEntry = { match_id: string; team_id: string; yellow_cards: number; red_cards: number }
+
 type Props = {
   matches: Match[]
   teams: Team[]
   questions: BonusQuestion[]
+  cardsByMatch: Record<string, CardEntry[]>
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
-const KNOCKOUT_STAGES = ['round_of_32', 'round_of_16', 'quarter_final', 'semi_final', 'third_place', 'final']
+const KNOCKOUT_STAGES = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
 const STAGE_LABELS: Record<string, string> = {
-  round_of_32:   'Ronde van 32',
-  round_of_16:   'Achtste finales',
-  quarter_final: 'Kwartfinales',
-  semi_final:    'Halve finales',
-  third_place:   'Derde plaats',
-  final:         'Finale',
+  r32:         'Ronde van 32',
+  r16:         'Achtste finales',
+  qf:          'Kwartfinales',
+  sf:          'Halve finales',
+  third_place: 'Derde plaats',
+  final:       'Finale',
 }
 
 type Tab = 'groepsfase' | 'bonusvragen' | 'knockout'
 
-export default function AdminClient({ matches, teams, questions }: Props) {
+export default function AdminClient({ matches, teams, questions, cardsByMatch }: Props) {
   const [tab, setTab] = useState<Tab>('groepsfase')
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
@@ -88,13 +91,13 @@ export default function AdminClient({ matches, teams, questions }: Props) {
       </div>
 
       {tab === 'groepsfase' && (
-        <GroupTab matches={groupMatches} teamMap={teamMap} />
+        <GroupTab matches={groupMatches} teamMap={teamMap} cardsByMatch={cardsByMatch} />
       )}
       {tab === 'bonusvragen' && (
         <BonusTab questions={questions} />
       )}
       {tab === 'knockout' && (
-        <KnockoutTab matches={knockoutMatches} teamMap={teamMap} />
+        <KnockoutTab matches={knockoutMatches} teamMap={teamMap} cardsByMatch={cardsByMatch} />
       )}
     </div>
   )
@@ -102,22 +105,31 @@ export default function AdminClient({ matches, teams, questions }: Props) {
 
 // ─── Group stage tab ──────────────────────────────────────────────────────────
 
-function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<string, Team> }) {
+function GroupTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMap: Record<string, Team>; cardsByMatch: Record<string, CardEntry[]> }) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [isPending, startTransition] = useTransition()
   const [demoToast, setDemoToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [advToast, setAdvToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [fillDate, setFillDate] = useState('2026-06-18')
 
   function showDemoToast(msg: string, ok: boolean) {
     setDemoToast({ msg, ok })
-    setTimeout(() => setDemoToast(null), 3000)
+    setTimeout(() => setDemoToast(null), 4000)
   }
 
   function handleAutoFill() {
     startTransition(async () => {
       const result = await autoFillGroupResults()
       showDemoToast(result.ok ? 'Auto-fill klaar!' : result.error, result.ok)
+    })
+  }
+
+  function handleAutoFillUntil() {
+    startTransition(async () => {
+      const iso = new Date(fillDate + 'T23:59:59Z').toISOString()
+      const result = await autoFillGroupResultsUntil(iso)
+      showDemoToast(result.ok ? `Auto-fill tot ${fillDate} klaar!` : result.error, result.ok)
     })
   }
 
@@ -142,6 +154,16 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
     })
   }
 
+  function handleScoreAllAdvancement() {
+    startTransition(async () => {
+      const result = await scoreAllGroupAdvancement()
+      setAdvToast({ msg: result.ok ? 'Alle eindposities gescoord!' : result.error, ok: result.ok })
+      setTimeout(() => setAdvToast(null), 4000)
+    })
+  }
+
+  const allGroupsDone = matches.every((m) => m.result_entered)
+
   const groupMatches = matches.filter((m) => {
     const home = m.home_team_id ? teamMap[m.home_team_id] : null
     return home?.group_name === activeGroup
@@ -159,31 +181,62 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
 
   return (
     <div className="space-y-4">
-      {/* Demo toolbar */}
-      <div className="flex items-center justify-end gap-2">
-        {demoToast && (
-          <span className={`font-mono text-[10px] tracking-[0.12em] ${demoToast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
-            {demoToast.msg}
-          </span>
-        )}
-        <button
-          onClick={handleAutoFill}
-          disabled={isPending}
-          className="rounded bg-wk-green px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
-        >
-          {isPending ? '…' : 'Auto-fill'}
-        </button>
-        <button
-          onClick={handleClearAll}
-          disabled={isPending}
-          className={`rounded border px-3 py-1.5 text-[10px] font-mono tracking-[0.12em] uppercase disabled:opacity-50 transition-colors ${
-            confirmClear
-              ? 'border-wk-red/50 bg-wk-red/10 text-wk-red hover:bg-wk-red/20'
-              : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
-          }`}
-        >
-          {confirmClear ? 'Zeker weten?' : 'Leegmaken'}
-        </button>
+      {/* Simulatie-toolbar */}
+      <div className="space-y-2">
+        <div className="flex items-center flex-wrap gap-2">
+          {demoToast && (
+            <span className={`font-mono text-[10px] tracking-[0.12em] flex-1 ${demoToast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+              {demoToast.msg}
+            </span>
+          )}
+          <button
+            onClick={handleAutoFill}
+            disabled={isPending}
+            className="rounded bg-wk-green px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {isPending ? '…' : 'Auto-fill alles'}
+          </button>
+          <button
+            onClick={handleClearAll}
+            disabled={isPending}
+            className={`rounded border px-3 py-1.5 text-[10px] font-mono tracking-[0.12em] uppercase disabled:opacity-50 transition-colors ${
+              confirmClear
+                ? 'border-wk-red/50 bg-wk-red/10 text-wk-red hover:bg-wk-red/20'
+                : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+            }`}
+          >
+            {confirmClear ? 'Zeker weten?' : 'Leegmaken'}
+          </button>
+        </div>
+
+        {/* Auto-fill tot datum */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-[10px] text-wk-muted tracking-widest uppercase shrink-0">Tot datum:</span>
+          <input
+            type="date"
+            value={fillDate}
+            onChange={(e) => setFillDate(e.target.value)}
+            min="2026-06-11"
+            max="2026-06-29"
+            className="rounded bg-wk-bg2 border border-white/10 px-2 py-1 text-[10px] font-mono text-wk-text focus:border-wk-gold focus:outline-none"
+          />
+          <button
+            onClick={handleAutoFillUntil}
+            disabled={isPending || !fillDate}
+            className="rounded bg-wk-blue/80 px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {isPending ? '…' : 'Auto-fill tot datum'}
+          </button>
+          {allGroupsDone && (
+            <button
+              onClick={handleScoreAllAdvancement}
+              disabled={isPending}
+              className="rounded bg-wk-gold/10 border border-wk-gold/30 px-3 py-1.5 text-[10px] font-mono font-semibold text-wk-gold tracking-[0.12em] uppercase hover:bg-wk-gold/20 disabled:opacity-50 transition-colors"
+            >
+              {isPending ? '…' : 'Score alle eindposities'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Group tabs */}
@@ -218,7 +271,7 @@ function GroupTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<stri
         </div>
         <div className="divide-y divide-white/5">
           {groupMatches.map((match) => (
-            <MatchResultRow key={match.id} match={match} teamMap={teamMap} knockout={false} />
+            <MatchResultRow key={match.id} match={match} teamMap={teamMap} knockout={false} existingCards={cardsByMatch[match.id] ?? []} />
           ))}
         </div>
 
@@ -258,10 +311,12 @@ function MatchResultRow({
   match,
   teamMap,
   knockout,
+  existingCards = [],
 }: {
   match: Match
   teamMap: Record<string, Team>
   knockout: boolean
+  existingCards?: CardEntry[]
 }) {
   const homeTeam = match.home_team_id ? teamMap[match.home_team_id] : null
   const awayTeam = match.away_team_id ? teamMap[match.away_team_id] : null
@@ -272,12 +327,22 @@ function MatchResultRow({
   const [isPending, startTransition] = useTransition()
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
+  // Kaarten
+  const homeCards = existingCards.find((c) => c.team_id === match.home_team_id)
+  const awayCards = existingCards.find((c) => c.team_id === match.away_team_id)
+  const [showCards, setShowCards] = useState(false)
+  const [homeYellow, setHomeYellow] = useState(String(homeCards?.yellow_cards ?? 0))
+  const [homeRed,    setHomeRed]    = useState(String(homeCards?.red_cards    ?? 0))
+  const [awayYellow, setAwayYellow] = useState(String(awayCards?.yellow_cards ?? 0))
+  const [awayRed,    setAwayRed]    = useState(String(awayCards?.red_cards    ?? 0))
+  const [cardToast, setCardToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok })
     setTimeout(() => setToast(null), 3000)
   }
 
-  function save() {
+  function saveScore() {
     const h = parseInt(home)
     const a = parseInt(away)
     if (isNaN(h) || isNaN(a)) return showToast('Voer geldige scores in.', false)
@@ -285,7 +350,6 @@ function MatchResultRow({
     startTransition(async () => {
       let result
       if (knockout) {
-        // Determine winner from score (assumes no draws in knockout — or admin picks)
         const winnerId = h > a ? match.home_team_id! : match.away_team_id!
         result = await setKnockoutResult(match.id, h, a, winnerId)
       } else {
@@ -300,13 +364,30 @@ function MatchResultRow({
     })
   }
 
+  function saveCards() {
+    if (!match.home_team_id || !match.away_team_id) return
+    startTransition(async () => {
+      const result = await saveMatchCards(
+        match.id,
+        match.home_team_id!,
+        match.away_team_id!,
+        parseInt(homeYellow) || 0,
+        parseInt(homeRed)    || 0,
+        parseInt(awayYellow) || 0,
+        parseInt(awayRed)    || 0,
+      )
+      setCardToast({ msg: result.ok ? 'Kaarten opgeslagen!' : result.error, ok: result.ok })
+      setTimeout(() => setCardToast(null), 3000)
+    })
+  }
+
   const homeName = homeTeam?.name ?? 'TBD'
   const awayName = awayTeam?.name ?? 'TBD'
 
   return (
     <div className="px-5 py-3.5">
       <div className="flex items-center gap-3">
-        {/* Match number + date */}
+        {/* Match number */}
         <div className="shrink-0 w-8 text-center">
           <span className="font-mono text-[10px] text-wk-muted">#{match.match_number}</span>
         </div>
@@ -350,35 +431,83 @@ function MatchResultRow({
           )}
           {editing ? (
             <>
-              <button
-                onClick={save}
-                disabled={isPending}
-                className="rounded bg-wk-green px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
+              <button onClick={saveScore} disabled={isPending}
+                className="rounded bg-wk-green px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
                 {isPending ? '…' : 'OK'}
               </button>
-              <button
-                onClick={() => { setEditing(false); setHome(String(match.home_score ?? '')); setAway(String(match.away_score ?? '')) }}
-                className="rounded border border-white/10 px-3 py-1 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors"
-              >
+              <button onClick={() => { setEditing(false); setHome(String(match.home_score ?? '')); setAway(String(match.away_score ?? '')) }}
+                className="rounded border border-white/10 px-3 py-1 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors">
                 ✕
               </button>
             </>
           ) : (
-            <button
-              onClick={() => setEditing(true)}
-              className="rounded border border-white/10 px-3 py-1 text-xs font-mono text-wk-muted hover:border-white/20 hover:text-wk-soft transition-colors"
-            >
+            <button onClick={() => setEditing(true)}
+              className="rounded border border-white/10 px-3 py-1 text-xs font-mono text-wk-muted hover:border-white/20 hover:text-wk-soft transition-colors">
               {match.result_entered ? 'Wijzig' : 'Invoeren'}
+            </button>
+          )}
+          {/* Kaarten-toggle (alleen zichtbaar als uitslag bekend) */}
+          {match.result_entered && homeTeam && awayTeam && (
+            <button
+              onClick={() => setShowCards((v) => !v)}
+              title="Kaarten invoeren"
+              className={`rounded border px-2 py-1 text-[10px] font-mono transition-colors ${
+                showCards
+                  ? 'border-wk-gold/40 bg-wk-gold/10 text-wk-gold'
+                  : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+              }`}
+            >
+              🟨
             </button>
           )}
         </div>
       </div>
 
       {toast && (
-        <p className={`mt-2 font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+        <p className={`mt-1 font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
           {toast.msg}
         </p>
+      )}
+
+      {/* Kaartinvoer */}
+      {showCards && homeTeam && awayTeam && (
+        <div className="mt-2 ml-11 rounded-lg bg-wk-bg2 border border-white/10 px-4 py-3 space-y-2">
+          {[
+            { label: homeName, yellow: homeYellow, red: homeRed, setYellow: setHomeYellow, setRed: setHomeRed },
+            { label: awayName, yellow: awayYellow, red: awayRed, setYellow: setAwayYellow, setRed: setAwayRed },
+          ].map(({ label, yellow, red, setYellow, setRed }) => (
+            <div key={label} className="flex items-center gap-3">
+              <span className="font-mono text-[10px] text-wk-muted w-28 truncate shrink-0">{label}</span>
+              <label className="flex items-center gap-1">
+                <span className="text-xs">🟨</span>
+                <input
+                  type="number" min={0} max={20} value={yellow}
+                  onChange={(e) => setYellow(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                  className="w-10 text-center rounded bg-wk-surface border border-white/10 py-0.5 text-xs font-mono text-wk-gold focus:border-wk-gold focus:outline-none transition"
+                />
+              </label>
+              <label className="flex items-center gap-1">
+                <span className="text-xs">🟥</span>
+                <input
+                  type="number" min={0} max={5} value={red}
+                  onChange={(e) => setRed(e.target.value.replace(/\D/g, '').slice(0, 1))}
+                  className="w-10 text-center rounded bg-wk-surface border border-white/10 py-0.5 text-xs font-mono text-wk-gold focus:border-wk-gold focus:outline-none transition"
+                />
+              </label>
+            </div>
+          ))}
+          <div className="flex items-center gap-3 pt-1">
+            <button onClick={saveCards} disabled={isPending}
+              className="rounded bg-wk-gold/10 border border-wk-gold/30 px-3 py-1 text-[10px] font-mono font-semibold text-wk-gold tracking-[0.12em] uppercase hover:bg-wk-gold/20 disabled:opacity-50 transition-colors">
+              {isPending ? '…' : 'Kaarten opslaan'}
+            </button>
+            {cardToast && (
+              <span className={`font-mono text-[10px] tracking-[0.12em] ${cardToast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+                {cardToast.msg}
+              </span>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -415,23 +544,34 @@ function BonusTab({ questions }: { questions: BonusQuestion[] }) {
   )
 }
 
+function isCountryBased(question: string) {
+  const q = question.toLowerCase()
+  return q.includes('kaartenkoning') || q.includes('desastreuze') || q.includes('goalgettergigant')
+}
+
 function BonusRow({ question }: { question: BonusQuestion }) {
-  const [editing, setEditing]   = useState(false)
-  const [answer, setAnswer]     = useState(question.correct_answer ?? '')
+  const [editing, setEditing]        = useState(false)
+  const [answer, setAnswer]          = useState(question.correct_answer ?? '')
   const [isPending, startTransition] = useTransition()
-  const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null)
+  const [toast, setToast]            = useState<{ msg: string; ok: boolean } | null>(null)
+
+  const countryBased = isCountryBased(question.question)
 
   function save() {
     if (!answer.trim()) return
     startTransition(async () => {
       const result = await setBonusCorrectAnswer(question.id, answer.trim())
-      if (result.ok) {
-        setEditing(false)
-        setToast({ msg: 'Opgeslagen!', ok: true })
-      } else {
-        setToast({ msg: result.error, ok: false })
-      }
+      if (result.ok) { setEditing(false); setToast({ msg: 'Opgeslagen!', ok: true }) }
+      else setToast({ msg: result.error, ok: false })
       setTimeout(() => setToast(null), 3000)
+    })
+  }
+
+  function award() {
+    startTransition(async () => {
+      const result = await awardCountryBonus(question.id)
+      setToast({ msg: result.ok ? 'Punten uitgekeerd!' : result.error, ok: result.ok })
+      setTimeout(() => setToast(null), 4000)
     })
   }
 
@@ -441,50 +581,61 @@ function BonusRow({ question }: { question: BonusQuestion }) {
       {question.description && (
         <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 mb-3 leading-relaxed">{question.description}</p>
       )}
-      <div className="flex items-center gap-2">
-        {editing ? (
-          <>
-            <input
-              type="text"
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && save()}
-              placeholder="Correct antwoord…"
-              className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text placeholder:text-wk-muted focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
-            />
-            <button
-              onClick={save}
-              disabled={isPending || !answer.trim()}
-              className="rounded bg-wk-green px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-            >
-              {isPending ? '…' : 'Opslaan'}
-            </button>
-            <button
-              onClick={() => { setEditing(false); setAnswer(question.correct_answer ?? '') }}
-              className="rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors"
-            >
-              ✕
-            </button>
-          </>
-        ) : (
-          <>
-            {question.correct_answer_set ? (
-              <div className="flex items-center gap-2 flex-1 min-w-0">
-                <span className="font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase shrink-0">✓</span>
-                <span className="text-sm text-wk-gold truncate">{question.correct_answer}</span>
-              </div>
-            ) : (
-              <span className="font-mono text-xs text-wk-muted tracking-[0.12em] italic flex-1">Nog niet ingesteld</span>
-            )}
-            <button
-              onClick={() => setEditing(true)}
-              className="shrink-0 rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:border-white/20 hover:text-wk-soft transition-colors"
-            >
-              {question.correct_answer_set ? 'Wijzig' : 'Instellen'}
-            </button>
-          </>
-        )}
-      </div>
+
+      {countryBased ? (
+        /* Landgebaseerde vragen: bereken en keer uit o.b.v. statistieken */
+        <div className="flex items-center gap-3 flex-wrap">
+          <p className="font-mono text-[10px] text-wk-muted tracking-widest italic flex-1">
+            Punten worden automatisch berekend uit wedstrijdstatistieken
+          </p>
+          <button
+            onClick={award}
+            disabled={isPending}
+            className="shrink-0 rounded bg-wk-gold/10 border border-wk-gold/30 px-3 py-1.5 text-[10px] font-mono font-semibold text-wk-gold tracking-[0.12em] uppercase hover:bg-wk-gold/20 disabled:opacity-50 transition-colors"
+          >
+            {isPending ? '…' : 'Bereken en keer uit'}
+          </button>
+        </div>
+      ) : (
+        /* Reguliere vragen: correct antwoord instellen */
+        <div className="flex items-center gap-2">
+          {editing ? (
+            <>
+              <input
+                type="text" value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && save()}
+                placeholder="Correct antwoord…"
+                className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text placeholder:text-wk-muted focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+              />
+              <button onClick={save} disabled={isPending || !answer.trim()}
+                className="rounded bg-wk-green px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
+                {isPending ? '…' : 'Opslaan'}
+              </button>
+              <button onClick={() => { setEditing(false); setAnswer(question.correct_answer ?? '') }}
+                className="rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors">
+                ✕
+              </button>
+            </>
+          ) : (
+            <>
+              {question.correct_answer_set ? (
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span className="font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase shrink-0">✓</span>
+                  <span className="text-sm text-wk-gold truncate">{question.correct_answer}</span>
+                </div>
+              ) : (
+                <span className="font-mono text-xs text-wk-muted tracking-[0.12em] italic flex-1">Nog niet ingesteld</span>
+              )}
+              <button onClick={() => setEditing(true)}
+                className="shrink-0 rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:border-white/20 hover:text-wk-soft transition-colors">
+                {question.correct_answer_set ? 'Wijzig' : 'Instellen'}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {toast && (
         <p className={`mt-2 font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
           {toast.msg}
@@ -496,24 +647,64 @@ function BonusRow({ question }: { question: BonusQuestion }) {
 
 // ─── Knockout tab ─────────────────────────────────────────────────────────────
 
-function KnockoutTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<string, Team> }) {
+function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; teamMap: Record<string, Team>; cardsByMatch: Record<string, CardEntry[]> }) {
   const availableStages = KNOCKOUT_STAGES.filter((s) => matches.some((m) => m.stage === s))
+  const [isPending, startTransition] = useTransition()
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+
+  function handleAssignNextRound() {
+    startTransition(async () => {
+      const result = await assignNextKoRoundTeams()
+      setToast({ msg: result.ok ? 'Volgende ronde ingevuld!' : result.error, ok: result.ok })
+      setTimeout(() => setToast(null), 4000)
+    })
+  }
 
   if (availableStages.length === 0) {
     return (
-      <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center">
-        <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
-          Nog geen knockoutwedstrijden aangemaakt.
-        </p>
-        <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] mt-2 opacity-60">
-          Voeg wedstrijden toe aan de database na de groepsfase.
-        </p>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          {toast && (
+            <span className={`font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+              {toast.msg}
+            </span>
+          )}
+          <button
+            onClick={handleAssignNextRound}
+            disabled={isPending}
+            className="rounded bg-wk-blue/80 px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {isPending ? '…' : 'Vul volgende ronde in'}
+          </button>
+        </div>
+        <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center">
+          <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
+            Nog geen knockoutwedstrijden aangemaakt.
+          </p>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] mt-2 opacity-60">
+            Maak ze aan via: <code className="text-wk-gold">npm run ko:create</code>
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        {toast && (
+          <span className={`font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+            {toast.msg}
+          </span>
+        )}
+        <button
+          onClick={handleAssignNextRound}
+          disabled={isPending}
+          className="rounded bg-wk-blue/80 px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {isPending ? '…' : 'Vul volgende ronde in'}
+        </button>
+      </div>
       {availableStages.map((stage) => {
         const stageMatches = matches.filter((m) => m.stage === stage)
         return (
@@ -521,7 +712,7 @@ function KnockoutTab({ matches, teamMap }: { matches: Match[]; teamMap: Record<s
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">{STAGE_LABELS[stage]}</p>
             <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
               {stageMatches.map((match) => (
-                <MatchResultRow key={match.id} match={match} teamMap={teamMap} knockout={true} />
+                <MatchResultRow key={match.id} match={match} teamMap={teamMap} knockout={true} existingCards={cardsByMatch[match.id] ?? []} />
               ))}
             </div>
           </section>

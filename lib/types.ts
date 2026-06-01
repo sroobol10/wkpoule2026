@@ -219,6 +219,48 @@ export type Database = {
           },
         ]
       }
+      match_cards: {
+        Row: {
+          created_at:   string
+          id:           string
+          match_id:     string
+          red_cards:    number
+          team_id:      string
+          yellow_cards: number
+        }
+        Insert: {
+          created_at?:  string
+          id?:          string
+          match_id:     string
+          red_cards?:   number
+          team_id:      string
+          yellow_cards?: number
+        }
+        Update: {
+          created_at?:  string
+          id?:          string
+          match_id?:    string
+          red_cards?:   number
+          team_id?:     string
+          yellow_cards?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_cards_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_cards_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       matches: {
         Row: {
           away_score: number | null
