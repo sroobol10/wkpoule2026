@@ -27,7 +27,11 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
 
   const { data: scores } = await supabase
     .from('poule_scores')
-    .select('user_id, total_pts, exact_hits, correct_results, rank_change')
+    .select(`
+      user_id, total_pts, exact_hits, correct_results, rank_change,
+      group_match_pts, group_standings_pts, knockout_pts,
+      bonus_pre_pts, bonus_daily_pts, jokers_played
+    `)
     .eq('poule_id', id)
     .order('total_pts', { ascending: false })
 
@@ -43,14 +47,30 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
     if (p) profileMap[p.id] = p
   }
 
-  type ScoreRow = { user_id: string; total_pts: number; exact_hits: number; correct_results: number; rank_change: number | null }
+  type ScoreRow = {
+    user_id: string
+    total_pts: number
+    exact_hits: number
+    correct_results: number
+    rank_change: number | null
+    group_match_pts: number
+    group_standings_pts: number
+    knockout_pts: number
+    bonus_pre_pts: number
+    bonus_daily_pts: number
+    jokers_played: number
+  }
   const scoreMap: Record<string, ScoreRow> = {}
-  for (const s of scores ?? []) scoreMap[s.user_id] = s
+  for (const s of scores ?? []) scoreMap[s.user_id] = s as ScoreRow
 
   const ranked = Object.keys(profileMap)
     .map((uid) => ({
       profile: profileMap[uid],
-      score: scoreMap[uid] ?? { user_id: uid, total_pts: 0, exact_hits: 0, correct_results: 0 },
+      score: scoreMap[uid] ?? {
+        user_id: uid, total_pts: 0, exact_hits: 0, correct_results: 0,
+        rank_change: null, group_match_pts: 0, group_standings_pts: 0,
+        knockout_pts: 0, bonus_pre_pts: 0, bonus_daily_pts: 0, jokers_played: 0,
+      } as ScoreRow,
     }))
     .sort((a, b) => b.score.total_pts - a.score.total_pts)
 
@@ -86,67 +106,115 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
         </div>
       </div>
 
-      {/* Leaderboard */}
+      {/* Leaderboard tabel */}
       <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-white/10">
-          <span className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase">Stand</span>
-        </div>
-
         {ranked.length === 0 ? (
           <div className="px-5 py-8 text-center font-mono text-xs text-wk-muted tracking-[0.12em]">
             Nog geen deelnemers.
           </div>
         ) : (
-          <div className="divide-y divide-white/5">
-            {ranked.map(({ profile, score }, index) => {
-              const isCurrentUser = profile.id === user.id
-              const medals = ['🥇', '🥈', '🥉']
-              const medal = index < 3 ? medals[index] : null
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left border-collapse">
+              {/* Header */}
+              <thead>
+                <tr className="border-b border-white/10">
+                  <th className="sticky left-0 z-10 bg-wk-surface px-3 py-2.5 w-8 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">#</th>
+                  <th className="sticky left-8 z-10 bg-wk-surface px-0 py-2.5 w-6 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">±</th>
+                  <th className="sticky left-14 z-10 bg-wk-surface pl-2 pr-4 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase">Deelnemer</th>
+                  <th className="px-3 py-2.5 font-mono text-[9px] text-wk-gold tracking-widest uppercase text-right">Totaal</th>
+                  <ColHeader label="Jokers" sublabel="/ 12" />
+                  <ColHeader label="WED" sublabel="Groepsfase" />
+                  <ColHeader label="STAND" sublabel="Eindstand" />
+                  <ColHeader label="KO" sublabel="KO-fase" />
+                  <ColHeader label="VRF" sublabel="Bonus vooraf" />
+                  <ColHeader label="DAG" sublabel="Bonus dagelijks" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {ranked.map(({ profile, score }, index) => {
+                  const isCurrentUser = profile.id === user.id
+                  const medals = ['🥇', '🥈', '🥉']
+                  const medal = index < 3 ? medals[index] : null
 
-              return (
-                <div
-                  key={profile.id}
-                  className={`flex items-center gap-4 px-5 py-3.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}
-                >
-                  {/* Rank */}
-                  <div className="w-8 text-center shrink-0">
-                    {medal ? (
-                      <span className="text-base">{medal}</span>
-                    ) : (
-                      <span className="font-mono text-xs text-wk-muted">{index + 1}</span>
-                    )}
-                  </div>
+                  return (
+                    <tr
+                      key={profile.id}
+                      className={`${isCurrentUser ? 'bg-wk-gold/5' : 'hover:bg-white/2'}`}
+                    >
+                      {/* Positie */}
+                      <td className="sticky left-0 z-10 bg-inherit px-3 py-3 w-8 text-center">
+                        {medal
+                          ? <span className="text-sm">{medal}</span>
+                          : <span className="font-mono text-xs text-wk-muted">{index + 1}</span>
+                        }
+                      </td>
 
-                  {/* Avatar + name */}
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-wk-bg2 border border-white/10 flex items-center justify-center shrink-0 font-mono text-xs font-bold text-wk-gold">
-                      {profile.username.charAt(0).toUpperCase()}
-                    </div>
-                    <span className={`text-sm truncate ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text'}`}>
-                      {profile.username}
-                      {isCurrentUser && <span className="ml-1.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase">jij</span>}
-                    </span>
-                  </div>
+                      {/* Rang-wijziging */}
+                      <td className="sticky left-8 z-10 bg-inherit px-0 py-3 w-6 text-center">
+                        <RankBadge change={score.rank_change} />
+                      </td>
 
-                  {/* Stats — hidden on mobile */}
-                  <div className="hidden sm:flex items-center gap-4 shrink-0">
-                    <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">{score.exact_hits}× exact</span>
-                    <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">{score.correct_results}× resultaat</span>
-                  </div>
+                      {/* Naam */}
+                      <td className="sticky left-14 z-10 bg-inherit pl-2 pr-4 py-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-7 h-7 rounded-full bg-wk-bg2 border border-white/10 flex items-center justify-center shrink-0 font-mono text-xs font-bold text-wk-gold">
+                            {profile.username.charAt(0).toUpperCase()}
+                          </div>
+                          <span className={`text-sm truncate max-w-[100px] ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text'}`}>
+                            {profile.username}
+                          </span>
+                        </div>
+                      </td>
 
-                  {/* Rang-wijziging pijltje */}
-                  <RankBadge change={score.rank_change} />
+                      {/* Totaal */}
+                      <td className="px-3 py-3 text-right">
+                        <span className="font-display text-base text-wk-gold">{score.total_pts}</span>
+                        <span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span>
+                      </td>
 
-                  {/* Points */}
-                  <div className="shrink-0 text-right">
-                    <span className="font-display text-lg text-wk-gold">{score.total_pts}</span>
-                    <span className="font-mono text-[10px] text-wk-muted ml-1">pt</span>
-                  </div>
-                </div>
-              )
-            })}
+                      {/* Jokers */}
+                      <DataCell value={score.jokers_played} suffix={`/12`} />
+
+                      {/* Groepsfase wedstrijden */}
+                      <DataCell value={score.group_match_pts} suffix="pt" />
+
+                      {/* Groepsfase eindstand */}
+                      <DataCell value={score.group_standings_pts} suffix="pt" />
+
+                      {/* KO-fase */}
+                      <DataCell value={score.knockout_pts} suffix="pt" />
+
+                      {/* Bonus vooraf */}
+                      <DataCell value={score.bonus_pre_pts} suffix="pt" />
+
+                      {/* Bonus dagelijks */}
+                      <DataCell value={score.bonus_daily_pts} suffix="pt" />
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
+      </div>
+
+      {/* Legenda */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {[
+          ['WED', 'Groepsfase wedstrijden'],
+          ['STAND', 'Groepsfase eindstanden'],
+          ['KO', 'Knockout-fase'],
+          ['VRF', 'Bonusvragen vooraf'],
+          ['DAG', 'Bonusvragen dagelijks'],
+          ['Jokers', 'Ingezette jokers (max. 1 per groep)'],
+        ].map(([abbr, label]) => (
+          <div key={abbr} className="flex items-center gap-2">
+            <span className="font-mono text-[9px] font-bold text-wk-gold bg-wk-gold/10 border border-wk-gold/20 rounded px-1.5 py-0.5 tracking-widest shrink-0">
+              {abbr}
+            </span>
+            <span className="font-mono text-[9px] text-wk-muted tracking-widest">{label}</span>
+          </div>
+        ))}
       </div>
 
       {/* Owner info */}
@@ -162,21 +230,42 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
   )
 }
 
-// ─── Rangswijziging-pijltje ───────────────────────────────────────────────────
+// ─── Tabel-subcomponenten ─────────────────────────────────────────────────────
+
+function ColHeader({ label, sublabel }: { label: string; sublabel: string }) {
+  return (
+    <th className="px-3 py-2.5 text-right min-w-[56px]">
+      <span className="block font-mono text-[9px] font-bold text-wk-muted tracking-widest uppercase">{label}</span>
+      <span className="block font-mono text-[8px] text-wk-muted/50 tracking-widest normal-case">{sublabel}</span>
+    </th>
+  )
+}
+
+function DataCell({ value, suffix }: { value: number; suffix: string }) {
+  const isEmpty = value === 0
+  return (
+    <td className="px-3 py-3 text-right">
+      <span className={`font-mono text-xs ${isEmpty ? 'text-wk-muted/40' : 'text-wk-soft'}`}>
+        {value}
+      </span>
+      <span className="font-mono text-[9px] text-wk-muted/40 ml-0.5">{suffix}</span>
+    </td>
+  )
+}
 
 function RankBadge({ change }: { change: number | null }) {
   if (change === null || change === 0) {
-    return <span className="font-mono text-[10px] text-wk-muted w-8 text-center shrink-0">–</span>
+    return <span className="font-mono text-[10px] text-wk-muted/40">–</span>
   }
   if (change > 0) {
     return (
-      <span className="font-mono text-[10px] font-bold text-wk-green w-8 text-center shrink-0 tracking-tighter">
+      <span className="font-mono text-[10px] font-bold text-wk-green tracking-tighter">
         ↑{change}
       </span>
     )
   }
   return (
-    <span className="font-mono text-[10px] font-bold text-wk-red w-8 text-center shrink-0 tracking-tighter">
+    <span className="font-mono text-[10px] font-bold text-wk-red tracking-tighter">
       ↓{Math.abs(change)}
     </span>
   )

@@ -63,49 +63,58 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     }
   }
 
-  // Herbereken punten per gebruiker
+  // Haal pre-tournament vraag-IDs eenmalig op voor bonus-opsplitsing
+  const { data: preQRows } = await supabase
+    .from('bonus_questions')
+    .select('id')
+    .eq('type', 'pre_tournament')
+  const preQuestionIds = new Set((preQRows ?? []).map((q) => q.id))
+
+  // Herbereken punten per gebruiker (inclusief breakdown)
   for (const userId of userIds) {
-    const { data: preds } = await supabase
-      .from('predictions')
-      .select('points_awarded')
-      .eq('user_id', userId)
-      .not('points_awarded', 'is', null)
+    const [predsRes, koRes, advRes, bonusRes, jokersRes] = await Promise.all([
+      supabase.from('predictions').select('points_awarded')
+        .eq('user_id', userId).not('points_awarded', 'is', null),
+      supabase.from('knockout_predictions').select('points_awarded')
+        .eq('user_id', userId).not('points_awarded', 'is', null),
+      supabase.from('group_advancement').select('points_awarded')
+        .eq('user_id', userId).not('points_awarded', 'is', null),
+      supabase.from('bonus_answers').select('points_awarded, question_id')
+        .eq('user_id', userId).not('points_awarded', 'is', null),
+      supabase.from('jokers').select('id').eq('user_id', userId),
+    ])
 
-    const { data: knockoutPreds } = await supabase
-      .from('knockout_predictions')
-      .select('points_awarded')
-      .eq('user_id', userId)
-      .not('points_awarded', 'is', null)
+    const preds       = predsRes.data   ?? []
+    const koPreds     = koRes.data      ?? []
+    const advancement = advRes.data     ?? []
+    const bonuses     = bonusRes.data   ?? []
+    const jokerRows   = jokersRes.data  ?? []
 
-    const { data: advancement } = await supabase
-      .from('group_advancement')
-      .select('points_awarded')
-      .eq('user_id', userId)
-      .not('points_awarded', 'is', null)
+    const groupMatchPts     = preds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const groupStandingsPts = advancement.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const knockoutPts       = koPreds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const bonusPrePts       = bonuses.filter((b) => preQuestionIds.has(b.question_id))
+                                .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const bonusDailyPts     = bonuses.filter((b) => !preQuestionIds.has(b.question_id))
+                                .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const jokersPlayed      = jokerRows.length
 
-    const { data: bonuses } = await supabase
-      .from('bonus_answers')
-      .select('points_awarded')
-      .eq('user_id', userId)
-      .not('points_awarded', 'is', null)
-
-    const predPts        = (preds         ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const knockoutPts    = (knockoutPreds ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const advancementPts = (advancement   ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const bonusPts       = (bonuses       ?? []).reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const totalPts       = predPts + knockoutPts + advancementPts + bonusPts
-
-    const exactHits      = (preds ?? []).filter((r) => (r.points_awarded ?? 0) >= 5).length
-    const correctResults = (preds ?? []).filter((r) => r.points_awarded && r.points_awarded >= 2 && r.points_awarded < 5).length
+    const totalPts       = groupMatchPts + groupStandingsPts + knockoutPts + bonusPrePts + bonusDailyPts
+    const exactHits      = preds.filter((r) => (r.points_awarded ?? 0) >= 5).length
+    const correctResults = preds.filter((r) => r.points_awarded != null && r.points_awarded >= 2 && r.points_awarded < 5).length
 
     const userPoules = memberships.filter((m) => m.user_id === userId).map((m) => m.poule_id)
     for (const pouleId of userPoules) {
-      await supabase
-        .from('poule_scores')
-        .upsert(
-          { user_id: userId, poule_id: pouleId, total_pts: totalPts, exact_hits: exactHits, correct_results: correctResults },
-          { onConflict: 'user_id,poule_id' }
-        )
+      await supabase.from('poule_scores').upsert(
+        {
+          user_id: userId, poule_id: pouleId,
+          total_pts: totalPts, exact_hits: exactHits, correct_results: correctResults,
+          group_match_pts: groupMatchPts, group_standings_pts: groupStandingsPts,
+          knockout_pts: knockoutPts, bonus_pre_pts: bonusPrePts, bonus_daily_pts: bonusDailyPts,
+          jokers_played: jokersPlayed,
+        },
+        { onConflict: 'user_id,poule_id' }
+      )
     }
   }
 

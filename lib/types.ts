@@ -314,8 +314,14 @@ export type Database = {
       }
       poule_scores: {
         Row: {
+          bonus_daily_pts: number
+          bonus_pre_pts: number
           correct_results: number
           exact_hits: number
+          group_match_pts: number
+          group_standings_pts: number
+          jokers_played: number
+          knockout_pts: number
           poule_id: string
           rank_change: number | null
           total_pts: number
@@ -323,8 +329,14 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          bonus_daily_pts?: number
+          bonus_pre_pts?: number
           correct_results?: number
           exact_hits?: number
+          group_match_pts?: number
+          group_standings_pts?: number
+          jokers_played?: number
+          knockout_pts?: number
           poule_id: string
           rank_change?: number | null
           total_pts?: number
@@ -332,8 +344,14 @@ export type Database = {
           user_id: string
         }
         Update: {
+          bonus_daily_pts?: number
+          bonus_pre_pts?: number
           correct_results?: number
           exact_hits?: number
+          group_match_pts?: number
+          group_standings_pts?: number
+          jokers_played?: number
+          knockout_pts?: number
           poule_id?: string
           rank_change?: number | null
           total_pts?: number
