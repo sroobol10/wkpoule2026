@@ -33,6 +33,7 @@ type Props = {
   advancement: AdvancementEntry[]
   bracketPicks: BracketPickEntry[]
   groupStageStartsAt: string | null
+  actualWinners?: Record<number, string>
 }
 
 const STAGE_ORDER = ['r32', 'r16', 'qf', 'sf', 'final']
@@ -59,6 +60,7 @@ export default function KnockoutClient({
   advancement,
   bracketPicks,
   groupStageStartsAt,
+  actualWinners = {},
 }: Props) {
   const [activeTab, setActiveTab] = useState<'bracket' | 'live'>('bracket')
 
@@ -107,6 +109,7 @@ export default function KnockoutClient({
             advancement={advancement}
             bracketPicks={bracketPicks}
             locked={bracketLocked}
+            actualWinners={actualWinners}
           />
         </>
       )}

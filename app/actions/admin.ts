@@ -17,6 +17,41 @@ async function assertAdmin() {
   return { supabase, userId: user.id }
 }
 
+// ─── Bracket-voorspellingen scoren voor één KO-wedstrijd ─────────────────────
+async function scoreBracketPicksForMatch(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  matchId: string,
+  stage: string,
+  winnerId: string
+): Promise<string[]> {
+  const pointsForRound = KO_POINTS[stage] ?? 0
+  if (pointsForRound === 0) return []
+
+  const { data: match } = await supabase
+    .from('matches').select('match_number').eq('id', matchId).single()
+  if (!match?.match_number) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: picks } = await (supabase as any)
+    .from('bracket_predictions')
+    .select('id, user_id, predicted_team_id')
+    .eq('slot', match.match_number)
+
+  if (!picks?.length) return []
+
+  const affectedUsers: string[] = []
+  for (const pick of picks as { id: string; user_id: string; predicted_team_id: string }[]) {
+    const pts = pick.predicted_team_id === winnerId ? pointsForRound : 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any)
+      .from('bracket_predictions')
+      .update({ points_awarded: pts })
+      .eq('id', pick.id)
+    affectedUsers.push(pick.user_id)
+  }
+  return affectedUsers
+}
+
 // ─── Point system ─────────────────────────────────────────────────────────────
 // Exact score:                               5 pt
 // Correct result + één doelpunttotaal klopt: 3 pt
@@ -73,7 +108,7 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
 
   // Herbereken punten per gebruiker (inclusief breakdown)
   for (const userId of userIds) {
-    const [predsRes, koRes, advRes, bonusRes, jokersRes] = await Promise.all([
+    const [predsRes, koRes, advRes, bonusRes, jokersRes, bracketRes] = await Promise.all([
       supabase.from('predictions').select('points_awarded')
         .eq('user_id', userId).not('points_awarded', 'is', null),
       supabase.from('knockout_predictions').select('points_awarded')
@@ -83,6 +118,9 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
       supabase.from('bonus_answers').select('points_awarded, question_id')
         .eq('user_id', userId).not('points_awarded', 'is', null),
       supabase.from('jokers').select('id').eq('user_id', userId),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from('bracket_predictions').select('points_awarded')
+        .eq('user_id', userId).not('points_awarded', 'is', null),
     ])
 
     const preds       = predsRes.data   ?? []
@@ -90,10 +128,13 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     const advancement = advRes.data     ?? []
     const bonuses     = bonusRes.data   ?? []
     const jokerRows   = jokersRes.data  ?? []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bracketRows = (bracketRes.data ?? []) as { points_awarded: number | null }[]
 
     const groupMatchPts     = preds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const groupStandingsPts = advancement.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const knockoutPts       = koPreds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+                            + bracketRows.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const bonusPrePts       = bonuses.filter((b) => preQuestionIds.has(b.question_id))
                                 .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const bonusDailyPts     = bonuses.filter((b) => !preQuestionIds.has(b.question_id))
@@ -254,12 +295,22 @@ export async function setKnockoutResult(
     .select('id, user_id, predicted_winner_id')
     .eq('match_id', matchId)
 
+  const affectedUsers = new Set<string>()
+
   if (preds && preds.length > 0) {
     for (const pred of preds) {
       const pts = pred.predicted_winner_id === winnerId ? pointsForRound : 0
       await supabase.from('knockout_predictions').update({ points_awarded: pts }).eq('id', pred.id)
+      affectedUsers.add(pred.user_id)
     }
-    await recalcPouleScores(supabase, [...new Set(preds.map((p) => p.user_id))])
+  }
+
+  // Bracket-voorspellingen (pre-toernooi) ook scoren
+  const bracketUsers = await scoreBracketPicksForMatch(supabase, matchId, match.stage, winnerId)
+  bracketUsers.forEach((u) => affectedUsers.add(u))
+
+  if (affectedUsers.size > 0) {
+    await recalcPouleScores(supabase, [...affectedUsers])
   }
 
   revalidatePath('/admin')
@@ -278,7 +329,9 @@ export async function autoFillGroupResults(): Promise<AdminResult> {
     .eq('stage', 'group')
     .eq('result_entered', false)
 
-  if (!matches || matches.length === 0) return { ok: true }
+  if (!matches || matches.length === 0) {
+    return { ok: false, error: 'Geen openstaande wedstrijden gevonden — is Leegmaken uitgevoerd?' }
+  }
 
   const affectedUserIds = new Set<string>()
 
@@ -286,10 +339,11 @@ export async function autoFillGroupResults(): Promise<AdminResult> {
     const homeScore = Math.floor(Math.random() * 5)
     const awayScore = Math.floor(Math.random() * 5)
 
-    await supabase
+    const { error: mErr } = await supabase
       .from('matches')
       .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
       .eq('id', match.id)
+    if (mErr) return { ok: false, error: `Match update mislukt: ${mErr.message}` }
 
     const { data: preds } = await supabase
       .from('predictions')
@@ -315,16 +369,10 @@ export async function autoFillGroupResults(): Promise<AdminResult> {
 
 // ─── Demo: clear all group match results and reset prediction points ───────────
 export async function clearAllGroupResults(): Promise<AdminResult> {
-  // Verify admin via session client, then use service role to bypass RLS.
-  // The DB trigger only fires when result_entered goes false→true, so clearing
-  // never triggers automatic recalculation — we must do it manually with a
-  // client that can write other users' rows.
-  const { supabase: sessionClient } = await assertAdmin()
-  if (!sessionClient) return { ok: false, error: 'Geen toegang.' }
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
-  const db = createServiceClient()
-
-  const { data: groupMatches } = await db
+  const { data: groupMatches } = await supabase
     .from('matches')
     .select('id')
     .eq('stage', 'group')
@@ -333,20 +381,28 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
 
   const matchIds = groupMatches.map((m) => m.id)
 
-  await db
+  // Matches resetten (admin heeft ALL-policy op matches)
+  const { error: matchErr } = await supabase
     .from('matches')
     .update({ home_score: null, away_score: null, result_entered: false })
     .in('id', matchIds)
+  if (matchErr) return { ok: false, error: `Matches: ${matchErr.message}` }
 
-  await db
+  // Punten wissen (admin heeft nu ALL-policy op predictions)
+  const { error: predErr } = await supabase
     .from('predictions')
     .update({ points_awarded: null })
     .in('match_id', matchIds)
+  if (predErr) return { ok: false, error: `Voorspellingen: ${predErr.message}` }
 
-  await db
+  // Klassement nullen (admin heeft nu ALL-policy op poule_scores)
+  const { error: scoreErr } = await supabase
     .from('poule_scores')
-    .update({ total_pts: 0, exact_hits: 0, correct_results: 0 })
+    .update({ total_pts: 0, exact_hits: 0, correct_results: 0, rank_change: null,
+              group_match_pts: 0, group_standings_pts: 0, knockout_pts: 0,
+              bonus_pre_pts: 0, bonus_daily_pts: 0 })
     .not('user_id', 'is', null)
+  if (scoreErr) return { ok: false, error: `Standen: ${scoreErr.message}` }
 
   revalidatePath('/admin')
   revalidatePath('/voorspellingen')
@@ -601,10 +657,8 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
   const { supabase } = await assertAdmin()
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
-  const db = createServiceClient()
-
-  // Haal alle KO-wedstrijden op
-  const { data: koMatches } = await db
+  // Haal alle KO-wedstrijden op (admin heeft SELECT op alle matches)
+  const { data: koMatches } = await supabase
     .from('matches')
     .select('id, match_number, stage, home_team_id, away_team_id, home_score, away_score, result_entered')
     .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
@@ -618,7 +672,7 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
   const matchBySlot = Object.fromEntries(koMatches.map((m) => [m.match_number, m]))
 
   // Bereken groepsfinale-standen voor groep-seeds (1A, 2B etc.)
-  const { data: groupMatches } = await db
+  const { data: groupMatches } = await supabase
     .from('matches')
     .select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(group_name)')
     .eq('stage', 'group')
@@ -710,7 +764,7 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
       if (!homeId || !awayId) continue
 
       const m = matchBySlot[bm.slot]
-      await db.from('matches').update({ home_team_id: homeId, away_team_id: awayId }).eq('id', m.id)
+      await supabase.from('matches').update({ home_team_id: homeId, away_team_id: awayId }).eq('id', m.id)
       updated++
     }
 
@@ -721,5 +775,91 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
 
   revalidatePath('/admin')
   revalidatePath('/knockout')
+  return { ok: true }
+}
+
+// ─── Simuleer volledige KO-fase in één klik ───────────────────────────────────
+// Vult alle rondes achter elkaar: R32 → R16 → KF → HF → Finale
+// Vereist dat ko:create al gedraaid heeft (KO-wedstrijden bestaan in DB).
+export async function simulateFullKo(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const db = createServiceClient()
+  const affectedUserIds = new Set<string>()
+  let totalFilled = 0
+  const MAX_PASSES = 10 // veiligheidsgrens
+
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    // Zoek KO-wedstrijden met teams maar nog geen uitslag
+    const { data: open } = await supabase
+      .from('matches')
+      .select('id, stage, home_team_id, away_team_id')
+      .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
+      .eq('result_entered', false)
+      .not('home_team_id', 'is', null)
+      .not('away_team_id', 'is', null)
+      .order('match_number')
+
+    if (!open || open.length === 0) {
+      // Probeer volgende ronde teams toe te wijzen en ga opnieuw
+      const assignResult = await assignNextKoRoundTeams()
+      if (!assignResult.ok) break // geen teams meer toe te wijzen → klaar
+      continue
+    }
+
+    for (const match of open) {
+      // Genereer willekeurige uitslag met gegarandeerde winnaar
+      let homeScore = Math.floor(Math.random() * 4)
+      let awayScore = Math.floor(Math.random() * 4)
+      if (homeScore === awayScore) {
+        // Verlengingstijd: willekeurig een winnaar
+        if (Math.random() < 0.5) { homeScore++ } else { awayScore++ }
+      }
+      const winnerId = homeScore > awayScore ? match.home_team_id! : match.away_team_id!
+
+      const { error: mErr } = await supabase
+        .from('matches')
+        .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
+        .eq('id', match.id)
+      if (mErr) return { ok: false, error: `KO match update mislukt: ${mErr.message}` }
+
+      const pointsForRound = KO_POINTS[match.stage] ?? 0
+
+      const { data: preds } = await supabase
+        .from('knockout_predictions')
+        .select('id, user_id, predicted_winner_id')
+        .eq('match_id', match.id)
+
+      if (preds && preds.length > 0) {
+        for (const pred of preds) {
+          const pts = pred.predicted_winner_id === winnerId ? pointsForRound : 0
+          await supabase.from('knockout_predictions').update({ points_awarded: pts }).eq('id', pred.id)
+          affectedUserIds.add(pred.user_id)
+        }
+      }
+
+      // Bracket-voorspellingen (pre-toernooi picks) scoren
+      const bracketUsers = await scoreBracketPicksForMatch(supabase, match.id, match.stage, winnerId)
+      bracketUsers.forEach((u) => affectedUserIds.add(u))
+
+      totalFilled++
+    }
+
+    // Teams toewijzen voor volgende ronde na het invullen van deze ronde
+    await assignNextKoRoundTeams()
+  }
+
+  if (totalFilled > 0) {
+    await recalcPouleScores(supabase, [...affectedUserIds])
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/knockout')
+  revalidatePath('/poules')
+
+  if (totalFilled === 0) {
+    return { ok: false, error: 'Geen KO-wedstrijden gevonden. Voer eerst npm run ko:create uit.' }
+  }
   return { ok: true }
 }

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { savePredictions, saveGroupAdvancement } from '@/app/actions/predictions'
 import { toggleJoker } from '@/app/actions/jokers'
@@ -43,6 +44,15 @@ function ptsBadgeClass(pts: number) {
 }
 
 export default function PredictionsClient({ matches, predMap, jokerMatchIds, pouleStandings, currentUserId }: Props) {
+  const router = useRouter()
+
+  // Als punten al berekend zijn maar result_entered nog false → data is stale → ververs
+  useEffect(() => {
+    const isStale = matches.some(
+      (m) => !m.result_entered && predMap[m.id]?.points_awarded != null
+    )
+    if (isStale) router.refresh()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [activeGroup, setActiveGroup] = useState('A')
   const [scores, setScores] = useState<Record<string, { home: string; away: string }>>(() => {
     const init: Record<string, { home: string; away: string }> = {}
@@ -312,7 +322,7 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
 
           <div className="divide-y divide-white/5">
             {groupMatches.map((match) => {
-              const locked = new Date(match.kickoff_at) <= now
+              const locked = new Date(match.kickoff_at) <= now || match.result_entered
               const score = scores[match.id]
               const pts = predMap[match.id]?.points_awarded
               return (
@@ -568,12 +578,15 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
             </div>
 
             {/* Score */}
-            <div className="shrink-0">
+            <div className="shrink-0 text-center">
               {match.result_entered ? (
-                <div className="flex items-center gap-1">
-                  <span className="w-10 text-center font-display text-2xl text-wk-text">{match.home_score}</span>
-                  <span className="font-mono text-base text-wk-muted">–</span>
-                  <span className="w-10 text-center font-display text-2xl text-wk-text">{match.away_score}</span>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-10 text-center font-display text-2xl text-wk-text">{match.home_score}</span>
+                    <span className="font-mono text-base text-wk-muted">–</span>
+                    <span className="w-10 text-center font-display text-2xl text-wk-text">{match.away_score}</span>
+                  </div>
+                  <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mt-0.5">Uitslag</p>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5">
@@ -776,7 +789,7 @@ function GroupStandingsInline({
     if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 }
   }
 
-  // Build a quick team lookup from the matches themselves
+  // Team-lookup vanuit de wedstrijden zelf
   const teamMap: Record<string, Team> = {}
   for (const m of groupMatches) {
     if (m.home_team) teamMap[m.home_team.id] = m.home_team
@@ -784,11 +797,28 @@ function GroupStandingsInline({
   }
 
   let hasAnyScore = false
+  let hasActualResult = false
+
   for (const m of groupMatches) {
-    const s = scores[m.id]
-    if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
-    hasAnyScore = true
-    const h = Number(s.home), a = Number(s.away)
+    if (!m.home_team || !m.away_team) continue
+
+    let h: number, a: number
+
+    if (m.result_entered && m.home_score !== null && m.away_score !== null) {
+      // Werkelijke uitslag — hogere prioriteit dan voorspelling
+      h = m.home_score
+      a = m.away_score
+      hasAnyScore = true
+      hasActualResult = true
+    } else {
+      // Eigen voorspelling
+      const s = scores[m.id]
+      if (!s || s.home === '' || s.away === '') continue
+      h = Number(s.home)
+      a = Number(s.away)
+      hasAnyScore = true
+    }
+
     st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a
     st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h
     if (h > a) st[m.home_team.id].points += 3
@@ -802,11 +832,18 @@ function GroupStandingsInline({
   // Nummer 3 die door is, op basis van beste-8-berekening
   const advancingThird = advancementPicks[2]
 
+  const allPlayed = groupMatches.every((m) => m.result_entered)
+  const standingLabel = allPlayed
+    ? `Actuele stand groep ${group}`
+    : hasActualResult
+      ? `Lopende stand groep ${group}`
+      : `Voorspelde stand groep ${group}`
+
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
       <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
         <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-          Voorspelde stand groep {group}
+          {standingLabel}
         </span>
         {!hasAnyScore && (
           <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest uppercase italic">

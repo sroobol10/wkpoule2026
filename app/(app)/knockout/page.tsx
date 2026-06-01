@@ -55,12 +55,27 @@ export default async function KnockoutPage() {
         .single(),
     ])
 
-  // Fetch bracket picks — handle gracefully if table doesn't exist yet
+  // Bracket picks (incl. points_awarded na simulatie/live)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bracketPicks } = await (supabase as any)
     .from('bracket_predictions')
-    .select('slot, predicted_team_id')
+    .select('slot, predicted_team_id, points_awarded')
     .eq('user_id', user.id)
+
+  // Werkelijke KO-uitslagen voor feedback in de bracket
+  const { data: koResults } = await supabase
+    .from('matches')
+    .select('match_number, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
+    .eq('result_entered', true)
+
+  // slot → werkelijke winnaar-ID
+  const actualWinners: Record<number, string> = {}
+  for (const m of koResults ?? []) {
+    if (m.match_number && m.home_score !== null && m.away_score !== null && m.home_team_id && m.away_team_id) {
+      actualWinners[m.match_number] = m.home_score > m.away_score ? m.home_team_id : m.away_team_id
+    }
+  }
 
   return (
     <KnockoutClient
@@ -71,6 +86,7 @@ export default async function KnockoutPage() {
       advancement={advancement ?? []}
       bracketPicks={bracketPicks ?? []}
       groupStageStartsAt={firstGroupMatch?.kickoff_at ?? null}
+      actualWinners={actualWinners}
     />
   )
 }

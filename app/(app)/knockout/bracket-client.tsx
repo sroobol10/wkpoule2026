@@ -9,13 +9,14 @@ import { BRACKET, THIRD_SLOT_GROUPS, assignThirdPlaceSlots } from '@/lib/bracket
 
 type Team = { id: string; name: string; flag_url: string; group_name: string }
 type AdvancementEntry = { team_id: string; predicted_position: number }
-type BracketPickEntry = { slot: number; predicted_team_id: string }
+type BracketPickEntry = { slot: number; predicted_team_id: string; points_awarded?: number | null }
 
 type Props = {
   teams: Team[]
   advancement: AdvancementEntry[]
   bracketPicks: BracketPickEntry[]
   locked: boolean
+  actualWinners?: Record<number, string>
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -111,7 +112,7 @@ function getDownstreamSlots(changedSlot: number): number[] {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BracketClient({ teams, advancement, bracketPicks, locked }: Props) {
+export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {} }: Props) {
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
   // Build advancement map: group -> pos -> teamId
@@ -143,6 +144,13 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
   // Bracket picks state
   const [picks, setPicks] = useState<Record<number, string>>(() =>
     Object.fromEntries(bracketPicks.map((p) => [p.slot, p.predicted_team_id]))
+  )
+
+  // Points per slot (bracket_predictions.points_awarded)
+  const ptsPerSlot = Object.fromEntries(
+    bracketPicks
+      .filter((p) => p.points_awarded != null)
+      .map((p) => [p.slot, p.points_awarded!])
   )
   const [isPending, startTransition] = useTransition()
   const [activeStage, setActiveStage] = useState('r32')
@@ -258,6 +266,8 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               locked={locked}
               isPending={isPending}
               onPick={(teamId) => pickWinner(m.slot, teamId)}
+              actualWinnerId={actualWinners[matchDef.slot] ?? null}
+              pts={ptsPerSlot[matchDef.slot] ?? null}
             />
           )
         })}
@@ -274,23 +284,56 @@ function BracketMatchCard({
   locked,
   isPending,
   onPick,
+  actualWinnerId,
+  pts,
 }: {
   match: ResolvedMatch
   teamMap: Record<string, Team>
   locked: boolean
   isPending: boolean
   onPick: (teamId: string) => void
+  actualWinnerId: string | null
+  pts: number | null
 }) {
   const homeTeam = match.home ? teamMap[match.home] : null
   const awayTeam = match.away ? teamMap[match.away] : null
   const bothKnown = !!homeTeam && !!awayTeam
 
+  const isPlayed = !!actualWinnerId
+  const userPick = match.winner
+  const isCorrect = isPlayed && userPick && userPick === actualWinnerId
+  const isWrong   = isPlayed && userPick && userPick !== actualWinnerId
+
   return (
-    <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-white/5">
+    <div className={`bg-wk-surface border rounded-xl overflow-hidden ${
+      isCorrect ? 'border-wk-green/40' : isWrong ? 'border-wk-red/30' : 'border-white/10'
+    }`}>
+      {/* Header */}
+      <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
         <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
           Wedstrijd {match.slot}
         </span>
+        <div className="flex items-center gap-2">
+          {isCorrect && (
+            <span className="font-mono text-[9px] font-bold text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
+              ✓ Correct
+            </span>
+          )}
+          {isWrong && (
+            <span className="font-mono text-[9px] font-bold text-wk-red border border-wk-red/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
+              ✗ Fout
+            </span>
+          )}
+          {pts !== null && (
+            <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-[0.12em] uppercase ${
+              pts > 0
+                ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
+                : 'bg-white/5 border-white/10 text-wk-muted'
+            }`}>
+              {pts} pt
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="px-4 py-4">
@@ -305,6 +348,7 @@ function BracketMatchCard({
             <TeamBtn
               team={homeTeam}
               selected={match.winner === homeTeam.id}
+              isActualWinner={actualWinnerId === homeTeam.id}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(homeTeam.id)}
@@ -315,6 +359,7 @@ function BracketMatchCard({
             <TeamBtn
               team={awayTeam}
               selected={match.winner === awayTeam.id}
+              isActualWinner={actualWinnerId === awayTeam.id}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(awayTeam.id)}
@@ -329,19 +374,33 @@ function BracketMatchCard({
 function TeamBtn({
   team,
   selected,
+  isActualWinner,
   disabled,
   isPending,
   onClick,
 }: {
   team: Team
   selected: boolean
+  isActualWinner: boolean
   disabled: boolean
   isPending: boolean
   onClick: () => void
 }) {
-  const colorClass = selected
-    ? 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
-    : 'border-white/10 bg-wk-bg2 text-wk-soft'
+  // Kleur: correct (groen) > fout (rood/muted) > pick (goud) > neutraal
+  let colorClass: string
+  if (isActualWinner && selected) {
+    colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'
+  } else if (isActualWinner && !selected) {
+    // Werkelijke winnaar, maar niet de pick van de gebruiker
+    colorClass = 'border-wk-gold/40 bg-wk-gold/5 text-wk-gold'
+  } else if (!isActualWinner && selected && disabled) {
+    // Verkeerde pick (match gespeeld, dit team verloor)
+    colorClass = 'border-wk-red/30 bg-wk-red/5 text-wk-muted line-through'
+  } else if (selected) {
+    colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
+  } else {
+    colorClass = 'border-white/10 bg-wk-bg2 text-wk-soft'
+  }
 
   return (
     <button
@@ -361,10 +420,17 @@ function TeamBtn({
       <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight">
         {team.name}
       </span>
-      {selected && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">
-          ★ Mijn keuze
-        </span>
+      {isActualWinner && selected && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-green">✓ Correct</span>
+      )}
+      {isActualWinner && !selected && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">Uitslag</span>
+      )}
+      {!isActualWinner && selected && !disabled && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">★ Mijn keuze</span>
+      )}
+      {!isActualWinner && selected && disabled && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-red">✗ Fout</span>
       )}
     </button>
   )

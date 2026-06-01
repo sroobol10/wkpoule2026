@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
@@ -668,12 +668,21 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
     })
   }
 
+  function handleSimulateFullKo() {
+    startTransition(async () => {
+      const result = await simulateFullKo()
+      setToast({ msg: result.ok ? 'KO-fase volledig gesimuleerd!' : result.error, ok: result.ok })
+      setTimeout(() => setToast(null), 5000)
+      if (result.ok) router.refresh()
+    })
+  }
+
   if (availableStages.length === 0) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center flex-wrap gap-2">
           {toast && (
-            <span className={`font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+            <span className={`font-mono text-[10px] tracking-[0.12em] flex-1 ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
               {toast.msg}
             </span>
           )}
@@ -683,6 +692,13 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
             className="rounded bg-wk-blue/80 px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
             {isPending ? '…' : 'Vul volgende ronde in'}
+          </button>
+          <button
+            onClick={handleSimulateFullKo}
+            disabled={isPending}
+            className="rounded bg-wk-green px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {isPending ? '…' : 'Simuleer volledige KO'}
           </button>
         </div>
         <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center">
@@ -699,9 +715,9 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center flex-wrap gap-2">
         {toast && (
-          <span className={`font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+          <span className={`font-mono text-[10px] tracking-[0.12em] flex-1 ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
             {toast.msg}
           </span>
         )}
@@ -711,6 +727,13 @@ function KnockoutTab({ matches, teamMap, cardsByMatch }: { matches: Match[]; tea
           className="rounded bg-wk-blue/80 px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
           {isPending ? '…' : 'Vul volgende ronde in'}
+        </button>
+        <button
+          onClick={handleSimulateFullKo}
+          disabled={isPending}
+          className="rounded bg-wk-green px-3 py-1.5 text-[10px] font-mono font-semibold text-white tracking-[0.12em] uppercase hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {isPending ? '…' : 'Simuleer volledige KO'}
         </button>
       </div>
       {availableStages.map((stage) => {
