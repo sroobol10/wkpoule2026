@@ -24,10 +24,16 @@ type Props = {
   teams: Team[]
 }
 
-// Questions that should show a team picker instead of free text
+// Vragen waarbij een landkeuze getoond wordt i.p.v. vrije tekst
 function isTeamQuestion(question: string) {
   const q = question.toLowerCase()
-  return q.includes('kampioen') || q.includes('winnaar') && q.includes('land')
+  return (
+    q.includes('kampioen') ||
+    (q.includes('winnaar') && q.includes('land')) ||
+    q.includes('kaartenkoning') ||
+    q.includes('desastreuze') ||
+    q.includes('goalgettergigant')
+  )
 }
 
 export default function BonusvragenClient({ questions, answerMap, teams }: Props) {
