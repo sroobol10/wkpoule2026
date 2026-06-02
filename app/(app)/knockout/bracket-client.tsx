@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { saveBracketPick, clearBracketSlots } from '@/app/actions/bracket'
 import { BRACKET, THIRD_SLOT_GROUPS, assignThirdPlaceSlots } from '@/lib/bracket'
@@ -406,6 +406,18 @@ function TeamBtn({
   const pickCorrect = selected && stageHasResults && advanced
   const pickWrong   = selected && stageHasResults && !advanced
 
+  // Pop-animatie wanneer team net geselecteerd wordt
+  const [popping, setPopping] = useState(false)
+  const prevSelected = useRef(selected)
+  useEffect(() => {
+    if (selected && !prevSelected.current) {
+      setPopping(true)
+      const t = setTimeout(() => setPopping(false), 350)
+      return () => clearTimeout(t)
+    }
+    prevSelected.current = selected
+  }, [selected])
+
   let colorClass: string
   if (pickCorrect) {
     colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'
@@ -426,7 +438,7 @@ function TeamBtn({
       disabled={disabled || isPending}
       className={`flex-1 flex flex-col items-center gap-2 px-3 py-3 rounded-lg border transition-colors disabled:cursor-default ${colorClass} ${
         !disabled ? 'hover:border-white/25 hover:bg-white/5 cursor-pointer' : ''
-      }`}
+      } ${popping ? 'animate-pop' : ''}`}
     >
       <Image
         src={team.flag_url}

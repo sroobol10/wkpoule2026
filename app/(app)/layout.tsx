@@ -32,21 +32,21 @@ export default async function AppLayout({ children }: Readonly<{ children: React
         {/* Header banner */}
         <div className="relative h-44 md:h-[346px] lg:h-[432px] xl:h-[504px] min-[1600px]:h-[680px] w-full overflow-hidden">
           <Image
-            src={isRetro ? '/retro-1988.jpg' : '/worldcup.jpeg'}
+            src={isRetro ? '/retro-1988.jpg' : '/world-cup-banner.jpg'}
             alt={isRetro ? 'EK 1988 Retro' : 'WK 2026'}
             fill
-            className="object-cover object-center"
+            className={`object-cover object-center ${isRetro ? 'animate-ken-burns' : ''}`}
             priority
           />
           {/* Gradient overlays */}
-          <div className={`absolute inset-0 bg-gradient-to-b ${isRetro ? 'from-orange-900/60 via-transparent to-orange-900/80' : 'from-black/55 via-black/10 to-black/85'}`} />
+          <div className={`absolute inset-0 bg-gradient-to-b ${isRetro ? 'from-orange-900/60 via-transparent to-orange-900/80 animate-retro-shimmer' : 'from-black/55 via-black/10 to-black/85'}`} />
           <div className={`absolute inset-0 bg-gradient-to-r ${isRetro ? 'from-orange-900/50 via-transparent to-orange-900/40' : 'from-black/50 via-transparent to-black/40'}`} />
 
           {/* Top chrome */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 md:px-8 pt-5">
             <div className="flex items-center gap-3">
               <span className="bg-wk-red text-white font-mono font-bold text-[11px] tracking-[0.2em] uppercase px-2.5 py-1 rounded">
-                {isRetro ? 'EK 1988 VIBES' : 'WK&nbsp;Poule'}
+                {isRetro ? 'EK 1988 VIBES' : 'WK Poule'}
               </span>
               <span className="text-white/60 font-mono text-[11px] tracking-[0.16em] uppercase hidden sm:block">
                 {isRetro ? 'Oranje Boven' : 'Editie 2026'}

@@ -365,7 +365,7 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
               <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase animate-pulse">Opslaan…</span>
             )}
             {saveStatus === 'saved' && (
-              <span className="font-mono text-[10px] text-wk-green tracking-[0.14em] uppercase">✓ Automatisch opgeslagen</span>
+              <span className="font-mono text-[10px] text-wk-green tracking-[0.14em] uppercase animate-check-in">✓ Automatisch opgeslagen</span>
             )}
             {saveStatus === 'error' && (
               <span className="font-mono text-[10px] text-wk-red tracking-[0.14em] uppercase">Fout bij opslaan</span>
@@ -682,23 +682,27 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
               ) : (
                 <div className="flex items-center gap-1.5">
                   <input
-                    type="number"
-                    min={0}
-                    max={99}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     disabled={locked}
                     value={score?.home ?? ''}
                     onChange={(e) => onScoreChange(match.id, 'home', e.target.value)}
+                    onKeyDown={(e) => { if (!/^[0-9Backspace Delete ArrowLeft ArrowRight Tab]/.test(e.key)) e.preventDefault() }}
+                    maxLength={2}
                     className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
                     placeholder="–"
                   />
                   <span className="text-wk-muted font-mono text-sm">:</span>
                   <input
-                    type="number"
-                    min={0}
-                    max={99}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     disabled={locked}
                     value={score?.away ?? ''}
                     onChange={(e) => onScoreChange(match.id, 'away', e.target.value)}
+                    onKeyDown={(e) => { if (!/^[0-9Backspace Delete ArrowLeft ArrowRight Tab]/.test(e.key)) e.preventDefault() }}
+                    maxLength={2}
                     className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
                     placeholder="–"
                   />

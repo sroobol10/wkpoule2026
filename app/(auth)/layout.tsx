@@ -10,7 +10,7 @@ export default function AuthLayout({ children }: Readonly<{ children: React.Reac
       <div className="w-full max-w-sm mb-6 rounded-2xl overflow-hidden shadow-2xl border border-white/10">
         <div className="relative h-44">
           <Image
-            src="/worldcup.jpeg"
+            src="/world-cup-banner.jpg"
             alt="WK 2026"
             fill
             className="object-cover object-center"
@@ -22,7 +22,7 @@ export default function AuthLayout({ children }: Readonly<{ children: React.Reac
           <div className="absolute bottom-0 left-0 px-5 py-4">
             <div className="flex items-center gap-2 mb-1">
               <span className="bg-wk-red text-white text-xs font-mono font-bold tracking-[0.2em] uppercase px-2 py-1 rounded">
-                WK&nbsp;Poule
+                WK Poule
               </span>
               <span className="text-white/70 font-mono text-xs tracking-widest uppercase">Editie 2026</span>
             </div>
@@ -30,7 +30,7 @@ export default function AuthLayout({ children }: Readonly<{ children: React.Reac
               De <span className="text-wk-gold">Poule</span>
             </p>
             <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1">
-              Voorspel · Volgen · Winnen
+              Voorspellen · Volgen · Winnen
             </p>
           </div>
         </div>
