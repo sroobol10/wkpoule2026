@@ -44,7 +44,9 @@ function isGoatQuestion(question: string) {
 
 export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {} }: Props) {
   const preTournament = questions.filter((q) => q.type === 'pre_tournament')
-  const daily = questions.filter((q) => q.type === 'daily')
+  const daily = questions
+    .filter((q) => q.type === 'daily')
+    .sort((a, b) => (b.unlock_date ?? '').localeCompare(a.unlock_date ?? ''))
   const answeredCount = questions.filter((q) => answerMap[q.id]?.answer).length
 
   return (
@@ -57,58 +59,60 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         </p>
       </div>
 
-      {/* Dagelijkse vragen eerst */}
-      {daily.length > 0 && (
-        <section>
-          <div className="flex items-center gap-3 mb-3">
-            <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-              Dagelijkse vragen
-            </span>
-            <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-              {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} · 2 pt per goed antwoord
-            </span>
-          </div>
-          <div className="space-y-3">
-            {daily.map((q) => (
-              <QuestionCard
-                key={q.id}
-                question={q}
-                existingAnswer={answerMap[q.id] ?? null}
-                accentClass="text-wk-blue"
-                teams={[]}
-                effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      <div className={daily.length > 0 ? "lg:grid lg:grid-cols-2 lg:gap-8 space-y-8 lg:space-y-0" : "space-y-8"}>
+        {/* Links: Vóór het toernooi */}
+        {preTournament.length > 0 && (
+          <section>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="font-mono text-[10px] text-wk-red border border-wk-red/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+                Vóór het toernooi
+              </span>
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+                {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} · 5 pt per goed antwoord
+              </span>
+            </div>
+            <div className="space-y-3">
+              {preTournament.map((q) => (
+                <QuestionCard
+                  key={q.id}
+                  question={q}
+                  existingAnswer={answerMap[q.id] ?? null}
+                  accentClass="text-wk-red"
+                  teams={isTeamQuestion(q.question) ? teams : []}
+                  tournamentStarted={anyMatchPlayed}
+                  isGoat={isGoatQuestion(q.question)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
-      {/* Vóór-het-toernooi vragen eronder */}
-      {preTournament.length > 0 && (
-        <section>
-          <div className="flex items-center gap-3 mb-3">
-            <span className="font-mono text-[10px] text-wk-red border border-wk-red/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-              Vóór het toernooi
-            </span>
-            <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-              {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} · 5 pt per goed antwoord
-            </span>
-          </div>
-          <div className="space-y-3">
-            {preTournament.map((q) => (
-              <QuestionCard
-                key={q.id}
-                question={q}
-                existingAnswer={answerMap[q.id] ?? null}
-                accentClass="text-wk-red"
-                teams={isTeamQuestion(q.question) ? teams : []}
-                tournamentStarted={anyMatchPlayed}
-                isGoat={isGoatQuestion(q.question)}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+        {/* Rechts: Dagelijkse vragen */}
+        {daily.length > 0 && (
+          <section>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+                Dagelijkse vragen
+              </span>
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+                {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} · 2 pt per goed antwoord
+              </span>
+            </div>
+            <div className="space-y-3">
+              {daily.map((q) => (
+                <QuestionCard
+                  key={q.id}
+                  question={q}
+                  existingAnswer={answerMap[q.id] ?? null}
+                  accentClass="text-wk-blue"
+                  teams={[]}
+                  effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
 
       {questions.length === 0 && (
         <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center">

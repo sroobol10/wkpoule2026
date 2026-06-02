@@ -1,16 +1,18 @@
-import type { Metadata } from 'next'
-import Image from 'next/image'
+import type { Metadata } from "next";
+import Image from "next/image";
 
-export const metadata: Metadata = { title: 'WK Poule 2026' }
+export const metadata: Metadata = { title: "WK Poule 2026" };
 
-export default function AuthLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function AuthLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-wk-bg px-4 py-12">
       {/* Header card */}
       <div className="w-full max-w-sm mb-6 rounded-2xl overflow-hidden shadow-2xl border border-white/10">
         <div className="relative h-44">
           <Image
-            src="/world-cup-banner.jpg"
+            src="/world-cup-default.jpg"
             alt="WK 2026"
             fill
             className="object-cover object-center"
@@ -24,7 +26,9 @@ export default function AuthLayout({ children }: Readonly<{ children: React.Reac
               <span className="bg-wk-red text-white text-xs font-mono font-bold tracking-[0.2em] uppercase px-2 py-1 rounded">
                 WK Poule
               </span>
-              <span className="text-white/70 font-mono text-xs tracking-widest uppercase">Editie 2026</span>
+              <span className="text-white/70 font-mono text-xs tracking-widest uppercase">
+                Editie 2026
+              </span>
             </div>
             <p className="font-display text-2xl text-white uppercase leading-none tracking-tight">
               De <span className="text-wk-gold">Poule</span>
@@ -38,5 +42,5 @@ export default function AuthLayout({ children }: Readonly<{ children: React.Reac
 
       {children}
     </div>
-  )
+  );
 }

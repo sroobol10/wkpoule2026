@@ -29,11 +29,31 @@ export type MatchStat = {
   distribution: ScoreDist[]
 }
 
+export type AccuracyStats = {
+  playedMatches: number
+  totalPredictions: number
+  exactCount: number
+  correctResultCount: number
+}
+
+export type BonusQuestionStat = {
+  id: string
+  question: string
+  type: string
+  unlock_date: string | null
+  correct_answer_set: boolean
+  total_answers: number
+  participation_pct: number
+  top_answers: { answer: string; count: number; pct: number; is_correct: boolean }[]
+}
+
 type Props = {
   tournamentStarted: boolean
   kampioenStats: KampioenverdeligEntry[]
   groupedMatches: Record<string, MatchStat[]>
   totalDeelnemers: number
+  accuracyStats: AccuracyStats | null
+  bonusQuestionStats: BonusQuestionStat[]
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
@@ -43,11 +63,16 @@ export default function StatsClient({
   kampioenStats,
   groupedMatches,
   totalDeelnemers,
+  accuracyStats,
+  bonusQuestionStats,
 }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [openMatch, setOpenMatch] = useState<string | null>(null)
 
   const availableGroups = GROUPS.filter((g) => groupedMatches[g]?.length)
+
+  const preBonusStats = bonusQuestionStats.filter((q) => q.type === 'pre_tournament')
+  const dailyBonusStats = bonusQuestionStats.filter((q) => q.type === 'daily')
 
   return (
     <div className="space-y-8">
@@ -59,6 +84,31 @@ export default function StatsClient({
           {totalDeelnemers} {totalDeelnemers === 1 ? 'deelnemer' : 'deelnemers'}
         </p>
       </div>
+
+      {/* Nauwkeurigheid */}
+      {accuracyStats && (
+        <section>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Nauwkeurigheid · {accuracyStats.playedMatches} wedstrijden gespeeld
+          </p>
+          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            <AccuracyRow
+              label="Exacte uitslag"
+              count={accuracyStats.exactCount}
+              total={accuracyStats.totalPredictions}
+              accent
+            />
+            <AccuracyRow
+              label="Correct resultaat"
+              count={accuracyStats.correctResultCount}
+              total={accuracyStats.totalPredictions}
+            />
+          </div>
+          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
+            {accuracyStats.totalPredictions.toLocaleString('nl')} voorspellingen in totaal
+          </p>
+        </section>
+      )}
 
       {/* WK-kampioen verdeling */}
       {tournamentStarted ? (
@@ -79,10 +129,7 @@ export default function StatsClient({
                 return (
                   <div key={answer} className="px-5 py-3 border-b border-white/5 last:border-0">
                     <div className="flex items-center gap-3">
-                      {/* Positie */}
                       <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">{i + 1}</span>
-
-                      {/* Vlag + naam */}
                       {flag_url && (
                         <Image src={flag_url} alt={answer} width={28} height={20}
                           className="rounded-sm object-cover shrink-0 w-7 h-5" />
@@ -90,15 +137,11 @@ export default function StatsClient({
                       <span className={`flex-1 text-sm font-semibold ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
                         {answer}
                       </span>
-
-                      {/* Count + pct */}
                       <span className="font-mono text-xs text-wk-muted shrink-0">{count}×</span>
                       <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
                         {pct}%
                       </span>
                     </div>
-
-                    {/* Bar */}
                     <div className="mt-2 ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all ${isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'}`}
@@ -116,7 +159,6 @@ export default function StatsClient({
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Voorspeld wereldkampioen
           </p>
-
           <div className="bg-wk-surface border border-white/10 rounded-xl px-5 py-6 text-center space-y-2">
             <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
               🔒 Zichtbaar na start van het toernooi
@@ -132,7 +174,6 @@ export default function StatsClient({
             Uitslagverdeling — gespeelde wedstrijden
           </p>
 
-          {/* Group tabs */}
           <div className="flex flex-wrap gap-1.5 mb-4">
             {availableGroups.map((g) => (
               <button
@@ -156,7 +197,6 @@ export default function StatsClient({
                 match={match}
                 isOpen={openMatch === match.id}
                 onToggle={() => setOpenMatch(openMatch === match.id ? null : match.id)}
-                totalDeelnemers={totalDeelnemers}
               />
             ))}
             {(groupedMatches[activeGroup] ?? []).length === 0 && (
@@ -180,6 +220,119 @@ export default function StatsClient({
           </div>
         </section>
       )}
+
+      {/* Bonus-vraag statistieken */}
+      {bonusQuestionStats.length > 0 && (
+        <section>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Bonusvragen — antwoordverdeling
+          </p>
+          <div className="space-y-4">
+            {preBonusStats.length > 0 && (
+              <div className="space-y-3">
+                <p className="font-mono text-[9px] text-wk-red/70 tracking-[0.18em] uppercase">
+                  Vóór het toernooi
+                </p>
+                {preBonusStats.map((q) => (
+                  <BonusQuestionCard key={q.id} stat={q} />
+                ))}
+              </div>
+            )}
+            {dailyBonusStats.length > 0 && (
+              <div className="space-y-3">
+                <p className="font-mono text-[9px] text-wk-blue/70 tracking-[0.18em] uppercase">
+                  Dagelijkse vragen
+                </p>
+                {dailyBonusStats.map((q) => (
+                  <BonusQuestionCard key={q.id} stat={q} />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+// ─── Accuracy row ─────────────────────────────────────────────────────────────
+
+function AccuracyRow({ label, count, total, accent = false }: {
+  label: string
+  count: number
+  total: number
+  accent?: boolean
+}) {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0
+  return (
+    <div className="px-5 py-3.5">
+      <div className="flex items-center gap-3 mb-2">
+        <span className="flex-1 text-sm font-semibold text-wk-text">{label}</span>
+        <span className="font-mono text-xs text-wk-muted shrink-0">{count.toLocaleString('nl')}×</span>
+        <span className={`font-mono text-sm font-bold shrink-0 w-12 text-right ${accent ? 'text-wk-gold' : 'text-wk-soft'}`}>
+          {pct}%
+        </span>
+      </div>
+      <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${accent ? 'bg-wk-gold' : 'bg-wk-muted/40'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─── Bonus question card ──────────────────────────────────────────────────────
+
+function BonusQuestionCard({ stat }: { stat: BonusQuestionStat }) {
+  return (
+    <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-white/5">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-semibold text-wk-text leading-snug flex-1">{stat.question}</p>
+          <span className={`font-mono text-[10px] border rounded-full px-2.5 py-0.5 tracking-[0.12em] shrink-0 ${
+            stat.participation_pct >= 80
+              ? 'text-wk-green border-wk-green/30'
+              : stat.participation_pct >= 50
+                ? 'text-wk-gold border-wk-gold/30'
+                : 'text-wk-muted border-white/15'
+          }`}>
+            {stat.participation_pct}% deelname
+          </span>
+        </div>
+        <p className="font-mono text-[10px] text-wk-muted tracking-[0.1em] mt-0.5">
+          {stat.total_answers} {stat.total_answers === 1 ? 'antwoord' : 'antwoorden'}
+        </p>
+      </div>
+
+      {stat.top_answers.length > 0 ? (
+        <div className="px-5 py-3 space-y-2">
+          {stat.top_answers.map(({ answer, count, pct, is_correct }) => (
+            <div key={answer} className="flex items-center gap-3">
+              <span className={`font-mono text-xs font-semibold shrink-0 w-28 truncate ${
+                is_correct ? 'text-wk-green' : 'text-wk-soft'
+              }`}>
+                {answer}
+                {is_correct && <span className="ml-1 text-wk-green">✓</span>}
+              </span>
+              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="font-mono text-[10px] text-wk-muted shrink-0 w-16 text-right">
+                {count}× ({pct}%)
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="px-5 py-3">
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] italic">Geen antwoorden.</p>
+        </div>
+      )}
     </div>
   )
 }
@@ -190,12 +343,10 @@ function MatchDistRow({
   match,
   isOpen,
   onToggle,
-  totalDeelnemers,
 }: {
   match: MatchStat
   isOpen: boolean
   onToggle: () => void
-  totalDeelnemers: number
 }) {
   const top3 = match.distribution.slice(0, 3)
 
@@ -205,10 +356,8 @@ function MatchDistRow({
         onClick={onToggle}
         className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-white/5 transition-colors"
       >
-        {/* Match # */}
         <span className="font-mono text-[10px] text-wk-muted w-5 shrink-0">#{match.match_number}</span>
 
-        {/* Teams */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {match.home_flag && (
             <Image src={match.home_flag} alt={match.home_team} width={20} height={14}
@@ -223,17 +372,14 @@ function MatchDistRow({
           )}
         </div>
 
-        {/* Top prediction preview */}
         {top3[0] && !isOpen && (
           <span className="font-mono text-[10px] text-wk-gold shrink-0">
             {top3[0].predicted_home}–{top3[0].predicted_away}
           </span>
         )}
 
-        {/* Count badge */}
         <span className="font-mono text-[10px] text-wk-muted shrink-0">{match.total_predictions}×</span>
 
-        {/* Chevron */}
         <svg
           className={`w-3.5 h-3.5 text-wk-muted transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24"

@@ -1,6 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { AvatarCircle } from '@/components/avatar-circle'
 
 export default async function PoulePage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params
@@ -157,9 +158,7 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                       {/* Naam */}
                       <td className="sticky left-14 z-10 bg-inherit pl-2 pr-4 py-3">
                         <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-7 h-7 rounded-full bg-wk-bg2 border border-white/10 flex items-center justify-center shrink-0 font-mono text-xs font-bold text-wk-gold">
-                            {profile.username.charAt(0).toUpperCase()}
-                          </div>
+                          <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={28} />
                           <span className={`text-sm truncate max-w-[100px] ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text'}`}>
                             {profile.username}
                           </span>

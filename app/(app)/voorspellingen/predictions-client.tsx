@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
+import { AvatarCircle } from '@/components/avatar-circle'
 import { savePredictions, saveGroupAdvancement } from '@/app/actions/predictions'
 import { toggleJoker } from '@/app/actions/jokers'
 import { getMatchPrediction } from '@/app/actions/ai-prediction'
@@ -22,7 +23,7 @@ type Match = {
 }
 type Prediction = { predicted_home: number; predicted_away: number; points_awarded: number | null }
 
-type PouleEntry = { userId: string; username: string; totalPts: number; rankChange: number | null }
+type PouleEntry = { userId: string; username: string; avatarUrl: string | null; totalPts: number; rankChange: number | null }
 type PouleStanding = { pouleId: string; pouleName: string; isGeneral: boolean; entries: PouleEntry[] }
 type GroupEntry = { userId: string; username: string; pts: number }
 type PouleGroupStanding = { pouleId: string; byGroup: Record<string, GroupEntry[]> }
@@ -570,7 +571,7 @@ function MiniLeaderboardRow({
 }) {
   const medals = ['🥇', '🥈', '🥉']
   return (
-    <div className={`flex items-center gap-3 px-5 py-2.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
+    <div className={`flex items-center gap-2 px-4 py-2.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
       <div className="w-5 text-center shrink-0">
         {rank <= 3
           ? <span className="text-xs">{medals[rank - 1]}</span>
@@ -585,6 +586,7 @@ function MiniLeaderboardRow({
             : <span className="font-mono text-[9px] font-bold text-wk-red">↓{Math.abs(entry.rankChange)}</span>
         }
       </div>
+      <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={22} />
       <span className={`flex-1 text-xs truncate ${isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-text'}`}>
         {entry.username}
       </span>

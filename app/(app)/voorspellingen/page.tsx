@@ -72,17 +72,20 @@ export default async function VoorspellingenPage() {
 
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, username')
+        .select('id, username, avatar_url')
         .in('id', scores.map((s) => s.user_id))
 
-      const profileMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.username]))
+      const profileMap = Object.fromEntries(
+        (profiles ?? []).map((p) => [p.id, { username: p.username, avatar_url: p.avatar_url }])
+      )
       return {
         pouleId: poule.id,
         pouleName: poule.name,
         isGeneral: poule.is_general,
         entries: scores.map((s) => ({
           userId: s.user_id,
-          username: profileMap[s.user_id] ?? 'Onbekend',
+          username: profileMap[s.user_id]?.username ?? 'Onbekend',
+          avatarUrl: profileMap[s.user_id]?.avatar_url ?? null,
           totalPts: s.total_pts,
           rankChange: s.rank_change,
         })),
