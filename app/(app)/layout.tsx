@@ -13,55 +13,61 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('username, is_admin')
+    .select('username, is_admin, theme')
     .eq('id', user.id)
     .single()
 
   const username = profile?.username ?? user.email ?? 'Gebruiker'
   const isAdmin  = profile?.is_admin ?? false
+  const theme    = profile?.theme ?? 'default'
+  const isRetro  = theme === 'retro-1988'
 
   return (
-    <div className="min-h-screen bg-wk-bg">
+    <div className={`min-h-screen bg-wk-bg ${isRetro ? 'theme-retro' : ''}`}>
       <NavProgress />
       <Sidebar isAdmin={isAdmin} username={username} />
       <BottomNav isAdmin={isAdmin} />
 
       <div className="md:pl-56 pb-20 md:pb-0 min-h-screen">
         {/* Header banner */}
-        <div className="relative h-40 md:h-80 w-full overflow-hidden">
+        <div className="relative h-48 md:h-96 w-full overflow-hidden">
           <Image
-            src="/worldcup.jpeg"
-            alt="WK 2026"
+            src={isRetro ? '/retro-1988.jpg' : '/worldcup.jpeg'}
+            alt={isRetro ? 'EK 1988 Retro' : 'WK 2026'}
             fill
             className="object-cover object-center"
             priority
           />
-          {/* Deck-style gradient overlays */}
-          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/10 to-black/85" />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-black/40" />
+          {/* Gradient overlays */}
+          <div className={`absolute inset-0 bg-gradient-to-b ${isRetro ? 'from-orange-900/60 via-transparent to-orange-900/80' : 'from-black/55 via-black/10 to-black/85'}`} />
+          <div className={`absolute inset-0 bg-gradient-to-r ${isRetro ? 'from-orange-900/50 via-transparent to-orange-900/40' : 'from-black/50 via-transparent to-black/40'}`} />
 
-          {/* Top chrome — mono label style from deck */}
+          {/* Top chrome */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 md:px-8 pt-5">
             <div className="flex items-center gap-3">
               <span className="bg-wk-red text-white font-mono font-bold text-[11px] tracking-[0.2em] uppercase px-2.5 py-1 rounded">
-                WK&nbsp;Poule
+                {isRetro ? 'EK&nbsp;1988' : 'WK&nbsp;Poule'}
               </span>
-              <span className="text-white/50 font-mono text-[11px] tracking-[0.16em] uppercase hidden sm:block">
-                Editie 2026
+              <span className="text-white/60 font-mono text-[11px] tracking-[0.16em] uppercase hidden sm:block">
+                {isRetro ? 'Oranje Boven' : 'Editie 2026'}
               </span>
             </div>
-            <span className="text-white/40 font-mono text-[11px] tracking-[0.16em] uppercase hidden sm:block">
-              NL · Vrienden &amp; Familie
+            <span className="text-white/50 font-mono text-[11px] tracking-[0.16em] uppercase hidden sm:block">
+              {isRetro ? 'Strijd · Passie · Glorie' : 'NL · Vrienden & Familie'}
             </span>
           </div>
 
           {/* Bottom title block */}
           <div className="absolute bottom-0 left-0 px-6 md:px-8 pb-5 md:pb-6">
             <p className="font-display text-3xl md:text-5xl text-white uppercase leading-none tracking-tight drop-shadow-lg">
-              De <span className="text-wk-gold">Poule</span>
+              {isRetro ? (
+                <>Oranje <span className="text-wk-gold">Boven</span></>
+              ) : (
+                <>De <span className="text-wk-gold">Poule</span></>
+              )}
             </p>
-            <p className="font-mono text-white/50 text-[10px] tracking-[0.18em] uppercase mt-1.5">
-              Voorspel · Volgen · Winnen
+            <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1.5">
+              {isRetro ? 'Retro · EK 1988 · Nederland' : 'Voorspel · Volgen · Winnen'}
             </p>
           </div>
         </div>

@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { setTheme } from '@/app/actions/profile'
 
 type Profile = { id: string; username: string; email: string; avatar_url: string | null; created_at: string }
 type Score = { total_pts: number; exact_hits: number; correct_results: number }
@@ -12,12 +13,14 @@ type Props = Readonly<{
   score: Score | null
   predCount: number
   bonusCount: number
+  currentTheme: string
 }>
 
-export default function ProfielClient({ profile, score, predCount, bonusCount }: Props) {
+export default function ProfielClient({ profile, score, predCount, bonusCount, currentTheme }: Props) {
   const [username, setUsername] = useState(profile.username)
   const [isPending, startTransition] = useTransition()
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [themeToast, setThemeToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const router = useRouter()
 
   function showToast(msg: string, ok: boolean) {
@@ -105,6 +108,70 @@ export default function ProfielClient({ profile, score, predCount, bonusCount }:
               {profile.email}
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Thema-keuze */}
+      <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-white/10">
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase">Thema</p>
+        </div>
+        <div className="p-5 space-y-3">
+          {([
+            {
+              id: 'default',
+              label: 'Standaard',
+              desc: 'Donker stadion-thema',
+              preview: 'bg-[#0B0E14] border-[#F4B92E]/30',
+              dot: 'bg-[#F4B92E]',
+            },
+            {
+              id: 'retro-1988',
+              label: 'EK 1988 Retro',
+              desc: 'Oranje · Strijd · Passie · Glorie',
+              preview: 'bg-[#2A0800] border-[#FF6600]/40',
+              dot: 'bg-[#FF6600]',
+            },
+          ] as const).map((t) => {
+            const active = currentTheme === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => {
+                  startTransition(async () => {
+                    const result = await setTheme(t.id)
+                    setThemeToast({ msg: result.ok ? `Thema "${t.label}" ingesteld!` : result.error, ok: result.ok })
+                    setTimeout(() => setThemeToast(null), 3000)
+                  })
+                }}
+                disabled={active || isPending}
+                className={`w-full flex items-center gap-4 rounded-lg border px-4 py-3 text-left transition-colors ${
+                  active
+                    ? 'border-wk-gold/50 bg-wk-gold/5'
+                    : 'border-white/10 hover:border-white/20'
+                }`}
+              >
+                {/* Preview swatch */}
+                <div className={`w-10 h-7 rounded shrink-0 border ${t.preview} flex items-center justify-center`}>
+                  <span className={`w-2.5 h-2.5 rounded-full ${t.dot}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold ${active ? 'text-wk-gold' : 'text-wk-text'}`}>{t.label}</p>
+                  <p className="font-mono text-[10px] text-wk-muted tracking-widest">{t.desc}</p>
+                </div>
+                {active && (
+                  <span className="font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase shrink-0">
+                    Actief
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          {themeToast && (
+            <p className={`font-mono text-[10px] tracking-[0.12em] ${themeToast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+              {themeToast.msg}
+            </p>
+          )}
         </div>
       </div>
 

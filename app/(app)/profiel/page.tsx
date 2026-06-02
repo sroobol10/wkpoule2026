@@ -9,7 +9,7 @@ export default async function ProfielPage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, created_at')
+    .select('id, username, email, avatar_url, created_at, theme')
     .eq('id', user.id)
     .single()
 
@@ -47,6 +47,7 @@ export default async function ProfielPage() {
       score={score ?? null}
       predCount={predCount ?? 0}
       bonusCount={bonusCount ?? 0}
+      currentTheme={profile?.theme ?? 'default'}
     />
   )
 }

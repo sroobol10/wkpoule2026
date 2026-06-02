@@ -69,6 +69,33 @@
   }
 }
 
+/* ── EK 1988 Retro Theme ────────────────────────────────────────────────────── */
+/* Alle wk-* kleuren worden overschreven voor het retro-thema */
+
+.theme-retro {
+  /* Warm donkerbruin — structuur van witte overlays blijft werken */
+  --color-wk-bg:      #1A0B04;   /* donker warm bruin (niet oranje-grot) */
+  --color-wk-bg2:     #261508;   /* iets lichter warm bruin */
+  --color-wk-surface: #321C0C;   /* kaartjes */
+  --color-wk-text:    #FFF2DC;   /* warm créme wit — goed leesbaar */
+  --color-wk-soft:    #F0C080;   /* zacht amber */
+  --color-wk-muted:   #9A6A3C;   /* gedempt warm — niet te fel */
+  --color-wk-red:     #D94800;   /* Oranje — minder schreeuwerig */
+  --color-wk-gold:    #E89C18;   /* amber goud */
+  --color-wk-blue:    #2255A8;   /* Nederland-blauw (iets lichter) */
+  --color-wk-green:   #2A7A38;   /* groen */
+}
+
+.theme-retro body,
+.theme-retro {
+  background-color: var(--color-wk-bg);
+  color: var(--color-wk-text);
+}
+
+/* Scrollbar meegewisseld */
+.theme-retro ::-webkit-scrollbar-track { background: var(--color-wk-bg); }
+.theme-retro ::-webkit-scrollbar-thumb { background: var(--color-wk-muted); }
+
 @layer base {
   *, *::before, *::after { box-sizing: border-box; }
   html { height: 100%; }

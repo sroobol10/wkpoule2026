@@ -619,9 +619,9 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
   }
 
   return (
-    <div className={hasJoker ? 'bg-wk-gold/8 border-l-[3px] border-wk-gold/60' : ''}>
+    <div className={hasJoker ? 'bg-wk-gold/[0.12]' : ''}>
       {/* Date + joker row */}
-      <div className="px-5 pt-4 pb-0">
+      <div className="px-5 pt-4 pb-4">
         <div className="flex items-center justify-center gap-2 mb-3">
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
             {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
