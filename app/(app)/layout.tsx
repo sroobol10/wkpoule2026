@@ -22,6 +22,19 @@ export default async function AppLayout({ children }: Readonly<{ children: React
   const theme    = profile?.theme ?? 'default'
   const isRetro  = theme === 'retro-1988'
 
+  // Controleer of de gebruiker in een poule genaamd "ennovate" zit
+  const { data: ennovatePoule } = await supabase
+    .from('poule_members')
+    .select('poules!inner(name)')
+    .eq('user_id', user.id)
+    .ilike('poules.name', '%ennovate%')
+    .limit(1)
+    .maybeSingle()
+
+  const isEnnovate = !!ennovatePoule
+  const defaultHeaderImg = isEnnovate ? '/world-cup-banner.jpg' : '/world-cup-default.jpg'
+  const headerImg = isRetro ? '/retro-1988.jpg' : defaultHeaderImg
+
   return (
     <div className={`min-h-screen bg-wk-bg ${isRetro ? 'theme-retro' : ''}`}>
       <NavProgress />
@@ -32,7 +45,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
         {/* Header banner */}
         <div className="relative h-44 md:h-[346px] lg:h-[432px] xl:h-[504px] min-[1600px]:h-[680px] w-full overflow-hidden">
           <Image
-            src={isRetro ? '/retro-1988.jpg' : '/world-cup-banner.jpg'}
+            src={headerImg}
             alt={isRetro ? 'EK 1988 Retro' : 'WK 2026'}
             fill
             className={`object-cover object-center ${isRetro ? 'animate-ken-burns' : ''}`}

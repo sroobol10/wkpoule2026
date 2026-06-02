@@ -24,6 +24,28 @@ export async function toggleJoker(matchId: string): Promise<JokerResult> {
   const groupName = (match.home_team as { group_name: string } | null)?.group_name
   if (!groupName) return { ok: false, error: 'Groep niet gevonden.' }
 
+  // Zodra er een wedstrijd in deze groep gespeeld is, mag de joker niet meer worden gewijzigd
+  const { data: groupTeams } = await supabase
+    .from('teams')
+    .select('id')
+    .eq('group_name', groupName)
+
+  const teamIds = (groupTeams ?? []).map((t) => t.id)
+  if (teamIds.length > 0) {
+    const { data: playedMatch } = await supabase
+      .from('matches')
+      .select('id')
+      .eq('stage', 'group')
+      .eq('result_entered', true)
+      .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
+      .limit(1)
+      .maybeSingle()
+
+    if (playedMatch) {
+      return { ok: false, error: `De joker voor groep ${groupName} kan niet meer worden gewijzigd — er is al een wedstrijd gespeeld.` }
+    }
+  }
+
   const { data: existing } = await supabase
     .from('jokers')
     .select('id, match_id')

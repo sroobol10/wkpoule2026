@@ -345,6 +345,8 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
               const locked = new Date(match.kickoff_at) <= now || match.result_entered
               const score = scores[match.id]
               const pts = predMap[match.id]?.points_awarded
+              // Joker-wijziging geblokkeerd als er al een wedstrijd in de groep gespeeld is
+              const anyGroupMatchPlayed = groupMatches.some((m) => m.result_entered)
               return (
                 <MatchRow
                   key={match.id}
@@ -353,6 +355,7 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
                   pts={pts}
                   locked={locked}
                   hasJoker={jokerSet.has(match.id)}
+                  jokerLocked={anyGroupMatchPlayed}
                   onScoreChange={setScore}
                   onJokerToggle={handleJokerToggle}
                 />
@@ -599,15 +602,17 @@ type MatchRowProps = {
   pts: number | null | undefined
   locked: boolean
   hasJoker: boolean
+  jokerLocked: boolean
   onScoreChange: (matchId: string, side: 'home' | 'away', val: string) => void
   onJokerToggle: (matchId: string) => void
 }
 
-function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerToggle }: MatchRowProps) {
+function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreChange, onJokerToggle }: MatchRowProps) {
   const [showAi, setShowAi] = useState(false)
   const [aiState, setAiState] = useState<AiPrediction | 'loading' | 'error' | null>(null)
 
-  const jokerable = !locked
+  // Joker-knop zichtbaar: match nog niet gespeeld én geen wedstrijd in de groep gespeeld
+  const jokerable = !locked && !jokerLocked
 
   async function handleAiToggle() {
     if (showAi) { setShowAi(false); return }
@@ -621,7 +626,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
   return (
     <div className={hasJoker ? 'bg-wk-gold/[0.12]' : ''}>
       {/* Date + joker row */}
-      <div className="px-5 pt-4 pb-4">
+      <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4">
         <div className="flex items-center justify-center gap-2 mb-3">
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
             {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
@@ -652,19 +657,19 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
 
         {/* Match row */}
         <div className="flex flex-col items-center gap-1.5">
-          <div className="flex items-center gap-2 w-full">
+          <div className="flex items-center gap-1.5 sm:gap-2 w-full">
             {/* Home team */}
-            <div className="flex-1 flex items-center gap-2 justify-end">
-              <span className="text-sm font-semibold text-wk-text text-right leading-tight">
+            <div className="flex-1 flex items-center gap-1 sm:gap-2 justify-end min-w-0">
+              <span className="text-[11px] sm:text-sm font-semibold text-wk-text text-right leading-tight truncate">
                 {match.home_team?.name}
               </span>
               {match.home_team?.flag_url && (
                 <Image
                   src={match.home_team.flag_url}
                   alt={match.home_team.name}
-                  width={28}
-                  height={20}
-                  className="rounded-sm object-cover shrink-0 w-7 h-5"
+                  width={24}
+                  height={17}
+                  className="rounded-sm object-cover shrink-0 w-6 h-[17px] sm:w-7 sm:h-5"
                 />
               )}
             </div>
@@ -672,15 +677,13 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
             {/* Score */}
             <div className="shrink-0 text-center">
               {match.result_entered ? (
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-10 text-center font-display text-2xl text-wk-text">{match.home_score}</span>
-                    <span className="font-mono text-base text-wk-muted">–</span>
-                    <span className="w-10 text-center font-display text-2xl text-wk-text">{match.away_score}</span>
-                  </div>
+                <div className="flex items-center gap-0.5 sm:gap-1">
+                  <span className="w-8 sm:w-10 text-center font-display text-xl sm:text-2xl text-wk-text">{match.home_score}</span>
+                  <span className="font-mono text-sm sm:text-base text-wk-muted">–</span>
+                  <span className="w-8 sm:w-10 text-center font-display text-xl sm:text-2xl text-wk-text">{match.away_score}</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <input
                     type="text"
                     inputMode="numeric"
@@ -690,10 +693,10 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
                     onChange={(e) => onScoreChange(match.id, 'home', e.target.value)}
                     onKeyDown={(e) => { if (!/^[0-9Backspace Delete ArrowLeft ArrowRight Tab]/.test(e.key)) e.preventDefault() }}
                     maxLength={2}
-                    className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                    className="w-10 sm:w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
                     placeholder="–"
                   />
-                  <span className="text-wk-muted font-mono text-sm">:</span>
+                  <span className="text-wk-muted font-mono text-xs sm:text-sm">:</span>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -703,7 +706,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
                     onChange={(e) => onScoreChange(match.id, 'away', e.target.value)}
                     onKeyDown={(e) => { if (!/^[0-9Backspace Delete ArrowLeft ArrowRight Tab]/.test(e.key)) e.preventDefault() }}
                     maxLength={2}
-                    className="w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                    className="w-10 sm:w-12 text-center rounded bg-wk-bg2 border border-white/10 py-1.5 text-sm font-display text-wk-gold disabled:text-wk-muted disabled:opacity-60 focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
                     placeholder="–"
                   />
                 </div>
@@ -711,17 +714,17 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
             </div>
 
             {/* Away team */}
-            <div className="flex-1 flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-1 sm:gap-2 min-w-0">
               {match.away_team?.flag_url && (
                 <Image
                   src={match.away_team.flag_url}
                   alt={match.away_team.name ?? ''}
-                  width={28}
-                  height={20}
-                  className="rounded-sm object-cover shrink-0 w-7 h-5"
+                  width={24}
+                  height={17}
+                  className="rounded-sm object-cover shrink-0 w-6 h-[17px] sm:w-7 sm:h-5"
                 />
               )}
-              <span className="text-sm font-semibold text-wk-text leading-tight">
+              <span className="text-[11px] sm:text-sm font-semibold text-wk-text leading-tight truncate">
                 {match.away_team?.name}
               </span>
             </div>
