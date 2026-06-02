@@ -30,7 +30,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
       <div className="md:pl-56 pb-20 md:pb-0 min-h-screen">
         {/* Header banner */}
-        <div className="relative h-48 md:h-96 w-full overflow-hidden">
+        <div className="relative h-44 md:h-[346px] lg:h-[432px] xl:h-[504px] min-[1600px]:h-[680px] w-full overflow-hidden">
           <Image
             src={isRetro ? '/retro-1988.jpg' : '/worldcup.jpeg'}
             alt={isRetro ? 'EK 1988 Retro' : 'WK 2026'}
@@ -46,7 +46,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 md:px-8 pt-5">
             <div className="flex items-center gap-3">
               <span className="bg-wk-red text-white font-mono font-bold text-[11px] tracking-[0.2em] uppercase px-2.5 py-1 rounded">
-                {isRetro ? 'EK&nbsp;1988' : 'WK&nbsp;Poule'}
+                {isRetro ? 'EK 1988 VIBES' : 'WK&nbsp;Poule'}
               </span>
               <span className="text-white/60 font-mono text-[11px] tracking-[0.16em] uppercase hidden sm:block">
                 {isRetro ? 'Oranje Boven' : 'Editie 2026'}

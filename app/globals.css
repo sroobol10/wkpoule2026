@@ -73,17 +73,17 @@
 /* Alle wk-* kleuren worden overschreven voor het retro-thema */
 
 .theme-retro {
-  /* Warm donkerbruin — structuur van witte overlays blijft werken */
-  --color-wk-bg:      #1A0B04;   /* donker warm bruin (niet oranje-grot) */
-  --color-wk-bg2:     #261508;   /* iets lichter warm bruin */
-  --color-wk-surface: #321C0C;   /* kaartjes */
-  --color-wk-text:    #FFF2DC;   /* warm créme wit — goed leesbaar */
-  --color-wk-soft:    #F0C080;   /* zacht amber */
-  --color-wk-muted:   #9A6A3C;   /* gedempt warm — niet te fel */
-  --color-wk-red:     #D94800;   /* Oranje — minder schreeuwerig */
-  --color-wk-gold:    #E89C18;   /* amber goud */
-  --color-wk-blue:    #2255A8;   /* Nederland-blauw (iets lichter) */
-  --color-wk-green:   #2A7A38;   /* groen */
+  /* ORANJE — wij zijn Nederlanders, je moet het VOELEN */
+  --color-wk-bg:      #3A1200;   /* echt donker oranje — duidelijk geen blauw-zwart */
+  --color-wk-bg2:     #4D1A00;   /* warmer, meer oranje */
+  --color-wk-surface: #622400;   /* kaartjes: fel oranje-bruin */
+  --color-wk-text:    #FFF8EE;   /* warm crème — goed contrast op oranje */
+  --color-wk-soft:    #FFD070;   /* helder amber — zichtbaar als tekst */
+  --color-wk-muted:   #DD9050;   /* oranje-bruin, leesbaar */
+  --color-wk-red:     #FF6200;   /* de échte Nederlandse Oranje */
+  --color-wk-gold:    #FFCC00;   /* leeuw-goud, helder */
+  --color-wk-blue:    #1A4EB8;   /* Nederlandse vlag blauw */
+  --color-wk-green:   #2A8A40;   /* groen */
 }
 
 .theme-retro body,
