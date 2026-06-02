@@ -277,22 +277,10 @@ export default function ProfielClient({
         </p>
         <div className="grid grid-cols-3 gap-3">
           <StatCard
-            value={score?.exact_hits ?? 0}
-            label="Exact"
-            color="text-wk-green"
-          />
-          <StatCard
-            value={score?.correct_results ?? 0}
-            label="Correct"
-            color="text-wk-blue"
-          />
-          <StatCard
             value={score?.jokers_played ?? 0}
             label="Jokers"
             color="text-wk-gold"
           />
-        </div>
-        <div className="grid grid-cols-2 gap-3 mt-3">
           <StatCard
             value={predCount}
             label="Voorspellingen"
