@@ -476,6 +476,11 @@ export async function scoreGroupAdvancement(group: string): Promise<AdminResult>
   const gm = groupMatches.filter((m) => (m.home_team as TeamRef | null)?.group_name === group)
   if (gm.length === 0) return { ok: false, error: `Geen resultaten voor groep ${group}.` }
 
+  // Alle 6 wedstrijden in de groep moeten gespeeld zijn (4 teams × 3 duels / 2 = 6)
+  if (gm.length < 6) {
+    return { ok: false, error: `Groep ${group} is nog niet volledig gespeeld (${gm.length}/6 wedstrijden).` }
+  }
+
   // Werkelijke eindstand
   const st: Record<string, { points: number; gd: number; gf: number }> = {}
   for (const m of gm) {
