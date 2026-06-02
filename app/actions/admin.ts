@@ -325,6 +325,27 @@ export async function setBonusCorrectAnswer(
   return { ok: true }
 }
 
+// ─── Update answer config for a bonus question ────────────────────────────────
+export async function updateBonusAnswerConfig(
+  questionId: string,
+  answerType: 'free' | 'options' | 'yesno',
+  answerOptions: string[] | null
+): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const { error } = await supabase
+    .from('bonus_questions')
+    .update({ answer_type: answerType, answer_options: answerOptions })
+    .eq('id', questionId)
+
+  if (error) return { ok: false, error: 'Opslaan mislukt.' }
+
+  revalidatePath('/admin')
+  revalidatePath('/bonusvragen')
+  return { ok: true }
+}
+
 // ─── Enter knockout match result ───────────────────────────────────────────────
 export async function setKnockoutResult(
   matchId: string,

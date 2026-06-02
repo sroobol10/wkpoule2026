@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, updateBonusAnswerConfig, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
@@ -22,8 +22,11 @@ type BonusQuestion = {
   question: string
   description: string | null
   type: string
+  unlock_date: string | null
   correct_answer: string | null
   correct_answer_set: boolean
+  answer_type: string
+  answer_options: string[] | null
 }
 
 type CardEntry = { match_id: string; team_id: string; yellow_cards: number; red_cards: number }
@@ -654,12 +657,15 @@ function DeelnemersTab({
 function BonusTab({ questions }: { questions: BonusQuestion[] }) {
   const pre   = questions.filter((q) => q.type === 'pre_tournament')
   const daily = questions.filter((q) => q.type === 'daily')
+    .sort((a, b) => (a.unlock_date ?? '').localeCompare(b.unlock_date ?? ''))
 
   return (
     <div className="space-y-6">
       {pre.length > 0 && (
         <section>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">Vóór het toernooi</p>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Vóór het toernooi <span className="text-wk-muted/50">· {pre.length} vragen</span>
+          </p>
           <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
             {pre.map((q) => <BonusRow key={q.id} question={q} />)}
           </div>
@@ -667,7 +673,9 @@ function BonusTab({ questions }: { questions: BonusQuestion[] }) {
       )}
       {daily.length > 0 && (
         <section>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">Dagelijkse vragen</p>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Dagelijkse vragen <span className="text-wk-muted/50">· {daily.length} vragen</span>
+          </p>
           <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5 overflow-hidden">
             {daily.map((q) => <BonusRow key={q.id} question={q} />)}
           </div>
@@ -685,41 +693,141 @@ function isCountryBased(question: string) {
   return q.includes('kaartenkoning') || q.includes('desastreuze') || q.includes('goalgettergigant')
 }
 
+const ANSWER_TYPE_LABELS: Record<string, string> = {
+  free: 'Vrij tekst',
+  options: 'Keuze',
+  yesno: 'Ja / Nee',
+}
+
 function BonusRow({ question }: { question: BonusQuestion }) {
-  const [editing, setEditing]        = useState(false)
-  const [answer, setAnswer]          = useState(question.correct_answer ?? '')
-  const [isPending, startTransition] = useTransition()
-  const [toast, setToast]            = useState<{ msg: string; ok: boolean } | null>(null)
+  const [editingAnswer, setEditingAnswer]   = useState(false)
+  const [editingConfig, setEditingConfig]   = useState(false)
+  const [answer, setAnswer]                 = useState(question.correct_answer ?? '')
+  const [answerType, setAnswerType]         = useState<'free' | 'options' | 'yesno'>(
+    (question.answer_type as 'free' | 'options' | 'yesno') ?? 'free'
+  )
+  const [optionsText, setOptionsText]       = useState((question.answer_options ?? []).join('\n'))
+  const [isPending, startTransition]        = useTransition()
+  const [toast, setToast]                   = useState<{ msg: string; ok: boolean } | null>(null)
 
   const countryBased = isCountryBased(question.question)
 
-  function save() {
+  function showToast(msg: string, ok: boolean) {
+    setToast({ msg, ok })
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  function saveAnswer() {
     if (!answer.trim()) return
     startTransition(async () => {
       const result = await setBonusCorrectAnswer(question.id, answer.trim())
-      if (result.ok) { setEditing(false); setToast({ msg: 'Opgeslagen!', ok: true }) }
-      else setToast({ msg: result.error, ok: false })
-      setTimeout(() => setToast(null), 3000)
+      if (result.ok) { setEditingAnswer(false); showToast('Opgeslagen!', true) }
+      else showToast(result.error, false)
     })
   }
 
   function award() {
     startTransition(async () => {
       const result = await awardCountryBonus(question.id)
-      setToast({ msg: result.ok ? 'Punten uitgekeerd!' : result.error, ok: result.ok })
-      setTimeout(() => setToast(null), 4000)
+      showToast(result.ok ? 'Punten uitgekeerd!' : result.error, result.ok)
+    })
+  }
+
+  function saveConfig() {
+    const opts = answerType === 'options'
+      ? optionsText.split('\n').map((s) => s.trim()).filter(Boolean)
+      : null
+    startTransition(async () => {
+      const result = await updateBonusAnswerConfig(question.id, answerType, opts)
+      if (result.ok) { setEditingConfig(false); showToast('Configuratie opgeslagen!', true) }
+      else showToast(result.error, false)
     })
   }
 
   return (
-    <div className="px-5 py-4">
-      <p className="text-sm font-semibold text-wk-text leading-snug">{question.question}</p>
-      {question.description && (
-        <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 mb-3 leading-relaxed">{question.description}</p>
+    <div className="px-5 py-4 space-y-3">
+      {/* Vraag + meta */}
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-wk-text leading-snug">{question.question}</p>
+          {question.description && (
+            <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 leading-relaxed">{question.description}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          {question.unlock_date && (
+            <span className="font-mono text-[9px] text-wk-muted border border-white/10 rounded-full px-2 py-0.5 tracking-widest">
+              {question.unlock_date}
+            </span>
+          )}
+          <span className={`font-mono text-[9px] border rounded-full px-2 py-0.5 tracking-widest ${
+            question.answer_type === 'options' ? 'text-wk-blue border-wk-blue/30' :
+            question.answer_type === 'yesno'   ? 'text-wk-gold border-wk-gold/30' :
+            'text-wk-muted border-white/10'
+          }`}>
+            {ANSWER_TYPE_LABELS[question.answer_type] ?? 'Vrij tekst'}
+          </span>
+        </div>
+      </div>
+
+      {/* Antwoordtype configuratie */}
+      {editingConfig ? (
+        <div className="rounded-lg border border-white/10 bg-wk-bg2 p-3 space-y-3">
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Antwoordtype</p>
+          <div className="flex gap-2">
+            {(['free', 'options', 'yesno'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setAnswerType(t)}
+                className={`flex-1 rounded border px-2 py-1.5 font-mono text-[10px] tracking-widest transition-colors ${
+                  answerType === t
+                    ? 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
+                    : 'border-white/10 text-wk-muted hover:border-white/20'
+                }`}
+              >
+                {ANSWER_TYPE_LABELS[t]}
+              </button>
+            ))}
+          </div>
+          {answerType === 'options' && (
+            <div>
+              <p className="font-mono text-[10px] text-wk-muted tracking-widest mb-1">Opties — één per regel</p>
+              <textarea
+                value={optionsText}
+                onChange={(e) => setOptionsText(e.target.value)}
+                rows={5}
+                placeholder="Optie 1&#10;Optie 2&#10;Optie 3"
+                className="w-full rounded bg-wk-bg2 border border-white/10 px-3 py-2 text-sm text-wk-text placeholder:text-wk-muted focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition resize-none font-mono"
+              />
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={saveConfig}
+              disabled={isPending}
+              className="rounded bg-wk-green px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {isPending ? '…' : 'Opslaan'}
+            </button>
+            <button
+              onClick={() => { setEditingConfig(false); setAnswerType((question.answer_type as 'free' | 'options' | 'yesno') ?? 'free'); setOptionsText((question.answer_options ?? []).join('\n')) }}
+              className="rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors"
+            >
+              Annuleren
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setEditingConfig(true)}
+          className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-widest underline underline-offset-2 transition-colors"
+        >
+          Antwoordtype configureren
+        </button>
       )}
 
+      {/* Correct antwoord instellen */}
       {countryBased ? (
-        /* Landgebaseerde vragen: bereken en keer uit o.b.v. statistieken */
         <div className="flex items-center gap-3 flex-wrap">
           <p className="font-mono text-[10px] text-wk-muted tracking-widest italic flex-1">
             Punten worden automatisch berekend uit wedstrijdstatistieken
@@ -733,22 +841,21 @@ function BonusRow({ question }: { question: BonusQuestion }) {
           </button>
         </div>
       ) : (
-        /* Reguliere vragen: correct antwoord instellen */
         <div className="flex items-center gap-2">
-          {editing ? (
+          {editingAnswer ? (
             <>
               <input
                 type="text" value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && save()}
+                onKeyDown={(e) => e.key === 'Enter' && saveAnswer()}
                 placeholder="Correct antwoord…"
                 className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text placeholder:text-wk-muted focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
               />
-              <button onClick={save} disabled={isPending || !answer.trim()}
+              <button onClick={saveAnswer} disabled={isPending || !answer.trim()}
                 className="rounded bg-wk-green px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
                 {isPending ? '…' : 'Opslaan'}
               </button>
-              <button onClick={() => { setEditing(false); setAnswer(question.correct_answer ?? '') }}
+              <button onClick={() => { setEditingAnswer(false); setAnswer(question.correct_answer ?? '') }}
                 className="rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors">
                 ✕
               </button>
@@ -761,9 +868,9 @@ function BonusRow({ question }: { question: BonusQuestion }) {
                   <span className="text-sm text-wk-gold truncate">{question.correct_answer}</span>
                 </div>
               ) : (
-                <span className="font-mono text-xs text-wk-muted tracking-[0.12em] italic flex-1">Nog niet ingesteld</span>
+                <span className="font-mono text-xs text-wk-muted tracking-[0.12em] italic flex-1">Correct antwoord nog niet ingesteld</span>
               )}
-              <button onClick={() => setEditing(true)}
+              <button onClick={() => setEditingAnswer(true)}
                 className="shrink-0 rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-wk-muted hover:border-white/20 hover:text-wk-soft transition-colors">
                 {question.correct_answer_set ? 'Wijzig' : 'Instellen'}
               </button>
@@ -773,7 +880,7 @@ function BonusRow({ question }: { question: BonusQuestion }) {
       )}
 
       {toast && (
-        <p className={`mt-2 font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
+        <p className={`font-mono text-[10px] tracking-[0.12em] ${toast.ok ? 'text-wk-green' : 'text-wk-red'}`}>
           {toast.msg}
         </p>
       )}

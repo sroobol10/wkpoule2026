@@ -58,6 +58,8 @@ export type Database = {
       }
       bonus_questions: {
         Row: {
+          answer_options: string[] | null
+          answer_type: string
           correct_answer: string | null
           correct_answer_set: boolean
           created_at: string
@@ -68,6 +70,8 @@ export type Database = {
           unlock_date: string | null
         }
         Insert: {
+          answer_options?: string[] | null
+          answer_type?: string
           correct_answer?: string | null
           correct_answer_set?: boolean
           created_at?: string
@@ -78,6 +82,8 @@ export type Database = {
           unlock_date?: string | null
         }
         Update: {
+          answer_options?: string[] | null
+          answer_type?: string
           correct_answer?: string | null
           correct_answer_set?: boolean
           created_at?: string

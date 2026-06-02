@@ -13,6 +13,8 @@ type Question = {
   type: string
   unlock_date: string | null
   correct_answer_set: boolean
+  answer_type: string
+  answer_options: string[] | null
 }
 type AnswerEntry = { question_id: string; answer: string; points_awarded: number | null }
 type Team = { id: string; name: string; flag_url: string }
@@ -80,7 +82,6 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                   accentClass="text-wk-red"
                   teams={isTeamQuestion(q.question) ? teams : []}
                   tournamentStarted={anyMatchPlayed}
-                  isGoat={isGoatQuestion(q.question)}
                 />
               ))}
             </div>
@@ -129,7 +130,6 @@ function QuestionCard({
   accentClass,
   teams,
   tournamentStarted = false,
-  isGoat = false,
   effectiveDeadline = null,
 }: {
   question: Question
@@ -137,8 +137,7 @@ function QuestionCard({
   accentClass: string
   teams: Team[]
   tournamentStarted?: boolean
-  isGoat?: boolean
-  effectiveDeadline?: string | null  // ISO datetime: 1u voor eerste wedstrijd van die dag
+  effectiveDeadline?: string | null
 }) {
   const [answer, setAnswer] = useState(existingAnswer?.answer ?? '')
   const [isPending, startTransition] = useTransition()
@@ -147,23 +146,30 @@ function QuestionCard({
   const [showPicker, setShowPicker] = useState(false)
   const [search, setSearch] = useState('')
 
-  // Effectieve deadline: voor dagelijkse vragen = 1u voor eerste wedstrijd van die dag
   const deadline = effectiveDeadline
     ? new Date(effectiveDeadline)
     : (question.unlock_date ? new Date(question.unlock_date + 'T00:00:00Z') : null)
 
-  // Pre-tournament vragen gaan op slot zodra het toernooi begint (eerste wedstrijd gespeeld)
   const closed = question.type === 'pre_tournament'
     ? tournamentStarted
     : (deadline ? deadline <= new Date() : false)
-  const pts      = existingAnswer?.points_awarded
-  const isTeam   = teams.length > 0
+  const pts = existingAnswer?.points_awarded
 
-  const selectedTeam = isTeam ? teams.find((t) => t.name === answer) : null
+  // Input mode: answer_type field has priority over legacy keyword detection
+  type InputMode = 'options' | 'yesno' | 'goat' | 'team' | 'free'
+  let inputMode: InputMode = 'free'
+  if (question.answer_type === 'options' && question.answer_options?.length) {
+    inputMode = 'options'
+  } else if (question.answer_type === 'yesno') {
+    inputMode = 'yesno'
+  } else if (isGoatQuestion(question.question)) {
+    inputMode = 'goat'
+  } else if (teams.length > 0) {
+    inputMode = 'team'
+  }
 
-  const filteredTeams = teams.filter((t) =>
-    t.name.toLowerCase().includes(search.toLowerCase())
-  )
+  const selectedTeam = inputMode === 'team' ? teams.find((t) => t.name === answer) : null
+  const filteredTeams = teams.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
 
   function handleSave(val?: string) {
     const finalAnswer = val ?? answer
@@ -225,7 +231,45 @@ function QuestionCard({
 
           {/* Answer area */}
           {!closed ? (
-            isGoat ? (
+            inputMode === 'options' ? (
+              /* ── Keuze uit voorgedefinieerde opties ── */
+              <div className="flex flex-wrap gap-2">
+                {(question.answer_options ?? []).map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => { setAnswer(opt); setSaved(false); handleSave(opt) }}
+                    disabled={isPending}
+                    className={`rounded border px-4 py-2.5 text-sm font-semibold transition-colors ${
+                      answer === opt
+                        ? 'border-wk-gold/60 bg-wk-gold/15 text-wk-gold'
+                        : 'border-white/10 bg-wk-bg2 text-wk-soft hover:border-white/20'
+                    }`}
+                  >
+                    {opt}
+                    {answer === opt && <span className="ml-1.5 font-mono text-[10px]">✓</span>}
+                  </button>
+                ))}
+              </div>
+            ) : inputMode === 'yesno' ? (
+              /* ── Ja / Nee ── */
+              <div className="flex gap-2">
+                {['Ja', 'Nee'].map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => { setAnswer(opt); setSaved(false); handleSave(opt) }}
+                    disabled={isPending}
+                    className={`flex-1 rounded border px-4 py-3 text-sm font-semibold transition-colors ${
+                      answer === opt
+                        ? 'border-wk-gold/60 bg-wk-gold/15 text-wk-gold'
+                        : 'border-white/10 bg-wk-bg2 text-wk-soft hover:border-white/20'
+                    }`}
+                  >
+                    {opt}
+                    {answer === opt && <span className="ml-1.5 font-mono text-[10px]">✓</span>}
+                  </button>
+                ))}
+              </div>
+            ) : inputMode === 'goat' ? (
               /* ── GOAT: Ronaldo of Messi ── */
               <div className="flex gap-2">
                 {['Ronaldo', 'Messi'].map((name) => (
@@ -244,7 +288,7 @@ function QuestionCard({
                   </button>
                 ))}
               </div>
-            ) : isTeam ? (
+            ) : inputMode === 'team' ? (
               /* ── Team picker ── */
               <div className="space-y-2">
                 {/* Current selection */}
@@ -347,7 +391,7 @@ function QuestionCard({
             <div className="rounded bg-wk-bg2 border border-white/10 px-3 py-2">
               {existingAnswer?.answer ? (
                 <div className="flex items-center gap-3">
-                  {isTeam && (() => {
+                  {inputMode === 'team' && (() => {
                     const t = teams.find((t) => t.name === existingAnswer.answer)
                     return t ? <Image src={t.flag_url} alt={t.name} width={28} height={20} className="rounded-sm object-cover shrink-0 w-7 h-5" /> : null
                   })()}
