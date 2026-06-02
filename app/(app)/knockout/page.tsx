@@ -36,7 +36,7 @@ export default async function KnockoutPage() {
     : { data: [] }
 
   // ── Bracket prediction (pre-tournament) ───────────────────────────────────
-  const [{ data: allTeams }, { data: advancement }, { data: firstGroupMatch }] =
+  const [{ data: allTeams }, { data: advancement }, { data: firstGroupMatch }, { count: playedGroupCount }] =
     await Promise.all([
       supabase
         .from('teams')
@@ -53,7 +53,14 @@ export default async function KnockoutPage() {
         .order('kickoff_at', { ascending: true })
         .limit(1)
         .single(),
+      supabase
+        .from('matches')
+        .select('id', { count: 'exact', head: true })
+        .eq('stage', 'group')
+        .eq('result_entered', true),
     ])
+
+  const anyGroupMatchPlayed = (playedGroupCount ?? 0) > 0
 
   // Bracket picks (incl. points_awarded na simulatie/live)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,6 +116,7 @@ export default async function KnockoutPage() {
       advancement={advancement ?? []}
       bracketPicks={bracketPicks ?? []}
       groupStageStartsAt={firstGroupMatch?.kickoff_at ?? null}
+      anyMatchPlayed={anyGroupMatchPlayed}
       actualWinners={actualWinners}
       advancedFromStage={advancedFromStage}
     />

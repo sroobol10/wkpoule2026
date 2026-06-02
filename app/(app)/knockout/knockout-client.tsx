@@ -33,6 +33,7 @@ type Props = {
   advancement: AdvancementEntry[]
   bracketPicks: BracketPickEntry[]
   groupStageStartsAt: string | null
+  anyMatchPlayed?: boolean
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
 }
@@ -61,14 +62,14 @@ export default function KnockoutClient({
   advancement,
   bracketPicks,
   groupStageStartsAt,
+  anyMatchPlayed = false,
   actualWinners = {},
   advancedFromStage = {},
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'bracket' | 'live'>('bracket')
-
-  const bracketLocked = groupStageStartsAt
-    ? new Date(groupStageStartsAt) <= new Date()
-    : false
+  // Bracket is op slot zodra de eerste groepswedstrijd gespeeld is (niet puur op tijd)
+  const bracketLocked = anyMatchPlayed || (
+    groupStageStartsAt ? new Date(groupStageStartsAt) <= new Date() : false
+  )
 
   return (
     <div className="space-y-6">
@@ -76,55 +77,23 @@ export default function KnockoutClient({
       <div>
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Knockoutfase</p>
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Bracket</h1>
+        {bracketLocked && (
+          <span className="inline-flex items-center gap-1.5 mt-2 font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-3 py-1 tracking-widest uppercase">
+            🔒 Gesloten
+          </span>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-wk-bg2 rounded-lg p-1">
-        <button
-          onClick={() => setActiveTab('bracket')}
-          className={`flex-1 rounded py-2 font-mono text-[10px] tracking-[0.14em] uppercase font-bold transition-colors ${
-            activeTab === 'bracket'
-              ? 'bg-wk-surface text-wk-gold border border-wk-gold/30'
-              : 'text-wk-muted hover:text-wk-soft'
-          }`}
-        >
-          Bracket
-        </button>
-        <button
-          onClick={() => setActiveTab('live')}
-          className={`flex-1 rounded py-2 font-mono text-[10px] tracking-[0.14em] uppercase font-bold transition-colors ${
-            activeTab === 'live'
-              ? 'bg-wk-surface text-wk-gold border border-wk-gold/30'
-              : 'text-wk-muted hover:text-wk-soft'
-          }`}
-        >
-          Live scores
-        </button>
-      </div>
+      <KoScoringInfo />
 
-      {/* Bracket tab */}
-      {activeTab === 'bracket' && (
-        <>
-          <KoScoringInfo />
-          <BracketClient
-            teams={allTeams}
-            advancement={advancement}
-            bracketPicks={bracketPicks}
-            locked={bracketLocked}
-            actualWinners={actualWinners}
-            advancedFromStage={advancedFromStage}
-          />
-        </>
-      )}
-
-      {/* Live tab */}
-      {activeTab === 'live' && (
-        <LiveSection
-          matches={matches}
-          teams={liveTeams}
-          predictions={livePredictions}
-        />
-      )}
+      <BracketClient
+        teams={allTeams}
+        advancement={advancement}
+        bracketPicks={bracketPicks}
+        locked={bracketLocked}
+        actualWinners={actualWinners}
+        advancedFromStage={advancedFromStage}
+      />
     </div>
   )
 }
