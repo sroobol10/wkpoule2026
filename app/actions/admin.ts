@@ -145,6 +145,13 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     .eq('type', 'pre_tournament')
   const preQuestionIds = new Set((preQRows ?? []).map((q) => q.id))
 
+  // Eindstand-punten tellen pas mee als de VOLLEDIGE groepsfase gespeeld is (alle 72 matches)
+  const { count: totalGroupMatches } = await supabase
+    .from('matches').select('id', { count: 'exact', head: true }).eq('stage', 'group')
+  const { count: playedGroupMatches } = await supabase
+    .from('matches').select('id', { count: 'exact', head: true }).eq('stage', 'group').eq('result_entered', true)
+  const allGroupMatchesPlayed = (totalGroupMatches ?? 0) > 0 && totalGroupMatches === playedGroupMatches
+
   // Herbereken punten per gebruiker (inclusief breakdown)
   for (const userId of userIds) {
     const [predsRes, koRes, advRes, bonusRes, jokersRes, bracketRes] = await Promise.all([
@@ -175,7 +182,10 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     const bracketRows = (bracketRes.data ?? []) as { points_awarded: number | null }[]
 
     const groupMatchPts     = preds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const groupStandingsPts = advancement.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    // Eindstand-punten alleen meenemen als de volledige groepsfase klaar is
+    const groupStandingsPts = allGroupMatchesPlayed
+      ? advancement.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+      : 0
     const knockoutPts       = koPreds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
                             + bracketRows.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const bonusPrePts       = bonuses.filter((b) => preQuestionIds.has(b.question_id))
@@ -441,6 +451,13 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
     .update({ points_awarded: null })
     .in('match_id', matchIds)
   if (predErr) return { ok: false, error: `Voorspellingen: ${predErr.message}` }
+
+  // Ook groepsstand-punten resetten (zodat ze niet doorsijpelen bij herberekening)
+  const { error: advErr } = await supabase
+    .from('group_advancement')
+    .update({ points_awarded: null })
+    .not('id', 'is', null)
+  if (advErr) return { ok: false, error: `Eindstanden: ${advErr.message}` }
 
   // Klassement nullen (admin heeft nu ALL-policy op poule_scores)
   const { error: scoreErr } = await supabase

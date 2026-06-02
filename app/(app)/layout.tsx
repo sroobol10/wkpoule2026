@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
 import Sidebar from '@/components/nav/sidebar'
 import BottomNav from '@/components/nav/bottom-nav'
+import NavProgress from '@/components/nav/nav-progress'
 
 export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const supabase = await createClient()
@@ -21,6 +22,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
   return (
     <div className="min-h-screen bg-wk-bg">
+      <NavProgress />
       <Sidebar isAdmin={isAdmin} username={username} />
       <BottomNav isAdmin={isAdmin} />
 
@@ -65,7 +67,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
         </div>
 
         {/* Page content */}
-        <div className="mx-auto max-w-400 px-4 md:px-8 py-6 md:py-8">
+        <div className="mx-auto max-w-400 px-4 md:px-8 py-6 md:py-8 animate-fade-up">
           {children}
         </div>
       </div>

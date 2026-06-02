@@ -24,6 +24,51 @@
   --color-wk-green:    #2EA84B;
 }
 
+/* ── Animaties ────────────────────────────────────────────────────────────── */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes loading-bar {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(-5%);  }
+  100% { transform: translateX(0%);   }
+}
+
+@layer utilities {
+  .animate-fade-up {
+    animation: fade-up 0.35s ease-out both;
+  }
+  .animate-fade-in {
+    animation: fade-in 0.25s ease-out both;
+  }
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-wk-surface) 100%, transparent) 0%,
+      color-mix(in srgb, var(--color-wk-bg2) 100%, transparent) 50%,
+      color-mix(in srgb, var(--color-wk-surface) 100%, transparent) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+  .animate-loading-bar {
+    animation: loading-bar 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+}
+
 @layer base {
   *, *::before, *::after { box-sizing: border-box; }
   html { height: 100%; }
