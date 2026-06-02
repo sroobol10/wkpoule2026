@@ -178,8 +178,8 @@ const MATCHES: { n: number; home: string; away: string; kickoffUtc: string; grou
   { n: 20, home: 'Austria',        away: 'Jordan',         kickoffUtc: '2026-06-18T04:00:00Z', group: 'J' }, // Levi's   21:00 PDT jun 17
   { n: 43, home: 'Argentina',      away: 'Austria',        kickoffUtc: '2026-06-22T17:00:00Z', group: 'J' }, // AT&T     12:00 CDT
   { n: 44, home: 'Jordan',         away: 'Algeria',        kickoffUtc: '2026-06-24T03:00:00Z', group: 'J' }, // Levi's   20:00 PDT jun 23
-  { n: 69, home: 'Algeria',        away: 'Austria',        kickoffUtc: '2026-06-29T02:00:00Z', group: 'J' }, // KC       21:00 CDT jun 28
-  { n: 70, home: 'Jordan',         away: 'Argentina',      kickoffUtc: '2026-06-29T02:00:00Z', group: 'J' }, // AT&T     21:00 CDT jun 28
+  { n: 69, home: 'Algeria',        away: 'Austria',        kickoffUtc: '2026-06-28T21:00:00Z', group: 'J' }, // KC       23:00 CEST jun 28
+  { n: 70, home: 'Jordan',         away: 'Argentina',      kickoffUtc: '2026-06-28T21:00:00Z', group: 'J' }, // AT&T     23:00 CEST jun 28
 
   // ── Groep K ──
   { n: 23, home: 'Portugal',       away: 'DR Congo',       kickoffUtc: '2026-06-17T22:00:00Z', group: 'K' }, // Houston  17:00 CDT

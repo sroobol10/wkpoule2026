@@ -75,13 +75,17 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
   // Bereken doorstroom-picks voor saveGroupAdvancement:
   // - Positie 1 en 2 voor alle groepen (altijd door)
   // - Positie 3 voor de beste 8 nummers 3 (cross-groep vergelijking)
-  // Exact dit formaat verwacht de bracket-client (pos12 === 24 && pos3 === 8)
+  // Sla ALLEEN op voor groepen zonder gespeelde wedstrijden: zodra admin heeft
+  // gescoord overschrijft de auto-save de points_awarded waarden niet meer.
   function computeGroupStandings(): { teamId: string; position: number }[] {
     const picks: { teamId: string; position: number }[] = []
     const thirds: { group: string; teamId: string; points: number; gd: number; gf: number }[] = []
 
     for (const group of GROUPS) {
       const gm = matches.filter((m) => m.home_team?.group_name === group)
+
+      // Groep overgeslagen als er al een wedstrijd is gespeeld (admin scoort die groepen)
+      if (gm.some((m) => m.result_entered)) continue
       const st: Record<string, { points: number; gd: number; gf: number }> = {}
       for (const m of gm) {
         if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 }
@@ -206,10 +210,13 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
         setSaveStatus('saving')
         const result = await savePredictions([{ matchId, home: Number(newScore.home), away: Number(newScore.away) }])
         if (result.ok) {
-          // Auto-save groepsstand als doorstroom-voorspelling
-          const standingPicks = computeGroupStandings()
-          if (standingPicks.length > 0) {
-            saveGroupAdvancement(standingPicks).catch(() => {})
+          // Groepsstand-koppeling bevroren zodra toernooi is gestart (eerste match gespeeld)
+          const tournamentStarted = matches.some((m) => m.result_entered)
+          if (!tournamentStarted) {
+            const standingPicks = computeGroupStandings()
+            if (standingPicks.length > 0) {
+              saveGroupAdvancement(standingPicks).catch(() => {})
+            }
           }
         }
         setSaveStatus(result.ok ? 'saved' : 'error')
@@ -283,8 +290,6 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
                 { label: 'Correct resultaat + één doelpunttotaal', pts: '3 pt' },
                 { label: 'Fout resultaat + één doelpunttotaal',   pts: '1 pt' },
                 { label: 'Correcte eindpositie in de groep',      pts: '3 pt' },
-                { label: 'Bonusvraag (voor toernooi)',            pts: '5 pt' },
-                { label: 'Bonusvraag (dagelijks)',                pts: '2 pt' },
               ].map(({ label, pts }) => (
                 <div key={label} className="flex items-center justify-between gap-4">
                   <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
@@ -292,7 +297,7 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
                 </div>
               ))}
               <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-                De inzet van een joker zorgt voor een verdubbeling van het aantal punten behaald in deze wedstrijd.
+                Je hebt de mogelijkheid om in elke groep op één van de zes wedstrijden een joker in te zetten. Een joker zorgt voor een verdubbeling van het aantal punten dat je behaalt in deze wedstrijd.
               </p>
             </div>
           )}
@@ -621,11 +626,7 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
             {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
           </p>
-          {locked && (
-            <span className="font-mono text-[10px] text-wk-gold tracking-[0.12em] uppercase border border-wk-gold/30 rounded-full px-2 py-0.5">
-              🔒 Gesloten
-            </span>
-          )}
+          {locked && <span className="text-wk-muted text-xs">🔒</span>}
           {hasJoker && locked && (
             <span className="font-mono text-[10px] text-wk-gold tracking-widest">★ Joker</span>
           )}
@@ -677,7 +678,6 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
                     <span className="font-mono text-base text-wk-muted">–</span>
                     <span className="w-10 text-center font-display text-2xl text-wk-text">{match.away_score}</span>
                   </div>
-                  <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mt-0.5">Uitslag</p>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5">
@@ -723,50 +723,56 @@ function MatchRow({ match, score, pts, locked, hasJoker, onScoreChange, onJokerT
             </div>
           </div>
 
-          {/* Punten badge */}
-          {(pts !== null && pts !== undefined) || (match.result_entered && score) ? (
+          {/* Punten + voorspelling na gespeeld */}
+          {match.result_entered && (pts !== null && pts !== undefined) ? (
+            <div className="flex items-center justify-center gap-3 mt-1">
+              <span className={`font-mono text-sm font-bold px-3 py-1 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
+                {pts} pt
+              </span>
+              {score && (
+                <span className="font-mono text-[10px] text-wk-muted tracking-widest">
+                  jouw voorspelling: {score.home} – {score.away}
+                </span>
+              )}
+            </div>
+          ) : (!match.result_entered && pts !== null && pts !== undefined) ? (
             <div className="flex items-center gap-2">
-              {pts !== null && pts !== undefined && (
-                <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
-                  {pts} pt
-                </span>
-              )}
-              {match.result_entered && score && (
-                <span className="font-mono text-[9px] text-wk-muted tracking-widest">
-                  jouw: {score.home} – {score.away}
-                </span>
-              )}
+              <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
+                {pts} pt
+              </span>
             </div>
           ) : null}
         </div>
       </div>
 
-      {/* AI toggle */}
-      <div className="px-5 pt-4 pb-4">
-        <button
-          onClick={handleAiToggle}
-          className={`flex items-center justify-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors w-full ${
-            showAi ? 'text-wk-blue' : 'text-wk-muted hover:text-wk-soft'
-          }`}
-        >
-          <span className="text-[11px]">⚡</span>
-          AI voorspelling
-          <svg
-            className={`w-3 h-3 transition-transform ${showAi ? 'rotate-180' : ''}`}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+      {/* AI toggle — alleen tonen als wedstrijd nog niet gespeeld */}
+      {!match.result_entered && (
+        <div className="px-5 pt-2 pb-4">
+          <button
+            onClick={handleAiToggle}
+            className={`flex items-center justify-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors w-full ${
+              showAi ? 'text-wk-blue' : 'text-wk-muted hover:text-wk-soft'
+            }`}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+            <span className="text-[11px]">⚡</span>
+            AI voorspelling
+            <svg
+              className={`w-3 h-3 transition-transform ${showAi ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
 
-        {showAi && (
-          <AiPredictionPanel
-            state={aiState}
-            homeName={match.home_team?.name ?? ''}
-            awayName={match.away_team?.name ?? ''}
-          />
-        )}
-      </div>
+          {showAi && (
+            <AiPredictionPanel
+              state={aiState}
+              homeName={match.home_team?.name ?? ''}
+              awayName={match.away_team?.name ?? ''}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -966,29 +972,15 @@ function GroupStandingsInline({
     if (m.away_team) teamMap[m.away_team.id] = m.away_team
   }
 
+  // Altijd eigen voorspellingen gebruiken — nooit werkelijke uitslagen
+  // (ActualGroupStandingsInline toont de werkelijke stand apart hierboven)
   let hasAnyScore = false
-  let hasActualResult = false
 
   for (const m of groupMatches) {
-    if (!m.home_team || !m.away_team) continue
-
-    let h: number, a: number
-
-    if (m.result_entered && m.home_score !== null && m.away_score !== null) {
-      // Werkelijke uitslag — hogere prioriteit dan voorspelling
-      h = m.home_score
-      a = m.away_score
-      hasAnyScore = true
-      hasActualResult = true
-    } else {
-      // Eigen voorspelling
-      const s = scores[m.id]
-      if (!s || s.home === '' || s.away === '') continue
-      h = Number(s.home)
-      a = Number(s.away)
-      hasAnyScore = true
-    }
-
+    const s = scores[m.id]
+    if (!s || s.home === '' || s.away === '' || !m.home_team || !m.away_team) continue
+    hasAnyScore = true
+    const h = Number(s.home), a = Number(s.away)
     st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a
     st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h
     if (h > a) st[m.home_team.id].points += 3
@@ -1002,12 +994,7 @@ function GroupStandingsInline({
   // Nummer 3 die door is, op basis van beste-8-berekening
   const advancingThird = advancementPicks[2]
 
-  const allPlayed = groupMatches.every((m) => m.result_entered)
-  const standingLabel = allPlayed
-    ? `Actuele stand groep ${group}`
-    : hasActualResult
-      ? `Lopende stand groep ${group}`
-      : `Voorspelde stand groep ${group}`
+  const standingLabel = `Jouw prognose groep ${group}`
 
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
@@ -1037,17 +1024,13 @@ function GroupStandingsInline({
             if (advancingThird === teamId) {
               statusLabel = '→ Door'
               statusClass = 'text-wk-green'
-            } else if (hasAnyScore) {
-              // Op basis van huidige berekening niet in beste 8
-              statusLabel = 'Eventueel'
-              statusClass = 'text-wk-red/70'
             } else {
-              statusLabel = 'Eventueel'
-              statusClass = 'text-wk-gold'
+              statusLabel = '✗ Uit'
+              statusClass = 'text-wk-red/70'
             }
           } else {
             statusLabel = '✗ Uit'
-            statusClass = 'text-wk-muted'
+            statusClass = 'text-wk-red/70'
           }
 
           return (
@@ -1062,11 +1045,11 @@ function GroupStandingsInline({
               <span className="flex-1 text-xs font-semibold text-wk-text truncate">{team.name}</span>
               {hasAnyScore && (
                 <>
-                  <span className="font-mono text-[10px] text-wk-muted w-6 text-center">{stat.points}pt</span>
-                  <span className="font-mono text-[10px] text-wk-muted w-8 text-right">
+                  <span className="font-mono text-[10px] text-wk-muted w-5 text-center shrink-0">{stat.points}pt</span>
+                  <span className="font-mono text-[10px] text-wk-muted w-7 text-right shrink-0">
                     {stat.gd > 0 ? `+${stat.gd}` : stat.gd}
                   </span>
-                  <span className={`font-mono text-[9px] tracking-widest uppercase shrink-0 w-20 text-right ${statusClass}`}>
+                  <span className={`font-mono text-[9px] tracking-widest uppercase shrink-0 w-14 text-right ${statusClass}`}>
                     {statusLabel}
                   </span>
                 </>

@@ -28,11 +28,23 @@ type BonusQuestion = {
 
 type CardEntry = { match_id: string; team_id: string; yellow_cards: number; red_cards: number }
 
+type Participant = {
+  id: string
+  username: string
+  predictions: number
+  jokers: number
+  bracketPicks: number
+  bonusAnswers: number
+}
+
 type Props = {
   matches: Match[]
   teams: Team[]
   questions: BonusQuestion[]
   cardsByMatch: Record<string, CardEntry[]>
+  participants: Participant[]
+  totalGroupMatches: number
+  totalBonusQuestions: number
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
@@ -46,9 +58,9 @@ const STAGE_LABELS: Record<string, string> = {
   final:       'Finale',
 }
 
-type Tab = 'groepsfase' | 'bonusvragen' | 'knockout'
+type Tab = 'groepsfase' | 'bonusvragen' | 'knockout' | 'deelnemers'
 
-export default function AdminClient({ matches, teams, questions, cardsByMatch }: Props) {
+export default function AdminClient({ matches, teams, questions, cardsByMatch, participants, totalGroupMatches, totalBonusQuestions }: Props) {
   const [tab, setTab] = useState<Tab>('groepsfase')
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
@@ -63,6 +75,7 @@ export default function AdminClient({ matches, teams, questions, cardsByMatch }:
     { id: 'groepsfase',  label: 'Groepsfase',  badge: `${groupDone}/${groupMatches.length}` },
     { id: 'bonusvragen', label: 'Bonusvragen', badge: `${bonusDone}/${questions.length}` },
     { id: 'knockout',    label: 'Knockout',    badge: knockoutMatches.length > 0 ? `${knockoutDone}/${knockoutMatches.length}` : '–' },
+    { id: 'deelnemers',  label: 'Deelnemers',  badge: `${participants.length}` },
   ]
 
   return (
@@ -99,6 +112,13 @@ export default function AdminClient({ matches, teams, questions, cardsByMatch }:
       )}
       {tab === 'knockout' && (
         <KnockoutTab matches={knockoutMatches} teamMap={teamMap} cardsByMatch={cardsByMatch} />
+      )}
+      {tab === 'deelnemers' && (
+        <DeelnemersTab
+          participants={participants}
+          totalGroupMatches={totalGroupMatches}
+          totalBonusQuestions={totalBonusQuestions}
+        />
       )}
     </div>
   )
@@ -515,6 +535,116 @@ function MatchResultRow({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Deelnemers tab ───────────────────────────────────────────────────────────
+
+function DeelnemersTab({
+  participants,
+  totalGroupMatches,
+  totalBonusQuestions,
+}: {
+  participants: Participant[]
+  totalGroupMatches: number
+  totalBonusQuestions: number
+}) {
+  const allComplete = (p: Participant) =>
+    p.predictions === totalGroupMatches &&
+    p.jokers === 12 &&
+    p.bracketPicks === 32 &&
+    p.bonusAnswers >= totalBonusQuestions
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="font-mono text-[10px] text-wk-muted tracking-widest uppercase">
+          {participants.length} deelnemers · {participants.filter(allComplete).length} volledig ingevuld
+        </p>
+        <a
+          href="/admin/uitdraai"
+          target="_blank"
+          className="rounded border border-white/10 px-3 py-1.5 text-[10px] font-mono text-wk-muted hover:border-white/20 hover:text-wk-soft transition-colors tracking-[0.12em] uppercase"
+        >
+          📄 Uitdraai openen
+        </a>
+      </div>
+
+      <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-white/10">
+                <th className="px-4 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase">Deelnemer</th>
+                <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-right">Wedstrijden</th>
+                <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-right">Jokers</th>
+                <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-right">Bracket</th>
+                <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-right">Bonus</th>
+                <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">Status</th>
+                <th className="px-3 py-2.5"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {participants.map((p) => {
+                const complete = allComplete(p)
+                const wedstrOk = p.predictions === totalGroupMatches
+                const jokersOk = p.jokers === 12
+                const bracketOk = p.bracketPicks === 32
+                const bonusOk   = p.bonusAnswers >= totalBonusQuestions
+
+                return (
+                  <tr key={p.id} className={complete ? 'bg-wk-green/5' : ''}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-wk-bg2 border border-white/10 flex items-center justify-center text-xs font-bold text-wk-gold font-mono shrink-0">
+                          {p.username.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="text-sm font-medium text-wk-text">{p.username}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={`font-mono text-xs ${wedstrOk ? 'text-wk-green font-bold' : 'text-wk-muted'}`}>
+                        {p.predictions}/{totalGroupMatches}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={`font-mono text-xs ${jokersOk ? 'text-wk-green font-bold' : p.jokers > 0 ? 'text-wk-gold' : 'text-wk-muted'}`}>
+                        {p.jokers}/12
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={`font-mono text-xs ${bracketOk ? 'text-wk-green font-bold' : p.bracketPicks > 0 ? 'text-wk-gold' : 'text-wk-muted'}`}>
+                        {p.bracketPicks}/32
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <span className={`font-mono text-xs ${bonusOk ? 'text-wk-green font-bold' : p.bonusAnswers > 0 ? 'text-wk-gold' : 'text-wk-muted'}`}>
+                        {p.bonusAnswers}/{totalBonusQuestions}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      {complete
+                        ? <span className="font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest">✓ Klaar</span>
+                        : <span className="font-mono text-[9px] text-wk-gold border border-wk-gold/30 rounded-full px-2 py-0.5 tracking-widest">Onvolledig</span>
+                      }
+                    </td>
+                    <td className="px-3 py-3">
+                      <a
+                        href={`/admin/deelnemer/${p.id}`}
+                        target="_blank"
+                        className="font-mono text-[9px] text-wk-muted hover:text-wk-gold tracking-widest uppercase transition-colors"
+                      >
+                        Bekijk →
+                      </a>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }

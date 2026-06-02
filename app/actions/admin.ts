@@ -156,7 +156,10 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
         .eq('user_id', userId).not('points_awarded', 'is', null),
       supabase.from('bonus_answers').select('points_awarded, question_id')
         .eq('user_id', userId).not('points_awarded', 'is', null),
-      supabase.from('jokers').select('id').eq('user_id', userId),
+      // Jokers op al-gespeelde wedstrijden (result_entered = true)
+      supabase.from('jokers')
+        .select('id, match:matches!jokers_match_id_fkey(result_entered)')
+        .eq('user_id', userId),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any).from('bracket_predictions').select('points_awarded')
         .eq('user_id', userId).not('points_awarded', 'is', null),
@@ -168,6 +171,7 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     const bonuses     = bonusRes.data   ?? []
     const jokerRows   = jokersRes.data  ?? []
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bracketRows = (bracketRes.data ?? []) as { points_awarded: number | null }[]
 
     const groupMatchPts     = preds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
@@ -178,7 +182,10 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
                                 .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const bonusDailyPts     = bonuses.filter((b) => !preQuestionIds.has(b.question_id))
                                 .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const jokersPlayed      = jokerRows.length
+    const jokersPlayed      = jokerRows.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (j: any) => j.match?.result_entered === true
+    ).length
 
     const totalPts       = groupMatchPts + groupStandingsPts + knockoutPts + bonusPrePts + bonusDailyPts
     const exactHits      = preds.filter((r) => (r.points_awarded ?? 0) >= 5).length

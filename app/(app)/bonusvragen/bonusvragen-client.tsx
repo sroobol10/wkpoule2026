@@ -36,6 +36,11 @@ function isTeamQuestion(question: string) {
   )
 }
 
+// GOAT-vraag: binaire keuze tussen Ronaldo en Messi
+function isGoatQuestion(question: string) {
+  return question.toLowerCase().includes('goat') || question.toLowerCase().includes('ronaldo') || question.toLowerCase().includes('messi')
+}
+
 export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false }: Props) {
   const preTournament = questions.filter((q) => q.type === 'pre_tournament')
   const daily = questions.filter((q) => q.type === 'daily')
@@ -70,6 +75,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                 accentClass="text-wk-red"
                 teams={isTeamQuestion(q.question) ? teams : []}
                 tournamentStarted={anyMatchPlayed}
+                isGoat={isGoatQuestion(q.question)}
               />
             ))}
           </div>
@@ -115,12 +121,14 @@ function QuestionCard({
   accentClass,
   teams,
   tournamentStarted = false,
+  isGoat = false,
 }: {
   question: Question
   existingAnswer: AnswerEntry | null
   accentClass: string
   teams: Team[]
   tournamentStarted?: boolean
+  isGoat?: boolean
 }) {
   const [answer, setAnswer] = useState(existingAnswer?.answer ?? '')
   const [isPending, startTransition] = useTransition()
@@ -203,7 +211,26 @@ function QuestionCard({
 
           {/* Answer area */}
           {!closed ? (
-            isTeam ? (
+            isGoat ? (
+              /* ── GOAT: Ronaldo of Messi ── */
+              <div className="flex gap-2">
+                {['Ronaldo', 'Messi'].map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => { setAnswer(name); setSaved(false); handleSave(name) }}
+                    disabled={isPending}
+                    className={`flex-1 rounded border px-4 py-3 text-sm font-semibold transition-colors ${
+                      answer === name
+                        ? 'border-wk-gold/60 bg-wk-gold/15 text-wk-gold'
+                        : 'border-white/10 bg-wk-bg2 text-wk-soft hover:border-white/20'
+                    }`}
+                  >
+                    {name}
+                    {answer === name && <span className="ml-1.5 font-mono text-[10px]">✓</span>}
+                  </button>
+                ))}
+              </div>
+            ) : isTeam ? (
               /* ── Team picker ── */
               <div className="space-y-2">
                 {/* Current selection */}
