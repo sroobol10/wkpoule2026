@@ -22,52 +22,45 @@ export default async function StatistiekenPage() {
     .select('id', { count: 'exact', head: true })
 
   // ── WK-kampioen verdeling ────────────────────────────────────────────────
+  // Gebaseerd op bracket-picks: slot 104 = Finale → dat is de voorspelde kampioen
   let kampioenStats: KampioenverdeligEntry[] = []
 
   if (tournamentStarted) {
-    // Zoek de kampioen-bonusvraag op tekst
-    const { data: kampioenQuestion } = await supabase
-      .from('bonus_questions')
-      .select('id')
-      .ilike('question', '%kampioen%')
-      .eq('type', 'pre_tournament')
-      .limit(1)
-      .single()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: finalePicks } = await (supabase as any)
+      .from('bracket_predictions')
+      .select('predicted_team_id')
+      .eq('slot', 104)  // slot 104 = Finale
 
-    if (kampioenQuestion) {
-      const { data: answers } = await supabase
-        .from('bonus_answers')
-        .select('answer')
-        .eq('question_id', kampioenQuestion.id)
+    if (finalePicks && finalePicks.length > 0) {
+      const teamIds = (finalePicks as { predicted_team_id: string }[]).map((p) => p.predicted_team_id)
 
-      if (answers) {
-        // Groepeer antwoorden en tel
-        const counts: Record<string, number> = {}
-        for (const { answer } of answers) {
-          const normalized = answer.trim()
-          if (normalized) counts[normalized] = (counts[normalized] ?? 0) + 1
-        }
+      // Haal teamnamen en vlaggen op
+      const { data: teams } = await supabase
+        .from('teams')
+        .select('id, name, flag_url')
+        .in('id', teamIds)
 
-        // Haal vlaggen op voor de landen
-        const countryNames = Object.keys(counts)
-        const { data: teams } = countryNames.length > 0
-          ? await supabase
-              .from('teams')
-              .select('name, flag_url')
-              .in('name', countryNames)
-          : { data: [] }
+      const teamById: Record<string, { name: string; flag_url: string }> = {}
+      for (const t of teams ?? []) teamById[t.id] = t
 
-        const flagMap: Record<string, string> = {}
-        for (const t of teams ?? []) flagMap[t.name] = t.flag_url
-
-        kampioenStats = Object.entries(counts)
-          .sort(([, a], [, b]) => b - a)
-          .map(([answer, count]) => ({
-            answer,
-            count,
-            flag_url: flagMap[answer] ?? null,
-          }))
+      // Tel per team
+      const counts: Record<string, number> = {}
+      for (const { predicted_team_id } of finalePicks as { predicted_team_id: string }[]) {
+        const name = teamById[predicted_team_id]?.name
+        if (name) counts[name] = (counts[name] ?? 0) + 1
       }
+
+      const flagMap: Record<string, string> = {}
+      for (const t of teams ?? []) flagMap[t.name] = t.flag_url
+
+      kampioenStats = Object.entries(counts)
+        .sort(([, a], [, b]) => b - a)
+        .map(([answer, count]) => ({
+          answer,
+          count,
+          flag_url: flagMap[answer] ?? null,
+        }))
     }
   }
 

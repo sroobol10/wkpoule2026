@@ -22,6 +22,7 @@ type Props = {
   answerMap: Record<string, AnswerEntry>
   teams: Team[]
   anyMatchPlayed?: boolean
+  deadlineByDate?: Record<string, string>  // unlock_date → effectieve deadline ISO
 }
 
 // Vragen waarbij een landkeuze getoond wordt i.p.v. vrije tekst
@@ -41,7 +42,7 @@ function isGoatQuestion(question: string) {
   return question.toLowerCase().includes('goat') || question.toLowerCase().includes('ronaldo') || question.toLowerCase().includes('messi')
 }
 
-export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false }: Props) {
+export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {} }: Props) {
   const preTournament = questions.filter((q) => q.type === 'pre_tournament')
   const daily = questions.filter((q) => q.type === 'daily')
   const answeredCount = questions.filter((q) => answerMap[q.id]?.answer).length
@@ -56,6 +57,33 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         </p>
       </div>
 
+      {/* Dagelijkse vragen eerst */}
+      {daily.length > 0 && (
+        <section>
+          <div className="flex items-center gap-3 mb-3">
+            <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+              Dagelijkse vragen
+            </span>
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+              {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} · 2 pt per goed antwoord
+            </span>
+          </div>
+          <div className="space-y-3">
+            {daily.map((q) => (
+              <QuestionCard
+                key={q.id}
+                question={q}
+                existingAnswer={answerMap[q.id] ?? null}
+                accentClass="text-wk-blue"
+                teams={[]}
+                effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Vóór-het-toernooi vragen eronder */}
       {preTournament.length > 0 && (
         <section>
           <div className="flex items-center gap-3 mb-3">
@@ -82,30 +110,6 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         </section>
       )}
 
-      {daily.length > 0 && (
-        <section>
-          <div className="flex items-center gap-3 mb-3">
-            <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-              Dagelijkse vragen
-            </span>
-            <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-              {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} · 2 pt per goed antwoord
-            </span>
-          </div>
-          <div className="space-y-3">
-            {daily.map((q) => (
-              <QuestionCard
-                key={q.id}
-                question={q}
-                existingAnswer={answerMap[q.id] ?? null}
-                accentClass="text-wk-blue"
-                teams={[]}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
       {questions.length === 0 && (
         <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center">
           <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">Nog geen bonusvragen beschikbaar.</p>
@@ -122,6 +126,7 @@ function QuestionCard({
   teams,
   tournamentStarted = false,
   isGoat = false,
+  effectiveDeadline = null,
 }: {
   question: Question
   existingAnswer: AnswerEntry | null
@@ -129,6 +134,7 @@ function QuestionCard({
   teams: Team[]
   tournamentStarted?: boolean
   isGoat?: boolean
+  effectiveDeadline?: string | null  // ISO datetime: 1u voor eerste wedstrijd van die dag
 }) {
   const [answer, setAnswer] = useState(existingAnswer?.answer ?? '')
   const [isPending, startTransition] = useTransition()
@@ -137,7 +143,11 @@ function QuestionCard({
   const [showPicker, setShowPicker] = useState(false)
   const [search, setSearch] = useState('')
 
-  const deadline = question.unlock_date ? new Date(question.unlock_date) : null
+  // Effectieve deadline: voor dagelijkse vragen = 1u voor eerste wedstrijd van die dag
+  const deadline = effectiveDeadline
+    ? new Date(effectiveDeadline)
+    : (question.unlock_date ? new Date(question.unlock_date + 'T00:00:00Z') : null)
+
   // Pre-tournament vragen gaan op slot zodra het toernooi begint (eerste wedstrijd gespeeld)
   const closed = question.type === 'pre_tournament'
     ? tournamentStarted

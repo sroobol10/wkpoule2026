@@ -66,6 +66,7 @@ export default function StatsClient({
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Voorspeld wereldkampioen
           </p>
+
           {kampioenStats.length === 0 ? (
             <div className="bg-wk-surface border border-white/10 rounded-xl px-5 py-6 text-center">
               <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">Nog geen antwoorden ingediend.</p>
@@ -115,6 +116,7 @@ export default function StatsClient({
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Voorspeld wereldkampioen
           </p>
+
           <div className="bg-wk-surface border border-white/10 rounded-xl px-5 py-6 text-center space-y-2">
             <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
               🔒 Zichtbaar na start van het toernooi
