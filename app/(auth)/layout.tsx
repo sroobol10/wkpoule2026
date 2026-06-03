@@ -31,7 +31,7 @@ export default function AuthLayout({
               </span>
             </div>
             <p className="font-display text-2xl text-white uppercase leading-none tracking-tight">
-              De <span className="text-wk-gold">Poule</span>
+              MIJN <span className="text-wk-gold">WK POULE</span>
             </p>
             <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1">
               Voorspellen · Volgen · Winnen

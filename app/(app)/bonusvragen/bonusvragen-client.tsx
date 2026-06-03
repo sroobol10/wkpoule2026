@@ -2,9 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import Image from 'next/image'
-import { format } from 'date-fns'
-import { nl } from 'date-fns/locale'
 import { saveBonusAnswer } from '@/app/actions/bonus'
+import { formatInAmsterdam } from '@/lib/format'
 
 type Question = {
   id: string
@@ -19,12 +18,15 @@ type Question = {
 type AnswerEntry = { question_id: string; answer: string; points_awarded: number | null }
 type Team = { id: string; name: string; flag_url: string }
 
+type MatchForDay = { kickoff_at: string; home: string; away: string }
+
 type Props = {
   questions: Question[]
   answerMap: Record<string, AnswerEntry>
   teams: Team[]
   anyMatchPlayed?: boolean
-  deadlineByDate?: Record<string, string>  // unlock_date → effectieve deadline ISO
+  deadlineByDate?: Record<string, string>       // unlock_date → effectieve deadline ISO
+  matchesByDay?: Record<string, MatchForDay[]>  // CEST-datum → wedstrijden
 }
 
 // Vragen waarbij een landkeuze getoond wordt i.p.v. vrije tekst
@@ -52,7 +54,7 @@ function preSort(a: Question, b: Question) {
   return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
 }
 
-export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {} }: Props) {
+export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {}, matchesByDay = {} }: Props) {
   const [showScoring, setShowScoring] = useState(false)
 
   const preTournament = questions
@@ -149,6 +151,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                   accentClass="text-wk-blue"
                   teams={[]}
                   effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
+                  dayMatches={q.unlock_date ? (matchesByDay[q.unlock_date] ?? []) : []}
                 />
               ))}
             </div>
@@ -172,6 +175,7 @@ function QuestionCard({
   teams,
   tournamentStarted = false,
   effectiveDeadline = null,
+  dayMatches = [],
 }: {
   question: Question
   existingAnswer: AnswerEntry | null
@@ -179,12 +183,14 @@ function QuestionCard({
   teams: Team[]
   tournamentStarted?: boolean
   effectiveDeadline?: string | null
+  dayMatches?: MatchForDay[]
 }) {
   const [answer, setAnswer] = useState(existingAnswer?.answer ?? '')
   const [isPending, startTransition] = useTransition()
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [saved, setSaved] = useState(!!existingAnswer?.answer)
   const [showPicker, setShowPicker] = useState(false)
+  const [showMatches, setShowMatches] = useState(false)
   const [search, setSearch] = useState('')
 
   const deadline = effectiveDeadline
@@ -263,11 +269,42 @@ function QuestionCard({
             </div>
           </div>
 
-          {/* Deadline */}
-          {deadline && !closed && (
-            <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase mb-3">
-              Deadline: {format(deadline, 'EEEE d MMMM · HH:mm', { locale: nl })}
-            </p>
+          {/* Deadline + wedstrijden van die dag */}
+          {question.type === 'daily' && (
+            <div className="mb-3 space-y-1.5">
+              {deadline && !closed && (
+                <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
+                  Sluit bij aftrap: {formatInAmsterdam(deadline.toISOString(), 'EEEE d MMMM · HH:mm')}
+                </p>
+              )}
+              {dayMatches.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setShowMatches(v => !v)}
+                    className="font-mono text-[9px] text-wk-muted hover:text-wk-soft tracking-widest uppercase transition-colors flex items-center gap-1"
+                  >
+                    <svg className={`w-3 h-3 transition-transform ${showMatches ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                    {dayMatches.length} wedstrijd{dayMatches.length !== 1 ? 'en' : ''} op deze dag
+                  </button>
+                  {showMatches && (
+                    <div className="mt-1.5 rounded-lg bg-wk-bg2 border border-white/10 overflow-hidden">
+                      {dayMatches.map((m) => (
+                        <div key={m.kickoff_at} className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 last:border-0">
+                          <span className="font-mono text-[9px] text-wk-muted shrink-0 w-10">
+                            {formatInAmsterdam(m.kickoff_at, 'HH:mm')}
+                          </span>
+                          <span className="font-mono text-[10px] text-wk-soft">
+                            {m.home} – {m.away}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {/* Answer area */}

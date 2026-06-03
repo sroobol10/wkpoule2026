@@ -34,21 +34,26 @@ export async function saveBonusAnswer(
 
   if (question.unlock_date) {
     // Effectieve deadline = 1u voor de eerste wedstrijd van die dag (Amsterdam-datum)
-    // Alleen wedstrijden na 13:00 CEST (= 11:00 UTC) op die dag
-    // Nachtelijke wedstrijden (bijv. 03:00 CEST) tellen niet mee als "eerste wedstrijd"
+    // Deadline = aftrap van de vroegste wedstrijd op die CEST-kalenderdag (00:00–23:59 CEST)
+    // CEST = UTC+2: dag begint op (unlock_date - 1 dag)T22:00:00Z, eindigt op unlock_dateT22:00:00Z
+    const cestDayStartUtc = question.unlock_date + 'T00:00:00Z' // vertrouwt op unlock_date als CEST-datum
+    // Vroegste aftrap op deze CEST-dag: van 22:00 UTC vorige dag t/m 22:00 UTC die dag
+    const prevDayT22 = new Date(new Date(cestDayStartUtc).getTime() - 2 * 60 * 60 * 1000).toISOString()
+    const nextDayT22 = new Date(new Date(cestDayStartUtc).getTime() + 22 * 60 * 60 * 1000).toISOString()
+
     const { data: firstMatch } = await supabase
       .from('matches')
       .select('kickoff_at')
-      .eq('stage', 'group')
-      .gte('kickoff_at', question.unlock_date + 'T11:00:00Z')  // 13:00 CEST = 11:00 UTC
-      .lt('kickoff_at', question.unlock_date + 'T22:00:00Z')   // t/m 00:00 CEST volgende dag
+      .gte('kickoff_at', prevDayT22)
+      .lt('kickoff_at', nextDayT22)
       .order('kickoff_at', { ascending: true })
       .limit(1)
       .maybeSingle()
 
+    // Deadline = aftrap zelf (geen buffer) — vraag sluit bij eerste wedstrijd van die dag
     const effectiveDeadline = firstMatch
-      ? new Date(new Date(firstMatch.kickoff_at).getTime() - 60 * 60 * 1000)
-      : new Date(question.unlock_date + 'T00:00:00Z')
+      ? new Date(firstMatch.kickoff_at)
+      : new Date(question.unlock_date + 'T00:00:00Z')  // rustdag: midnight UTC
 
     if (effectiveDeadline <= new Date()) {
       return { ok: false, error: 'De deadline voor deze vraag is verstreken.' }

@@ -21,7 +21,7 @@ function getTitle(pathname: string, isRetro: boolean) {
     return { main: 'Mijn', accent: 'profiel', sub: 'Instellingen & thema' }
   if (isRetro)
     return { main: 'Oranje', accent: 'boven', sub: 'Retro · EK 1988 · Nederland' }
-  return { main: 'De', accent: 'poule', sub: 'Voorspel · Volgen · Winnen' }
+  return { main: 'Mijn', accent: 'WK poule', sub: 'Voorspellen · Volgen · Winnen' }
 }
 
 export default function HeroTitle({ isRetro }: { isRetro: boolean }) {

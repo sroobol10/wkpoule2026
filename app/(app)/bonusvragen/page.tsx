@@ -19,26 +19,38 @@ export default async function BonusvragenPage() {
 
   // Bereken effectieve deadline per dag: eerste wedstrijd van die dag - 1 uur
   // "Dag" = Amsterdam-datum (CEST = UTC+2 in zomer)
+  // Alle wedstrijden (groepsfase + KO) voor deadline-berekening + wedstrijden-per-dag
   const { data: allGroupMatches } = await supabase
     .from('matches')
-    .select('kickoff_at')
-    .eq('stage', 'group')
+    .select(`kickoff_at, home_team:teams!matches_home_team_id_fkey(name), away_team:teams!matches_away_team_id_fkey(name)`)
     .order('kickoff_at')
 
-  // Alleen wedstrijden vanaf 13:00 CEST (11:00 UTC) — nachtelijke matches vallen af
-  const firstKickoffByDay: Record<string, string> = {}  // CEST-datum → ISO kickoff
+  // Deadline = aftrap van de vroegste wedstrijd op die CEST-kalenderdag (geen tijdfilter)
+  const firstKickoffByDay: Record<string, string> = {}  // CEST-datum → vroegste kickoff
+  for (const m of allGroupMatches ?? []) {
+    const cest = new Date(new Date(m.kickoff_at).getTime() + 2 * 60 * 60 * 1000)
+    const day = cest.toISOString().slice(0, 10)  // CEST-datum
+    if (!firstKickoffByDay[day]) firstKickoffByDay[day] = m.kickoff_at  // all matches, no filter
+  }
+
+  // unlock_date → effectieve deadline (= aftrap zelf, geen buffer)
+  const deadlineByDate: Record<string, string> = {}
+  for (const [day, kickoff] of Object.entries(firstKickoffByDay)) {
+    deadlineByDate[day] = kickoff  // deadline = kickoff van vroegste wedstrijd die dag
+  }
+
+  // Wedstrijden per CEST-dag (voor de "welke wedstrijden"-dropdown per vraag)
+  type MatchForDay = { kickoff_at: string; home: string; away: string }
+  const matchesByDay: Record<string, MatchForDay[]> = {}
   for (const m of allGroupMatches ?? []) {
     const cest = new Date(new Date(m.kickoff_at).getTime() + 2 * 60 * 60 * 1000)
     const day = cest.toISOString().slice(0, 10)
-    const hourCEST = cest.getUTCHours()  // na +2u shift = CEST uur
-    if (hourCEST < 13) continue           // voor 13:00 CEST overslaan
-    if (!firstKickoffByDay[day]) firstKickoffByDay[day] = m.kickoff_at
-  }
-
-  // unlock_date (dag van de vraag) → effectieve deadline (= kickoff - 1u)
-  const deadlineByDate: Record<string, string> = {}
-  for (const [day, kickoff] of Object.entries(firstKickoffByDay)) {
-    deadlineByDate[day] = new Date(new Date(kickoff).getTime() - 60 * 60 * 1000).toISOString()
+    if (!matchesByDay[day]) matchesByDay[day] = []
+    matchesByDay[day].push({
+      kickoff_at: m.kickoff_at,
+      home: (m.home_team as { name: string } | null)?.name ?? '?',
+      away: (m.away_team as { name: string } | null)?.name ?? '?',
+    })
   }
 
   const { data: questions } = await supabase
@@ -82,6 +94,7 @@ export default async function BonusvragenPage() {
       teams={teams ?? []}
       anyMatchPlayed={anyMatchPlayed}
       deadlineByDate={deadlineByDate}
+      matchesByDay={matchesByDay}
     />
   )
 }
