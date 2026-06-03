@@ -286,11 +286,11 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
           {showScoring && (
             <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
               {[
-                { label: 'Exacte uitslag',                        pts: '5 pt' },
-                { label: 'Correct resultaat (W/G/V)',             pts: '2 pt' },
-                { label: 'Correct resultaat + één doelpunttotaal', pts: '3 pt' },
-                { label: 'Fout resultaat + één doelpunttotaal',   pts: '1 pt' },
-                { label: 'Correcte eindpositie in de groep',      pts: '3 pt' },
+                { label: 'Exacte uitslag',                        pts: '10 punten' },
+                { label: 'Correct resultaat (W/G/V)',             pts: '5 punten' },
+                { label: 'Correct resultaat + één doelpunttotaal', pts: '7 punten' },
+                { label: 'Fout resultaat + één doelpunttotaal',   pts: '2 punten' },
+                { label: 'Correcte eindpositie in de groep',      pts: '5 punten' },
               ].map(({ label, pts }) => (
                 <div key={label} className="flex items-center justify-between gap-4">
                   <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
@@ -298,7 +298,10 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
                 </div>
               ))}
               <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-                Je hebt de mogelijkheid om in elke groep op één van de zes wedstrijden een joker in te zetten. Een joker zorgt voor een verdubbeling van het aantal punten dat je behaalt in deze wedstrijd.
+                Je hebt de mogelijkheid om in elke groep op één van de zes wedstrijden een joker in te zetten.
+              </p>
+              <p className="font-mono text-[9px] text-wk-muted tracking-widest">
+                Een joker zorgt voor een verdubbeling van het aantal punten dat je behaalt in deze wedstrijd.
               </p>
             </div>
           )}
@@ -414,6 +417,12 @@ function PouleMiniLeaderboard({
   currentUserId: string
   activeGroup: string
 }) {
+  // Alleen niet-algemene poules tonen in de sidebar
+  const customPoules = poules.filter((p) => !p.isGeneral)
+  const customGroupStandings = groupStandings.filter((_, i) => !poules[i]?.isGeneral)
+  const displayPoules = customPoules.length > 0 ? customPoules : poules
+  const displayGroupStandings = customPoules.length > 0 ? customGroupStandings : groupStandings
+
   const [activeIdx, setActiveIdx] = useState(0)
   const [view, setView] = useState<'totaal' | 'groep'>('totaal')
   const [selectedGroup, setSelectedGroup] = useState(activeGroup)
@@ -423,9 +432,9 @@ function PouleMiniLeaderboard({
     setSelectedGroup(activeGroup)
   }
 
-  const active = poules[activeIdx] ?? poules[0]
-  const activeGroupData = groupStandings[activeIdx] ?? groupStandings[0]
-  const TOP = 8
+  const active = displayPoules[activeIdx] ?? displayPoules[0]
+  const activeGroupData = displayGroupStandings[activeIdx] ?? displayGroupStandings[0]
+  const TOP = 10  // top-10
 
   // Totaal view
   const top = active.entries.slice(0, TOP)
@@ -459,9 +468,9 @@ function PouleMiniLeaderboard({
         </div>
 
         {/* Poule-tabs */}
-        {poules.length > 1 && (
+        {displayPoules.length > 1 && (
           <div className="flex flex-wrap gap-1">
-            {poules.map((p, i) => (
+            {displayPoules.map((p, i) => (
               <button
                 key={p.pouleId}
                 onClick={() => setActiveIdx(i)}
@@ -629,13 +638,19 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
     <div className={hasJoker ? 'bg-wk-gold/[0.12]' : ''}>
       {/* Date + joker row */}
       <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4">
-        <div className="flex items-center justify-center gap-2 mb-3">
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
-            {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
-          </p>
-          {locked && <span className="text-wk-muted text-xs">🔒</span>}
-          {hasJoker && locked && (
-            <span className="font-mono text-[10px] text-wk-gold tracking-widest">★ Joker</span>
+        {/* Datum-rij: links datum, rechts punten-badge als gespeeld */}
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
+              {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
+            </p>
+            {locked && !match.result_entered && <span className="text-wk-muted text-xs">🔒</span>}
+          </div>
+          {/* Punten rechtsboven — conform knock-out stijl */}
+          {match.result_entered && pts !== null && pts !== undefined && (
+            <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase shrink-0 ${ptsBadgeClass(pts)}`}>
+              {pts} pt
+            </span>
           )}
         </div>
 
@@ -679,10 +694,10 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
             {/* Score */}
             <div className="shrink-0 text-center">
               {match.result_entered ? (
-                <div className="flex items-center gap-0.5 sm:gap-1">
-                  <span className="w-8 sm:w-10 text-center font-display text-xl sm:text-2xl text-wk-text">{match.home_score}</span>
-                  <span className="font-mono text-sm sm:text-base text-wk-muted">–</span>
-                  <span className="w-8 sm:w-10 text-center font-display text-xl sm:text-2xl text-wk-text">{match.away_score}</span>
+                <div className="flex items-center">
+                  <span className="font-display text-xl sm:text-2xl text-wk-text tabular-nums">{match.home_score}</span>
+                  <span className="font-mono text-sm sm:text-base text-wk-muted mx-0.5">-</span>
+                  <span className="font-display text-xl sm:text-2xl text-wk-text tabular-nums">{match.away_score}</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -732,25 +747,21 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
             </div>
           </div>
 
-          {/* Punten + voorspelling na gespeeld */}
-          {match.result_entered && (pts !== null && pts !== undefined) ? (
-            <div className="flex items-center justify-center gap-3 mt-1">
-              <span className={`font-mono text-sm font-bold px-3 py-1 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
-                {pts} pt
-              </span>
+          {/* Voorspeld-lijn + joker-indicator na gespeeld */}
+          {match.result_entered && (
+            <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
               {score && (
                 <span className="font-mono text-[10px] text-wk-muted tracking-widest">
-                  jouw voorspelling: {score.home} – {score.away}
+                  Voorspeld: {score.home}-{score.away}
+                </span>
+              )}
+              {hasJoker && (
+                <span className="flex items-center gap-1 font-mono text-[10px] font-bold text-wk-gold border border-wk-gold/60 bg-wk-gold/15 rounded-full px-2 py-0.5 tracking-[0.12em] uppercase">
+                  <span className="text-xs">★</span> Joker
                 </span>
               )}
             </div>
-          ) : (!match.result_entered && pts !== null && pts !== undefined) ? (
-            <div className="flex items-center gap-2">
-              <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
-                {pts} pt
-              </span>
-            </div>
-          ) : null}
+          )}
         </div>
       </div>
 

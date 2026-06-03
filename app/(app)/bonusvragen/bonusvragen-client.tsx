@@ -44,11 +44,23 @@ function isGoatQuestion(question: string) {
   return question.toLowerCase().includes('goat') || question.toLowerCase().includes('ronaldo') || question.toLowerCase().includes('messi')
 }
 
+// Vaste volgorde voor de vóór-toernooi vragen
+const PRE_ORDER = ['Topscorer','Beste speler','GOAT','Gedoseerde groepsfase','Goalgettergigant','Desastreuze defensie','Kaartenkoning']
+function preSort(a: Question, b: Question) {
+  const ai = PRE_ORDER.findIndex(t => a.question.toLowerCase().includes(t.toLowerCase()))
+  const bi = PRE_ORDER.findIndex(t => b.question.toLowerCase().includes(t.toLowerCase()))
+  return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+}
+
 export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {} }: Props) {
-  const preTournament = questions.filter((q) => q.type === 'pre_tournament')
+  const [showScoring, setShowScoring] = useState(false)
+
+  const preTournament = questions
+    .filter((q) => q.type === 'pre_tournament')
+    .sort(preSort)
   const daily = questions
     .filter((q) => q.type === 'daily')
-    .sort((a, b) => (b.unlock_date ?? '').localeCompare(a.unlock_date ?? ''))
+    .sort((a, b) => (a.unlock_date ?? '').localeCompare(b.unlock_date ?? ''))
   const answeredCount = questions.filter((q) => answerMap[q.id]?.answer).length
 
   return (
@@ -56,9 +68,41 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
       <div>
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Extra punten</p>
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Bonusvragen</h1>
-        <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
-          {answeredCount} / {questions.length} beantwoord
-        </p>
+      </div>
+
+      {/* Puntentelling openklapmenu */}
+      <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+        <button
+          onClick={() => setShowScoring(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-3 text-left"
+        >
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Puntentelling</span>
+          <svg className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {showScoring && (
+          <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
+            {[
+              { label: 'Topscorer',                    pts: '25 punten' },
+              { label: 'Beste speler',                 pts: '15 punten' },
+              { label: 'GOAT-duel',                    pts: '10 punten' },
+              { label: 'Gedoseerde groepsfase',        pts: 'Max. 15 punten' },
+              { label: 'Goalgettergigant',             pts: '1 punt per gescoord doelpunt' },
+              { label: 'Desastreuze defensie',         pts: '1 punt per tegendoelpunt' },
+              { label: 'Kaartenkoning',                pts: '1 pt geel · 2 pt rood' },
+              { label: 'Dagelijkse vragen',            pts: '2 punten per goed antwoord' },
+            ].map(({ label, pts }) => (
+              <div key={label} className="flex items-center justify-between gap-4">
+                <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
+                <span className="font-mono text-xs font-bold text-wk-gold shrink-0 text-right">{pts}</span>
+              </div>
+            ))}
+            <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
+              Gedoseerde groepsfase: maximaal 15 punten, -1 voor elk gelijkspel dat je ernaast zit.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className={daily.length > 0 ? "lg:grid lg:grid-cols-2 lg:gap-8 space-y-8 lg:space-y-0" : "space-y-8"}>
@@ -70,7 +114,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                 Vóór het toernooi
               </span>
               <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-                {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} · 5 pt per goed antwoord
+                {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} beantwoord
               </span>
             </div>
             <div className="space-y-3">
@@ -96,7 +140,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                 Dagelijkse vragen
               </span>
               <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-                {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} · 2 pt per goed antwoord
+                {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} beantwoord
               </span>
             </div>
             <div className="space-y-3">

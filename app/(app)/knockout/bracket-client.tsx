@@ -206,7 +206,7 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
           <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">
             Fase 02 · Vóór het toernooi
           </p>
-          <h2 className="font-display text-xl text-wk-text uppercase leading-none">Bracket voorspelling</h2>
+          <h2 className="font-display text-xl text-wk-text uppercase leading-none">Knock-out voorspelling</h2>
           <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
             {totalPicks} / 32 wedstrijden voorspeld
           </p>

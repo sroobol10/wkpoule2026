@@ -114,7 +114,46 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
             Nog geen deelnemers.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Mobile: twee regels per deelnemer */}
+          <div className="sm:hidden divide-y divide-white/5">
+            {ranked.map(({ profile, score }, index) => {
+              const isCurrentUser = profile.id === user.id
+              const medals = ['🥇', '🥈', '🥉']
+              const medal = index < 3 ? medals[index] : null
+              return (
+                <div key={profile.id} className={`px-4 py-3 space-y-1.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
+                  {/* Rij 1: positie + naam + totaal */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-6 text-center shrink-0">
+                      {medal ? <span className="text-sm">{medal}</span> : <span className="font-mono text-xs text-wk-muted">{index + 1}</span>}
+                    </div>
+                    <RankBadge change={score.rank_change} />
+                    <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={24} />
+                    <span className={`flex-1 text-sm font-medium ${isCurrentUser ? 'text-wk-gold font-bold' : 'text-wk-text'}`}>{profile.username}</span>
+                    <span className="font-display text-base text-wk-gold shrink-0">{score.total_pts}<span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span></span>
+                  </div>
+                  {/* Rij 2: breakdown */}
+                  <div className="flex items-center gap-2 pl-9 flex-wrap">
+                    {[
+                      { label: 'WED', val: score.group_match_pts },
+                      { label: 'STAND', val: score.group_standings_pts },
+                      { label: 'KO', val: score.knockout_pts },
+                      { label: 'BONUS', val: score.bonus_pre_pts },
+                      { label: 'DAG', val: score.bonus_daily_pts },
+                      { label: 'JOKERS', val: score.jokers_played, suffix: '/12' },
+                    ].map(({ label, val, suffix }) => (
+                      <span key={label} className="font-mono text-[9px] text-wk-muted tracking-widest">
+                        <span className="text-wk-muted/60">{label}</span> <span className={val > 0 ? 'text-wk-soft' : ''}>{val}{suffix ?? 'pt'}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Desktop: volledige tabel */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full min-w-[680px] text-left border-collapse">
               {/* Header */}
               <thead>
@@ -123,11 +162,11 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                   <th className="sticky left-8 z-10 bg-wk-surface px-0 py-2.5 w-6 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">±</th>
                   <th className="sticky left-14 z-10 bg-wk-surface pl-2 pr-4 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase">Deelnemer</th>
                   <th className="px-3 py-2.5 font-mono text-[9px] text-wk-gold tracking-widest uppercase text-right">Totaal</th>
-                  <ColHeader label="Jokers" sublabel="/ 12" />
+                  <ColHeader label="JOKERS" sublabel="/ 12" />
                   <ColHeader label="WED" sublabel="Groepsfase" />
                   <ColHeader label="STAND" sublabel="Eindstand" />
                   <ColHeader label="KO" sublabel="KO-fase" />
-                  <ColHeader label="VRF" sublabel="Bonus vooraf" />
+                  <ColHeader label="BONUS" sublabel="Bonus vooraf" />
                   <ColHeader label="DAG" sublabel="Bonus dagelijks" />
                 </tr>
               </thead>
@@ -159,7 +198,7 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                       <td className="sticky left-14 z-10 bg-inherit pl-2 pr-4 py-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={28} />
-                          <span className={`text-sm truncate max-w-[100px] ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text'}`}>
+                          <span className={`text-sm ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text'} whitespace-nowrap`}>
                             {profile.username}
                           </span>
                         </div>
@@ -194,6 +233,7 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
@@ -203,9 +243,9 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
           ['WED', 'Groepsfase wedstrijden'],
           ['STAND', 'Groepsfase eindstanden'],
           ['KO', 'Knockout-fase'],
-          ['VRF', 'Bonusvragen vooraf'],
+          ['BONUS', 'Bonusvragen vooraf'],
           ['DAG', 'Bonusvragen dagelijks'],
-          ['Jokers', 'Ingezette jokers (max. 1 per groep)'],
+          ['JOKERS', 'Ingezette jokers (max. 1 per groep)'],
         ].map(([abbr, label]) => (
           <div key={abbr} className="flex items-center gap-2">
             <span className="font-mono text-[9px] font-bold text-wk-gold bg-wk-gold/10 border border-wk-gold/20 rounded px-1.5 py-0.5 tracking-widest shrink-0">

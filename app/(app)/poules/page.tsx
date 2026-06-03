@@ -106,11 +106,6 @@ function PouleCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="font-semibold text-wk-text truncate">{poule.name}</p>
-          {isOfficial && (
-            <span className="shrink-0 font-mono text-[9px] text-wk-gold border border-wk-gold/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
-              Ennovate
-            </span>
-          )}
           {isOwner && (
             <span className="shrink-0 font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
               Eigenaar

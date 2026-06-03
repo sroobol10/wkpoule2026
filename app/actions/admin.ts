@@ -101,13 +101,13 @@ async function scoreBracketAdvancement(
 // Group advancement: 3 pt per correct eindpositie
 
 function calcMatchPoints(actualHome: number, actualAway: number, predHome: number, predAway: number): number {
-  if (actualHome === predHome && actualAway === predAway) return 5
+  if (actualHome === predHome && actualAway === predAway) return 10
   const correctResult = Math.sign(actualHome - actualAway) === Math.sign(predHome - predAway)
   const homeMatch = predHome === actualHome
   const awayMatch = predAway === actualAway
-  if (correctResult && (homeMatch || awayMatch)) return 3
-  if (correctResult) return 2
-  if (homeMatch || awayMatch) return 1
+  if (correctResult && (homeMatch || awayMatch)) return 7
+  if (correctResult) return 5
+  if (homeMatch || awayMatch) return 2
   return 0
 }
 

@@ -75,8 +75,8 @@ export default function KnockoutClient({
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Knockoutfase</p>
-        <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Bracket</h1>
+        <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Knock-out fase</p>
+        <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Knock-out voorspelling</h1>
         {bracketLocked && (
           <span className="inline-flex items-center gap-1.5 mt-2 font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-3 py-1 tracking-widest uppercase">
             🔒 Gesloten
@@ -366,12 +366,12 @@ function TbdSlot() {
 // ─── KO scoring info ──────────────────────────────────────────────────────────
 
 const KO_SCORING = [
-  { label: 'Ronde van 32',   pts: '5 pt' },
-  { label: 'Ronde van 16',   pts: '15 pt' },
-  { label: 'Kwartfinale',    pts: '25 pt' },
-  { label: 'Halve finale',   pts: '50 pt' },
-  { label: 'Troostfinale',   pts: '25 pt' },
-  { label: 'Finale',         pts: '100 pt' },
+  { label: 'Laatste 32',    pts: '15 punten' },
+  { label: 'Laatste 16',    pts: '25 punten' },
+  { label: 'Kwartfinale',   pts: '50 punten' },
+  { label: 'Halve finale',  pts: '100 punten' },
+  { label: 'Troostfinale',  pts: '50 punten' },
+  { label: 'Finale',        pts: '200 punten' },
 ]
 
 function KoScoringInfo() {
@@ -396,7 +396,7 @@ function KoScoringInfo() {
             </div>
           ))}
           <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-            Per correct voorspeld land dat doorgaat · hoe verder, hoe meer punten
+            Aantal te verdienen punten per correct voorspelde winnaar in desbetreffende ronde. Ongeacht of je dit land in exact de juiste wedstrijd hebt voorspeld.
           </p>
         </div>
       )}

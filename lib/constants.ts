@@ -12,21 +12,21 @@ export const STAGE_LABELS: Record<string, string> = {
 }
 
 export const SCORING = {
-  exactScore:          5,
-  correctResult:       2,
-  correctPlusOneGoal:  3,
-  wrongPlusOneGoal:    1,
-  advancement:         3,
+  exactScore:          10,
+  correctResult:       5,
+  correctPlusOneGoal:  7,
+  wrongPlusOneGoal:    2,
+  advancement:         5,
   bonusDaily:          2,
   bonusPre:            5,
 } as const
 
 // Punten per KO-ronde voor correct voorspeld doorgaand land
 export const KO_POINTS: Record<string, number> = {
-  r32:         5,
-  r16:         15,
-  qf:          25,
-  sf:          50,
-  third_place: 25,
-  final:       100,
+  r32:         15,
+  r16:         25,
+  qf:          50,
+  sf:          100,
+  third_place: 50,
+  final:       200,
 }
