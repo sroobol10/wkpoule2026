@@ -417,154 +417,59 @@ function PouleMiniLeaderboard({
   currentUserId: string
   activeGroup: string
 }) {
-  // Alleen niet-algemene poules tonen in de sidebar
+  // Eerste eigen (niet-algemene) poule; anders de eerste poule
   const customPoules = poules.filter((p) => !p.isGeneral)
-  const customGroupStandings = groupStandings.filter((_, i) => !poules[i]?.isGeneral)
-  const displayPoules = customPoules.length > 0 ? customPoules : poules
-  const displayGroupStandings = customPoules.length > 0 ? customGroupStandings : groupStandings
+  const poule = customPoules[0] ?? poules[0]
+  const pouleIdx = poules.findIndex((p) => p.pouleId === poule?.pouleId)
+  const pouleGroupData = groupStandings[pouleIdx]
 
-  const [activeIdx, setActiveIdx] = useState(0)
-  const [view, setView] = useState<'totaal' | 'groep'>('totaal')
-  const [selectedGroup, setSelectedGroup] = useState(activeGroup)
+  if (!poule) return null
 
-  // Sync selected group with the active football group tab
-  if (selectedGroup !== activeGroup && view === 'groep') {
-    setSelectedGroup(activeGroup)
-  }
-
-  const active = displayPoules[activeIdx] ?? displayPoules[0]
-  const activeGroupData = displayGroupStandings[activeIdx] ?? displayGroupStandings[0]
-  const TOP = 10  // top-10
-
-  // Totaal view
-  const top = active.entries.slice(0, TOP)
-  const userRank = active.entries.findIndex((e) => e.userId === currentUserId)
-  const userInTop = userRank >= 0 && userRank < TOP
-  const userEntry = active.entries[userRank]
-
-  // Groep view
-  const groupEntries = activeGroupData?.byGroup[selectedGroup] ?? []
+  // Groep-standings voor de actieve groep
+  const groupEntries = pouleGroupData?.byGroup[activeGroup] ?? []
+  const TOP = 10
 
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
-      {/* Header: poule-tabs + view-toggle */}
-      <div className="px-4 pt-3 pb-2 border-b border-white/10 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase shrink-0">Tussenstand</span>
-          {/* Totaal / Per groep toggle */}
-          <div className="flex gap-0.5 bg-wk-bg2 rounded p-0.5">
-            {(['totaal', 'groep'] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`px-2 py-0.5 rounded font-mono text-[9px] tracking-widest uppercase transition-colors ${
-                  view === v ? 'bg-wk-surface text-wk-gold' : 'text-wk-muted hover:text-wk-soft'
-                }`}
-              >
-                {v === 'totaal' ? 'Totaal' : 'Per groep'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Poule-tabs */}
-        {displayPoules.length > 1 && (
-          <div className="flex flex-wrap gap-1">
-            {displayPoules.map((p, i) => (
-              <button
-                key={p.pouleId}
-                onClick={() => setActiveIdx(i)}
-                className={`rounded px-2 py-0.5 font-mono text-[9px] tracking-widest uppercase border transition-colors max-w-30 truncate ${
-                  i === activeIdx
-                    ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
-                    : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
-                }`}
-                title={p.pouleName}
-              >
-                {p.isGeneral ? 'Algemeen' : p.pouleName}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Groep-tabs (alleen zichtbaar in groep-view) */}
-        {view === 'groep' && (
-          <div className="flex flex-wrap gap-1">
-            {GROUPS_ALL.map((g) => (
-              <button
-                key={g}
-                onClick={() => setSelectedGroup(g)}
-                className={`rounded px-2 py-0.5 font-mono text-[9px] font-bold tracking-widest uppercase transition-colors ${
-                  g === selectedGroup
-                    ? 'bg-wk-surface border border-wk-gold/50 text-wk-gold'
-                    : 'bg-wk-bg2 border border-white/10 text-wk-muted hover:text-wk-soft'
-                }`}
-              >
-                {g}
-              </button>
-            ))}
-          </div>
-        )}
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+        <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+          Groep {activeGroup}
+        </span>
+        <span className="font-mono text-[10px] text-wk-muted truncate max-w-32">{poule.pouleName}</span>
       </div>
 
-      {/* Content */}
-      {view === 'totaal' ? (
-        <>
-          {active.entries.length === 0 ? (
-            <div className="px-5 py-4 text-center font-mono text-[10px] text-wk-muted tracking-widest">
-              Nog geen punten gescoord
-            </div>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {top.map((entry, i) => (
-                <MiniLeaderboardRow key={entry.userId} rank={i + 1} entry={entry} isCurrentUser={entry.userId === currentUserId} />
-              ))}
-              {!userInTop && userEntry && userRank >= 0 && (
-                <>
-                  <div className="px-5 py-1"><span className="block border-t border-dashed border-white/10" /></div>
-                  <MiniLeaderboardRow rank={userRank + 1} entry={userEntry} isCurrentUser />
-                </>
-              )}
-            </div>
-          )}
-          <div className="px-5 py-2.5 border-t border-white/10">
-            <a href={`/poules/${active.pouleId}`} className="font-mono text-[9px] text-wk-muted hover:text-wk-gold tracking-widest uppercase transition-colors">
-              Volledig klassement →
-            </a>
-          </div>
-        </>
+      {/* Standings */}
+      {groupEntries.length === 0 ? (
+        <div className="px-5 py-4 text-center font-mono text-[10px] text-wk-muted tracking-widest">
+          Nog geen punten voor groep {activeGroup}
+        </div>
       ) : (
-        /* Per groep view */
-        <div>
-          {groupEntries.length === 0 ? (
-            <div className="px-5 py-4 text-center font-mono text-[10px] text-wk-muted tracking-widest">
-              Nog geen punten voor groep {selectedGroup}
-            </div>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {groupEntries.slice(0, TOP).map((entry, i) => {
-                const isCurrentUser = entry.userId === currentUserId
-                const medals = ['🥇', '🥈', '🥉']
-                return (
-                  <div key={entry.userId} className={`flex items-center gap-2 px-4 py-2 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
-                    <div className="w-5 text-center shrink-0">
-                      {i < 3 ? <span className="text-xs">{medals[i]}</span> : <span className="font-mono text-[10px] text-wk-muted">{i + 1}</span>}
-                    </div>
-                    <span className={`flex-1 text-xs truncate ${isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-text'}`}>
-                      {entry.username}
-                    </span>
-                    <span className="font-display text-sm text-wk-gold shrink-0">{entry.pts}</span>
-                    <span className="font-mono text-[9px] text-wk-muted shrink-0">pt</span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-          <div className="px-4 py-2 border-t border-white/10">
-            <p className="font-mono text-[9px] text-wk-muted/50 tracking-widest">Groep {selectedGroup} · punten groepsfase wedstrijden</p>
-          </div>
+        <div className="divide-y divide-white/5">
+          {groupEntries.slice(0, TOP).map((entry, i) => {
+            const isCurrentUser = entry.userId === currentUserId
+            const medals = ['🥇', '🥈', '🥉']
+            return (
+              <div key={entry.userId} className={`flex items-center gap-2 px-4 py-2 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
+                <div className="w-5 text-center shrink-0">
+                  {i < 3 ? <span className="text-xs">{medals[i]}</span> : <span className="font-mono text-[10px] text-wk-muted">{i + 1}</span>}
+                </div>
+                <span className={`flex-1 text-xs truncate ${isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-text'}`}>
+                  {entry.username}
+                </span>
+                <span className="font-display text-sm text-wk-gold shrink-0">{entry.pts}</span>
+                <span className="font-mono text-[9px] text-wk-muted shrink-0">pt</span>
+              </div>
+            )
+          })}
         </div>
       )}
+
+      <div className="px-4 py-2.5 border-t border-white/10">
+        <a href={`/poules/${poule.pouleId}`} className="font-mono text-[9px] text-wk-muted hover:text-wk-gold tracking-widest uppercase transition-colors">
+          Volledig klassement →
+        </a>
+      </div>
     </div>
   )
 }

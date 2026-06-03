@@ -133,21 +133,37 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                     <span className={`flex-1 text-sm font-medium ${isCurrentUser ? 'text-wk-gold font-bold' : 'text-wk-text'}`}>{profile.username}</span>
                     <span className="font-display text-base text-wk-gold shrink-0">{score.total_pts}<span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span></span>
                   </div>
-                  {/* Rij 2: breakdown */}
-                  <div className="flex items-center gap-2 pl-9 flex-wrap">
-                    {[
-                      { label: 'WED', val: score.group_match_pts },
-                      { label: 'STAND', val: score.group_standings_pts },
-                      { label: 'KO', val: score.knockout_pts },
-                      { label: 'BONUS', val: score.bonus_pre_pts },
-                      { label: 'DAG', val: score.bonus_daily_pts },
-                      { label: 'JOKERS', val: score.jokers_played, suffix: '/12' },
-                    ].map(({ label, val, suffix }) => (
-                      <span key={label} className="font-mono text-[9px] text-wk-muted tracking-widest">
-                        <span className="text-wk-muted/60">{label}</span> <span className={val > 0 ? 'text-wk-soft' : ''}>{val}{suffix ?? 'pt'}</span>
-                      </span>
-                    ))}
-                  </div>
+                  {/* Rij 2 + 3: categorieën bovenop, waarden eronder */}
+                  {(() => {
+                    const cats = [
+                      { label: 'WED',    val: score.group_match_pts },
+                      { label: 'STAND',  val: score.group_standings_pts },
+                      { label: 'KO',     val: score.knockout_pts },
+                      { label: 'BONUS',  val: score.bonus_pre_pts },
+                      { label: 'DAG',    val: score.bonus_daily_pts },
+                      { label: 'JOKERS', val: score.jokers_played },
+                    ]
+                    return (
+                      <div className="pl-9 space-y-0.5">
+                        {/* Categorielabels */}
+                        <div className="flex gap-0">
+                          {cats.map(({ label }) => (
+                            <span key={label} className="flex-1 font-mono text-[8px] text-wk-muted/60 tracking-widest text-center uppercase">
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                        {/* Waarden */}
+                        <div className="flex gap-0">
+                          {cats.map(({ label, val }) => (
+                            <span key={label} className={`flex-1 font-mono text-[11px] font-bold text-center ${val > 0 ? 'text-wk-soft' : 'text-wk-muted/40'}`}>
+                              {val}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })}
