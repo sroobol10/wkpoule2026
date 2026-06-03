@@ -262,6 +262,12 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
               {filledCount} / {matches.length} wedstrijden ingevuld
             </p>
           </div>
+          <a
+            href="/groepen"
+            className="font-mono text-[10px] text-wk-muted hover:text-wk-gold tracking-[0.14em] uppercase transition-colors border border-white/10 hover:border-wk-gold/30 rounded-full px-3 py-1.5 shrink-0"
+          >
+            Groepsinfo →
+          </a>
         </div>
 
         {/* Progress bar */}
@@ -338,7 +344,15 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
         {/* Matches for active group */}
         <div className="bg-wk-surface rounded-xl border border-white/10 overflow-hidden">
           <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
-            <span className="font-display text-sm text-wk-text uppercase tracking-wide">Groep {activeGroup}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-display text-sm text-wk-text uppercase tracking-wide">Groep {activeGroup}</span>
+              <a
+                href={`/groep/${activeGroup}`}
+                className="font-mono text-[9px] text-wk-muted hover:text-wk-gold tracking-widest uppercase transition-colors border border-white/10 hover:border-wk-gold/30 rounded-full px-2 py-0.5"
+              >
+                ℹ details
+              </a>
+            </div>
             <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
               {groupMatches.filter((m) => scores[m.id]?.home !== undefined && scores[m.id]?.home !== '').length}/{groupMatches.length} ingevuld
             </span>

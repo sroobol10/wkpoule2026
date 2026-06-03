@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
+import HeroTitle from "@/components/nav/hero-title";
 import Sidebar from "@/components/nav/sidebar";
 import BottomNav from "@/components/nav/bottom-nav";
 import NavProgress from "@/components/nav/nav-progress";
@@ -41,6 +42,7 @@ export default async function AppLayout({
     : "/patrick.jpeg";
   const headerImg = isRetro ? "/retro-1988.jpg" : defaultHeaderImg;
 
+
   return (
     <div className={`min-h-screen bg-wk-bg ${isRetro ? "theme-retro" : ""}`}>
       <NavProgress />
@@ -49,7 +51,7 @@ export default async function AppLayout({
 
       <div className="md:pl-56 pb-20 md:pb-0 min-h-screen">
         {/* Header banner */}
-        <div className="relative h-44 md:h-[346px] lg:h-[432px] xl:h-[504px] min-[1600px]:h-[680px] w-full overflow-hidden">
+        <div className="relative h-44 md:h-[346px] lg:h-86.5 xl:h-100.75 min-[1600px]:h-170 w-full overflow-hidden">
           <Image
             src={headerImg}
             alt={isRetro ? "EK 1988 Retro" : "WK 2026"}
@@ -80,25 +82,8 @@ export default async function AppLayout({
             </span>
           </div>
 
-          {/* Bottom title block */}
-          <div className="absolute bottom-0 left-0 px-6 md:px-8 pb-5 md:pb-6">
-            <p className="font-display text-3xl md:text-5xl text-white uppercase leading-none tracking-tight drop-shadow-lg">
-              {isRetro ? (
-                <>
-                  Oranje <span className="text-wk-gold">Boven</span>
-                </>
-              ) : (
-                <>
-                  De <span className="text-wk-gold">Poule</span>
-                </>
-              )}
-            </p>
-            <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1.5">
-              {isRetro
-                ? "Retro · EK 1988 · Nederland"
-                : "Voorspel · Volgen · Winnen"}
-            </p>
-          </div>
+          {/* Bottom title block — client component zodat usePathname() live updatet */}
+          <HeroTitle isRetro={isRetro} />
         </div>
 
         {/* Page content */}

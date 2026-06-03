@@ -8,7 +8,11 @@ const SKIP = /^\/(\_next|favicon\.ico|worldcup\.jpeg|.*\.[a-z]+$)/
 export async function proxy(request: NextRequest) {
   if (SKIP.test(request.nextUrl.pathname)) return NextResponse.next()
 
-  let supabaseResponse = NextResponse.next({ request })
+  // Geef pathname door als request-header zodat server components hem kunnen lezen via headers()
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-pathname', request.nextUrl.pathname)
+
+  let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -20,7 +24,7 @@ export async function proxy(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
+          supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           )

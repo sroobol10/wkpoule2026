@@ -73,16 +73,11 @@ export default function KnockoutClient({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Knock-out fase</p>
-        <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Knock-out voorspelling</h1>
-        {bracketLocked && (
-          <span className="inline-flex items-center gap-1.5 mt-2 font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-3 py-1 tracking-widest uppercase">
-            🔒 Gesloten
-          </span>
-        )}
-      </div>
+      {bracketLocked && (
+        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-3 py-1 tracking-widest uppercase">
+          🔒 Gesloten
+        </span>
+      )}
 
       <KoScoringInfo />
 
