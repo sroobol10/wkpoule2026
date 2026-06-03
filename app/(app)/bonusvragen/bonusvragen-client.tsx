@@ -88,10 +88,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
               { label: 'Beste speler',                 pts: '15 punten' },
               { label: 'GOAT-duel',                    pts: '10 punten' },
               { label: 'Gedoseerde groepsfase',        pts: 'Max. 15 punten' },
-              { label: 'Goalgettergigant',             pts: '1 punt per gescoord doelpunt' },
-              { label: 'Desastreuze defensie',         pts: '1 punt per tegendoelpunt' },
-              { label: 'Kaartenkoning',                pts: '1 pt geel · 2 pt rood' },
-              { label: 'Dagelijkse vragen',            pts: '2 punten per goed antwoord' },
+              { label: 'Dagelijkse vragen',            pts: '1 punt per goed antwoord' },
             ].map(({ label, pts }) => (
               <div key={label} className="flex items-center justify-between gap-4">
                 <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
