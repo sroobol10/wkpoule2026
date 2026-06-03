@@ -38,6 +38,29 @@ export async function createPoule(
   redirect(`/poules/${poule_id}`)
 }
 
+export async function deletePoule(pouleId: string): Promise<SaveResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Niet ingelogd.' }
+
+  // Controleer eigenaarschap en dat het geen algemene poule is
+  const { data: poule } = await supabase
+    .from('poules')
+    .select('id, creator_id, is_general')
+    .eq('id', pouleId)
+    .single()
+
+  if (!poule) return { ok: false, error: 'Poule niet gevonden.' }
+  if (poule.is_general) return { ok: false, error: 'De algemene poule kan niet worden verwijderd.' }
+  if (poule.creator_id !== user.id) return { ok: false, error: 'Alleen de eigenaar kan de poule verwijderen.' }
+
+  const { error } = await supabase.from('poules').delete().eq('id', pouleId)
+  if (error) return { ok: false, error: 'Verwijderen mislukt.' }
+
+  revalidatePath('/poules')
+  return { ok: true }
+}
+
 export async function joinPoule(inviteCode: string): Promise<SaveResult> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

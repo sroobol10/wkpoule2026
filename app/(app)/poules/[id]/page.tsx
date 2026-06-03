@@ -2,6 +2,7 @@ import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { AvatarCircle } from '@/components/avatar-circle'
+import DeletePouleButton from './delete-poule-button'
 
 export default async function PoulePage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params
@@ -279,6 +280,9 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
             Deel code <span className="text-wk-gold font-bold">{poule.invite_code}</span> met vrienden om ze uit te nodigen.
           </p>
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <DeletePouleButton pouleId={poule.id} />
+          </div>
         </div>
       )}
     </div>

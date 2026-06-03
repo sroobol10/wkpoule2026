@@ -8,7 +8,7 @@ export default function RegisterPage() {
   const [state, formAction, isPending] = useActionState(register, null)
 
   return (
-    <div className="w-full max-w-sm">
+    <div className="w-full max-w-md">
       <div className="bg-wk-surface border border-white/10 rounded-2xl p-8">
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-3">Registreren</p>
         <h2 className="font-display text-2xl text-wk-text uppercase leading-none mb-1">Account aanmaken</h2>

@@ -485,7 +485,7 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
     .from('poule_scores')
     .update({ total_pts: 0, exact_hits: 0, correct_results: 0, rank_change: null,
               group_match_pts: 0, group_standings_pts: 0, knockout_pts: 0,
-              bonus_pre_pts: 0, bonus_daily_pts: 0 })
+              bonus_pre_pts: 0, bonus_daily_pts: 0, jokers_played: 0 })
     .not('user_id', 'is', null)
   if (scoreErr) return { ok: false, error: `Standen: ${scoreErr.message}` }
 

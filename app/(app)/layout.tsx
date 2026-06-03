@@ -39,7 +39,7 @@ export default async function AppLayout({
   const isEnnovate = !!ennovatePoule;
   const defaultHeaderImg = isEnnovate
     ? "/world-cup-banner.jpg"
-    : "/patrick.jpeg";
+    : "/hero.jpg";
   const headerImg = isRetro ? "/retro-1988.jpg" : defaultHeaderImg;
 
 
