@@ -253,6 +253,13 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
     <div className="md:grid md:grid-cols-3 md:gap-6 md:items-start">
       {/* 2/3: voorspellingen + controls */}
       <div className="space-y-6 md:col-span-2">
+        {/* Mobiel: Hoe werkt het? — volledige breedte */}
+        <a
+          href="/hoe-werkt-het"
+          className="md:hidden flex items-center justify-center gap-2 w-full font-mono text-[10px] text-wk-muted hover:text-wk-gold tracking-[0.14em] uppercase transition-colors border border-white/10 hover:border-wk-gold/30 rounded-xl py-3"
+        >
+          Hoe werkt het? →
+        </a>
         {/* Header */}
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
@@ -418,7 +425,6 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
 
 // ─── Poule mini-leaderboard ───────────────────────────────────────────────────
 
-const GROUPS_ALL = ['A','B','C','D','E','F','G','H','I','J','K','L']
 
 function PouleMiniLeaderboard({
   poules,
@@ -510,42 +516,6 @@ function PouleMiniLeaderboard({
           Volledig klassement →
         </a>
       </div>
-    </div>
-  )
-}
-
-function MiniLeaderboardRow({
-  rank,
-  entry,
-  isCurrentUser,
-}: {
-  rank: number
-  entry: PouleEntry
-  isCurrentUser: boolean
-}) {
-  const medals = ['🥇', '🥈', '🥉']
-  return (
-    <div className={`flex items-center gap-2 px-4 py-2.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
-      <div className="w-5 text-center shrink-0">
-        {rank <= 3
-          ? <span className="text-xs">{medals[rank - 1]}</span>
-          : <span className="font-mono text-[10px] text-wk-muted">{rank}</span>
-        }
-      </div>
-      <div className="w-6 text-center shrink-0">
-        {entry.rankChange === null || entry.rankChange === 0
-          ? <span className="font-mono text-[9px] text-wk-muted/30">–</span>
-          : entry.rankChange > 0
-            ? <span className="font-mono text-[9px] font-bold text-wk-green">↑{entry.rankChange}</span>
-            : <span className="font-mono text-[9px] font-bold text-wk-red">↓{Math.abs(entry.rankChange)}</span>
-        }
-      </div>
-      <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={22} />
-      <span className={`flex-1 text-xs truncate ${isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-text'}`}>
-        {entry.username}
-      </span>
-      <span className="font-display text-sm text-wk-gold shrink-0">{entry.totalPts}</span>
-      <span className="font-mono text-[9px] text-wk-muted shrink-0">pt</span>
     </div>
   )
 }

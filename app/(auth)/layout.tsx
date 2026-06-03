@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 
-export const metadata: Metadata = { title: "WK Poule 2026" };
+export const metadata: Metadata = {
+  title: 'Inloggen',
+  description: 'Log in op Mijn WK Poule en ga direct aan de slag met jouw voorspellingen voor WK 2026.',
+  robots: { index: true, follow: true },
+};
 
 export default function AuthLayout({
   children,

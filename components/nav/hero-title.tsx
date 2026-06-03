@@ -28,14 +28,29 @@ export default function HeroTitle({ isRetro }: { isRetro: boolean }) {
   const pathname = usePathname()
   const { main, accent, sub } = getTitle(pathname, isRetro)
 
+  const isVoorspellingen = pathname === '/voorspellingen' || pathname.startsWith('/voorspellingen')
+
   return (
-    <div className="absolute bottom-0 left-0 px-6 md:px-8 pb-5 md:pb-6">
-      <p className="font-display text-3xl md:text-5xl text-white uppercase leading-none tracking-tight drop-shadow-lg">
-        {main} <span className="text-wk-gold">{accent}</span>
-      </p>
-      <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1.5">
-        {sub}
-      </p>
-    </div>
+    <>
+      <div className="absolute bottom-0 left-0 px-6 md:px-8 pb-5 md:pb-6">
+        <p className="font-display text-3xl md:text-5xl text-white uppercase leading-none tracking-tight drop-shadow-lg">
+          {main} <span className="text-wk-gold">{accent}</span>
+        </p>
+        <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1.5">
+          {sub}
+        </p>
+      </div>
+
+      {isVoorspellingen && (
+        <div className="absolute bottom-0 right-0 px-6 md:px-8 pb-5 md:pb-6 hidden md:block">
+          <a
+            href="/hoe-werkt-het"
+            className="font-mono text-[10px] text-white/60 hover:text-white tracking-[0.14em] uppercase transition-colors border border-white/20 hover:border-white/50 rounded-full px-3 py-1.5 backdrop-blur-sm bg-black/10"
+          >
+            Hoe werkt het? →
+          </a>
+        </div>
+      )}
+    </>
   )
 }

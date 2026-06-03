@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/registreren', '/poule']
+const PUBLIC_PATHS = ['/login', '/registreren', '/poule', '/hoe-werkt-het']
 
 const SKIP = /^\/(\_next|favicon\.ico|worldcup\.jpeg|.*\.[a-z]+$)/
 

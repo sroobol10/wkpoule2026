@@ -66,6 +66,11 @@ export default function LoginPage() {
             Registreren
           </Link>
         </p>
+        <p className="mt-3 text-center">
+          <Link href="/hoe-werkt-het" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-widest uppercase transition-colors">
+            Hoe werkt het? →
+          </Link>
+        </p>
       </div>
     </div>
   )
