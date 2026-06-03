@@ -638,20 +638,23 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
     <div className={hasJoker ? 'bg-wk-gold/[0.12]' : ''}>
       {/* Date + joker row */}
       <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4">
-        {/* Datum-rij: links datum, rechts punten-badge als gespeeld */}
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2">
+        {/* Datum-rij: datum gecentreerd, punten-badge rechts */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center mb-3">
+          <div /> {/* spacer links */}
+          <div className="flex items-center gap-1.5 justify-center">
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
               {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
             </p>
             {locked && !match.result_entered && <span className="text-wk-muted text-xs">🔒</span>}
           </div>
-          {/* Punten rechtsboven — conform knock-out stijl */}
-          {match.result_entered && pts !== null && pts !== undefined && (
-            <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase shrink-0 ${ptsBadgeClass(pts)}`}>
-              {pts} pt
-            </span>
-          )}
+          {/* Punten rechtsboven */}
+          <div className="flex justify-end">
+            {match.result_entered && pts !== null && pts !== undefined && (
+              <span className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}>
+                {pts} pt
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Joker toggle — prominenter, eigen rij */}
