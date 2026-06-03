@@ -29,7 +29,7 @@ export default function JoinPouleForm() {
       <p className="text-sm text-wk-soft mb-3">
         Heb je een uitnodigingscode? Vul hem in om deel te nemen.
       </p>
-      <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row gap-2">
         <input
           type="text"
           value={code}
