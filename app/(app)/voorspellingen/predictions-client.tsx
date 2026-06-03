@@ -417,26 +417,52 @@ function PouleMiniLeaderboard({
   currentUserId: string
   activeGroup: string
 }) {
-  // Eerste eigen (niet-algemene) poule; anders de eerste poule
+  // Privé-poules → anders de algemene poule
   const customPoules = poules.filter((p) => !p.isGeneral)
-  const poule = customPoules[0] ?? poules[0]
-  const pouleIdx = poules.findIndex((p) => p.pouleId === poule?.pouleId)
-  const pouleGroupData = groupStandings[pouleIdx]
+  const displayPoules = customPoules.length > 0 ? customPoules : poules.filter((p) => p.isGeneral)
 
-  if (!poule) return null
+  const [activeIdx, setActiveIdx] = useState(0)
 
-  // Groep-standings voor de actieve groep
+  if (displayPoules.length === 0) return null
+
+  const poule = displayPoules[activeIdx] ?? displayPoules[0]
+  const globalIdx = poules.findIndex((p) => p.pouleId === poule.pouleId)
+  const pouleGroupData = groupStandings[globalIdx]
   const groupEntries = pouleGroupData?.byGroup[activeGroup] ?? []
   const TOP = 10
 
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-        <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-          Groep {activeGroup}
-        </span>
-        <span className="font-mono text-[10px] text-wk-muted truncate max-w-32">{poule.pouleName}</span>
+      {/* Header: groep + poulekeuze */}
+      <div className="px-4 pt-3 pb-2 border-b border-white/10 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+            Groep {activeGroup}
+          </span>
+          {/* Poulekeuze — alleen tonen als er meerdere privé-poules zijn */}
+          {displayPoules.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              {displayPoules.map((p, i) => (
+                <button
+                  key={p.pouleId}
+                  onClick={() => setActiveIdx(i)}
+                  className={`rounded px-2 py-0.5 font-mono text-[9px] tracking-widest uppercase border transition-colors max-w-28 truncate ${
+                    i === activeIdx
+                      ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
+                      : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+                  }`}
+                  title={p.pouleName}
+                >
+                  {p.pouleName}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Één privé-poule of algemeen: naam tonen */}
+          {displayPoules.length === 1 && (
+            <span className="font-mono text-[10px] text-wk-muted truncate max-w-32">{poule.pouleName}</span>
+          )}
+        </div>
       </div>
 
       {/* Standings */}
