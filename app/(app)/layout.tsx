@@ -37,11 +37,8 @@ export default async function AppLayout({
     .maybeSingle();
 
   const isEnnovate = !!ennovatePoule;
-  const defaultHeaderImg = isEnnovate
-    ? "/world-cup-banner.jpg"
-    : "/hero.jpg";
+  const defaultHeaderImg = isEnnovate ? "/world-cup-banner.jpg" : "/hero.jpg";
   const headerImg = isRetro ? "/retro-1988.jpg" : defaultHeaderImg;
-
 
   return (
     <div className={`min-h-screen bg-wk-bg ${isRetro ? "theme-retro" : ""}`}>

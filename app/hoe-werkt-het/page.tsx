@@ -85,7 +85,7 @@ export default async function HoeWerktHetPage() {
   return (
     <div className="min-h-screen bg-wk-bg">
       {/* Hero */}
-      <div className="relative h-64 md:h-84 overflow-hidden">
+      <div className="relative h-64 md:h-84 xl:h-auto xl:aspect-[3/1] overflow-hidden">
         <Image
           src="/retro-1988.jpg"
           alt="Mijn WK Poule 2026"
