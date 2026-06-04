@@ -553,9 +553,16 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
     <div className={hasJoker ? 'bg-wk-gold/[0.12]' : ''}>
       {/* Date + joker row */}
       <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4">
-        {/* Datum-rij: datum gecentreerd, punten-badge rechts */}
+        {/* Datum-rij: joker links · datum midden · punten rechts */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center mb-3">
-          <div /> {/* spacer links */}
+          {/* Joker-indicator links bovenin (zodra wedstrijd gespeeld) */}
+          <div className="flex justify-start">
+            {hasJoker && locked && (
+              <span className="flex items-center gap-1 font-mono text-[10px] font-bold text-wk-gold border border-wk-gold/60 bg-wk-gold/15 rounded-full px-2 py-0.5 tracking-[0.12em] uppercase">
+                <span className="text-xs">★</span> Joker
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 justify-center">
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
               {formatInAmsterdam(match.kickoff_at, 'EEEE d MMMM · HH:mm')}
@@ -612,10 +619,17 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
             {/* Score */}
             <div className="shrink-0 text-center">
               {match.result_entered ? (
-                <div className="flex items-center">
-                  <span className="font-display text-xl sm:text-2xl text-wk-text tabular-nums">{match.home_score}</span>
-                  <span className="font-mono text-sm sm:text-base text-wk-muted mx-0.5">-</span>
-                  <span className="font-display text-xl sm:text-2xl text-wk-text tabular-nums">{match.away_score}</span>
+                <div>
+                  {/* Voorspelling groot */}
+                  <div className="flex items-center">
+                    <span className="font-display text-xl sm:text-2xl text-wk-gold tabular-nums">{score?.home ?? '–'}</span>
+                    <span className="font-mono text-sm sm:text-base text-wk-muted mx-0.5">-</span>
+                    <span className="font-display text-xl sm:text-2xl text-wk-gold tabular-nums">{score?.away ?? '–'}</span>
+                  </div>
+                  {/* Uitslag klein */}
+                  <p className="font-mono text-[9px] text-wk-muted tracking-widest mt-0.5">
+                    Uitslag: {match.home_score}-{match.away_score}
+                  </p>
                 </div>
               ) : (
                 <div className="flex items-center gap-1">
@@ -665,21 +679,6 @@ function MatchRow({ match, score, pts, locked, hasJoker, jokerLocked, onScoreCha
             </div>
           </div>
 
-          {/* Voorspeld-lijn + joker-indicator na gespeeld */}
-          {match.result_entered && (
-            <div className="flex items-center justify-center gap-2 mt-1 flex-wrap">
-              {score && (
-                <span className="font-mono text-[10px] text-wk-muted tracking-widest">
-                  Voorspeld: {score.home}-{score.away}
-                </span>
-              )}
-              {hasJoker && (
-                <span className="flex items-center gap-1 font-mono text-[10px] font-bold text-wk-gold border border-wk-gold/60 bg-wk-gold/15 rounded-full px-2 py-0.5 tracking-[0.12em] uppercase">
-                  <span className="text-xs">★</span> Joker
-                </span>
-              )}
-            </div>
-          )}
         </div>
       </div>
 

@@ -17,7 +17,7 @@ const STEPS = [
     icon: '⚽',
     title: 'Voorspel alle groepswedstrijden',
     desc: 'Vul voor de start van het WK de uitslag in van alle 72 groepswedstrijden. Per groep (A t/m L) voorspel je wie 1e, 2e of 3e eindigt.',
-    detail: 'Je hebt tot aan de aftrap van elke wedstrijd om je voorspelling aan te passen.',
+    detail: 'Al je groepsvoorspellingen moeten ingevuld zijn vóór de aftrap van de allereerste wedstrijd. Daarna zijn ze niet meer aan te passen.',
     scores: [
       { label: 'Exacte uitslag', pts: '10' },
       { label: 'Correct resultaat + één doelpunttotaal', pts: '7' },
@@ -41,7 +41,7 @@ const STEPS = [
     icon: '🏆',
     title: 'Voorspel de KO-fase',
     desc: 'Vul vóór het toernooi je bracket in: wie wint de Ronde van 32, de achtste finales, de kwartfinales, de halve finales en de finale?',
-    detail: 'Je hoeft niet het exacte slot te raden — het gaat erom of je het juiste land in die ronde hebt voorspeld.',
+    detail: 'Je hoeft niet het exacte slot te raden — het gaat erom of je het juiste land in die ronde hebt voorspeld als winnaar.',
     scores: [
       { label: 'Ronde van 32', pts: '15' },
       { label: 'Achtste finale', pts: '25' },
