@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#c0392b"/>
+  <text x="16" y="22" font-family="Georgia, serif" font-size="14" font-weight="bold" fill="#c9a84c" text-anchor="middle" letter-spacing="1">WK</text>
+  <text x="16" y="28" font-family="Georgia, serif" font-size="5" fill="rgba(255,255,255,0.6)" text-anchor="middle" letter-spacing="2">2026</text>
+</svg>

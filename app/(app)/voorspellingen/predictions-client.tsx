@@ -8,6 +8,7 @@ import { savePredictions, saveGroupAdvancement } from '@/app/actions/predictions
 import { toggleJoker } from '@/app/actions/jokers'
 import { getMatchPrediction } from '@/app/actions/ai-prediction'
 import { formatInAmsterdam } from '@/lib/format'
+import { compareThirds, type ThirdEntry } from '@/lib/third-place'
 import type { AiPrediction } from '@/app/actions/ai-prediction'
 
 type Team = { id: string; name: string; flag_url: string; group_name: string }
@@ -80,7 +81,14 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
   // gescoord overschrijft de auto-save de points_awarded waarden niet meer.
   function computeGroupStandings(): { teamId: string; position: number }[] {
     const picks: { teamId: string; position: number }[] = []
-    const thirds: { group: string; teamId: string; points: number; gd: number; gf: number }[] = []
+    const thirds: ThirdEntry[] = []
+
+    // teamId → naam voor FIFA-ranking lookup
+    const teamNames: Record<string, string> = {}
+    for (const m of matches) {
+      if (m.home_team) teamNames[m.home_team.id] = m.home_team.name
+      if (m.away_team) teamNames[m.away_team.id] = m.away_team.name
+    }
 
     for (const group of GROUPS) {
       const gm = matches.filter((m) => m.home_team?.group_name === group)
@@ -111,13 +119,11 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
 
       if (sorted[0]) picks.push({ teamId: sorted[0][0], position: 1 })
       if (sorted[1]) picks.push({ teamId: sorted[1][0], position: 2 })
-      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], ...sorted[2][1] })
+      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], name: teamNames[sorted[2][0]] ?? '', ...sorted[2][1] })
     }
 
-    // Sla positie 3 op voor de beste 8 nummers 3 (zodat bracket pos3Count === 8 krijgt)
-    const best8 = [...thirds]
-      .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf)
-      .slice(0, 8)
+    // Sla positie 3 op voor de beste 8 nummers 3 — gesorteerd op FIFA-regels
+    const best8 = [...thirds].sort(compareThirds).slice(0, 8)
     for (const t of best8) picks.push({ teamId: t.teamId, position: 3 })
 
     return picks
@@ -126,7 +132,14 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
   // Bereken beste 8 nummers 3 voor KO-weergave (posities 1–3 per groep)
   function computeAdvancementPicks(): Record<string, [string | null, string | null, string | null]> {
     const result: Record<string, [string | null, string | null, string | null]> = {}
-    const thirds: Array<{ group: string; teamId: string; points: number; gd: number; gf: number }> = []
+    const thirds: ThirdEntry[] = []
+
+    // teamId → naam voor FIFA-ranking lookup
+    const teamNames: Record<string, string> = {}
+    for (const m of matches) {
+      if (m.home_team) teamNames[m.home_team.id] = m.home_team.name
+      if (m.away_team) teamNames[m.away_team.id] = m.away_team.name
+    }
 
     for (const group of GROUPS) {
       const gm = matches.filter((m) => m.home_team?.group_name === group)
@@ -148,15 +161,10 @@ export default function PredictionsClient({ matches, predMap, jokerMatchIds, pou
       const sorted = Object.entries(st)
         .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
       result[group] = [sorted[0]?.[0] ?? null, sorted[1]?.[0] ?? null, sorted[2]?.[0] ?? null]
-      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], ...sorted[2][1] })
+      if (sorted[2]) thirds.push({ group, teamId: sorted[2][0], name: teamNames[sorted[2][0]] ?? '', ...sorted[2][1] })
     }
 
-    const best8 = new Set(
-      [...thirds]
-        .sort((a, b) => b.points - a.points || b.gd - a.gd || b.gf - a.gf)
-        .slice(0, 8)
-        .map((t) => t.group)
-    )
+    const best8 = new Set([...thirds].sort(compareThirds).slice(0, 8).map((t) => t.group))
     for (const group of GROUPS) {
       if (!best8.has(group)) result[group] = [result[group][0], result[group][1], null]
     }
