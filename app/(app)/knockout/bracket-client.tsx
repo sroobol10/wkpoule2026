@@ -3,7 +3,7 @@
 import { useState, useTransition, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { saveBracketPick, clearBracketSlots } from '@/app/actions/bracket'
-import { BRACKET, THIRD_SLOT_GROUPS, assignThirdPlaceSlots } from '@/lib/bracket'
+import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

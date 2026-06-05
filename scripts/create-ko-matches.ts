@@ -29,7 +29,7 @@ try {
 import { createClient } from '@supabase/supabase-js'
 import ws from 'ws'
 import type { Database } from '../lib/types'
-import { BRACKET, KO_KICKOFFS, assignThirdPlaceSlots, THIRD_SLOT_GROUPS } from '../lib/bracket'
+import { BRACKET, KO_KICKOFFS, assignThirdPlaceSlots } from '../lib/bracket'
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
