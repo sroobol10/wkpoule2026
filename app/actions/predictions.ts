@@ -52,27 +52,13 @@ export async function saveGroupAdvancement(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
 
-  // Verwijder altijd alle bestaande pos-3 entries — de "beste 8 nummers 3"
-  // wordt bij elke save volledig herberekend, en stale entries veroorzaken
-  // pos3Count > 8 waardoor de bracket-check faalt.
-  const hasThirds = selections.some((s) => s.position === 3)
-  if (hasThirds) {
-    await supabase
-      .from('group_advancement')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('predicted_position', 3)
-  }
-
-  // Verwijder pos-1/pos-2 picks voor de teams die nu worden aangeboden
-  const nonThirds = selections.filter((s) => s.position !== 3)
-  if (nonThirds.length > 0) {
-    await supabase
-      .from('group_advancement')
-      .delete()
-      .eq('user_id', user.id)
-      .in('team_id', nonThirds.map((s) => s.teamId))
-  }
+  // Verwijder altijd alle bestaande entries en schrijf volledig opnieuw.
+  // Partieel deleten op team_id laat stale entries achter als een team
+  // na een scorewijziging uit de top-2 valt — dat corrumpeert de bracket.
+  await supabase
+    .from('group_advancement')
+    .delete()
+    .eq('user_id', user.id)
 
   if (selections.length === 0) return { ok: true }
 
