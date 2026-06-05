@@ -4,6 +4,7 @@
 export const FIFA_RANKING: Record<string, number> = {
   // Groep A
   'México': 15,
+  'Mexico': 15,          // zonder accent (DB-spelling)
   'Zuid-Korea': 25,
   'Zuid-Afrika': 60,
   'Tsjechië': 41,
@@ -19,6 +20,7 @@ export const FIFA_RANKING: Record<string, number> = {
   'Haïti': 83,
   // Groep D
   'Verenigde Staten': 16,
+  'United States': 16,   // engelstalige alias
   'Paraguay': 40,
   'Australië': 27,
   'Turkije': 22,
