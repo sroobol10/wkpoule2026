@@ -75,6 +75,7 @@ function ptsBadgeClass(pts: number, hasJoker: boolean) {
 export default function PredictionsClient({
   matches,
   predMap,
+  advancement,
   jokerMatchIds,
   pouleStandings,
   pouleGroupStandings,
@@ -88,6 +89,26 @@ export default function PredictionsClient({
       (m) => !m.result_entered && predMap[m.id]?.points_awarded != null,
     );
     if (isStale) router.refresh();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bij page load: als alle scores al ingevuld zijn maar doorstroom incompleet is,
+  // herbereken en sla op. Herstelt users die vóór de stale-closure bugfix speelden.
+  useEffect(() => {
+    const pos12 = advancement.filter((a) => a.predicted_position <= 2).length;
+    const pos3  = advancement.filter((a) => a.predicted_position === 3).length;
+    if (pos12 === 24 && pos3 === 8) return; // al correct, niets te doen
+
+    const initialScores: Record<string, { home: string; away: string }> = {};
+    for (const [matchId, pred] of Object.entries(predMap)) {
+      initialScores[matchId] = {
+        home: String(pred.predicted_home),
+        away: String(pred.predicted_away),
+      };
+    }
+    const picks = computeGroupStandings(initialScores);
+    if (picks.length > 0) {
+      saveGroupAdvancement(picks).catch(() => {});
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [activeGroup, setActiveGroup] = useState("A");
   const [scores, setScores] = useState<
