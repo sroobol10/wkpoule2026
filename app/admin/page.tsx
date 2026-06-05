@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import AdminClient from './admin-client'
 
 const KNOCKOUT_STAGES = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
@@ -57,22 +58,38 @@ export default async function AdminPage() {
   }
 
   // ── Deelnemers-overzicht ───────────────────────────────────────────────────
-  // Twee stappen: eerst unieke user_ids, dan profiles ophalen
-  const { data: memberRows } = await supabase
+  // Service client gebruiken zodat RLS niet blokkeert (admin ziet alle poules)
+  const serviceClient = createServiceClient()
+  const { data: memberRows } = await serviceClient
     .from('poule_members')
-    .select('user_id')
+    .select('user_id, poule_id, poules(id, name, is_general)')
 
   const memberUserIds = [...new Set((memberRows ?? []).map((m) => m.user_id))]
+
+  // Poule-filter data: unieke poules + per user welke poules
+  type PouleRef = { id: string; name: string; isGeneral: boolean }
+  const poulesMap: Record<string, PouleRef> = {}
+  const userPouleIds: Record<string, string[]> = {}
+  for (const row of memberRows ?? []) {
+    const p = row.poules as { id: string; name: string; is_general: boolean } | null
+    if (!p) continue
+    poulesMap[p.id] = { id: p.id, name: p.name, isGeneral: p.is_general }
+    userPouleIds[row.user_id] ??= []
+    if (!userPouleIds[row.user_id].includes(p.id)) userPouleIds[row.user_id].push(p.id)
+  }
+  const allPoules = Object.values(poulesMap)
+    .filter((p) => !p.isGeneral)
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   const { data: profileRows } = memberUserIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('id, username')
+        .select('id, username, avatar_url')
         .in('id', memberUserIds)
         .order('username')
     : { data: [] }
 
-  type ProfileRef = { id: string; username: string }
+  type ProfileRef = { id: string; username: string; avatar_url: string | null }
   const uniqueUsers: Record<string, ProfileRef> = {}
   for (const p of profileRows ?? []) {
     uniqueUsers[p.id] = p
@@ -131,9 +148,19 @@ export default async function AdminPage() {
   const totalGroupMatches = groupMatchIds.length
   const totalBonusQuestions = (questions ?? []).filter((q) => q.type === 'pre_tournament').length
 
+  // Emails ophalen via service role (auth.users is niet toegankelijk via reguliere client)
+  const { data: { users: authUsers } } = await serviceClient.auth.admin.listUsers({ perPage: 1000 })
+  const emailMap: Record<string, string> = {}
+  for (const u of authUsers ?? []) {
+    if (u.email) emailMap[u.id] = u.email
+  }
+
   const participants = Object.values(uniqueUsers).map((p) => ({
     id: p.id,
     username: p.username,
+    avatarUrl: p.avatar_url ?? null,
+    email: emailMap[p.id] ?? '',
+    pouleIds: userPouleIds[p.id] ?? [],
     predictions: predCountMap[p.id] ?? 0,
     jokers: jokerCountMap[p.id] ?? 0,
     bracketPicks: bracketCountMap[p.id] ?? 0,
@@ -178,6 +205,7 @@ export default async function AdminPage() {
           questions={questions ?? []}
           cardsByMatch={cardsByMatch}
           participants={participants}
+          allPoules={allPoules}
           totalGroupMatches={totalGroupMatches}
           totalBonusQuestions={totalBonusQuestions}
         />

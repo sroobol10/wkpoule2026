@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { setMatchResult, setBonusCorrectAnswer, updateBonusAnswerConfig, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
+import { AvatarCircle } from '@/components/avatar-circle'
 
 type Team = { id: string; name: string; code: string; flag_url: string; group_name: string }
 type Match = {
@@ -34,11 +35,16 @@ type CardEntry = { match_id: string; team_id: string; yellow_cards: number; red_
 type Participant = {
   id: string
   username: string
+  avatarUrl: string | null
+  email: string
+  pouleIds: string[]
   predictions: number
   jokers: number
   bracketPicks: number
   bonusAnswers: number
 }
+
+type PouleRef = { id: string; name: string; isGeneral: boolean }
 
 type Props = {
   matches: Match[]
@@ -46,6 +52,7 @@ type Props = {
   questions: BonusQuestion[]
   cardsByMatch: Record<string, CardEntry[]>
   participants: Participant[]
+  allPoules: PouleRef[]
   totalGroupMatches: number
   totalBonusQuestions: number
 }
@@ -63,7 +70,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 type Tab = 'groepsfase' | 'bonusvragen' | 'knockout' | 'deelnemers'
 
-export default function AdminClient({ matches, teams, questions, cardsByMatch, participants, totalGroupMatches, totalBonusQuestions }: Props) {
+export default function AdminClient({ matches, teams, questions, cardsByMatch, participants, allPoules, totalGroupMatches, totalBonusQuestions }: Props) {
   const [tab, setTab] = useState<Tab>('groepsfase')
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
@@ -84,19 +91,19 @@ export default function AdminClient({ matches, teams, questions, cardsByMatch, p
   return (
     <div className="space-y-6">
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-white/10 pb-0">
+      <div className="flex gap-1 border-b border-white/10 overflow-x-auto scrollbar-none pb-0">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 font-mono text-xs tracking-[0.14em] uppercase border-b-2 -mb-px transition-colors ${
+            className={`shrink-0 flex items-center gap-1.5 px-3 sm:px-4 py-2.5 font-mono text-[10px] sm:text-xs tracking-[0.14em] uppercase border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === t.id
                 ? 'border-wk-gold text-wk-gold'
                 : 'border-transparent text-wk-muted hover:text-wk-soft'
             }`}
           >
             {t.label}
-            <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded-full border ${
+            <span className={`font-mono text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded-full border ${
               tab === t.id
                 ? 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
                 : 'bg-white/5 border-white/10 text-wk-muted'
@@ -119,6 +126,7 @@ export default function AdminClient({ matches, teams, questions, cardsByMatch, p
       {tab === 'deelnemers' && (
         <DeelnemersTab
           participants={participants}
+          allPoules={allPoules}
           totalGroupMatches={totalGroupMatches}
           totalBonusQuestions={totalBonusQuestions}
         />
@@ -546,24 +554,62 @@ function MatchResultRow({
 
 function DeelnemersTab({
   participants,
+  allPoules,
   totalGroupMatches,
   totalBonusQuestions,
 }: {
   participants: Participant[]
+  allPoules: PouleRef[]
   totalGroupMatches: number
   totalBonusQuestions: number
 }) {
+  const [filterPoule, setFilterPoule] = useState<string | null>(null)
+
   const allComplete = (p: Participant) =>
     p.predictions === totalGroupMatches &&
     p.jokers === 12 &&
     p.bracketPicks === 32 &&
     p.bonusAnswers >= totalBonusQuestions
 
+  const visible = filterPoule
+    ? participants.filter((p) => p.pouleIds.includes(filterPoule))
+    : participants
+
   return (
     <div className="space-y-4">
+      {/* Poule-filter */}
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          onClick={() => setFilterPoule(null)}
+          className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
+            filterPoule === null
+              ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
+              : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+          }`}
+        >
+          Alle ({participants.length})
+        </button>
+        {allPoules.map((poule) => {
+          const count = participants.filter((p) => p.pouleIds.includes(poule.id)).length
+          return (
+            <button
+              key={poule.id}
+              onClick={() => setFilterPoule(poule.id)}
+              className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
+                filterPoule === poule.id
+                  ? 'bg-wk-green/10 border-wk-green/40 text-wk-green'
+                  : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+              }`}
+            >
+              {poule.name} ({count})
+            </button>
+          )
+        })}
+      </div>
+
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="font-mono text-[10px] text-wk-muted tracking-widest uppercase">
-          {participants.length} deelnemers · {participants.filter(allComplete).length} volledig ingevuld
+          {visible.length} deelnemers · {visible.filter(allComplete).length} volledig ingevuld
         </p>
         <a
           href="/admin/uitdraai"
@@ -589,7 +635,7 @@ function DeelnemersTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {participants.map((p) => {
+              {visible.map((p) => {
                 const complete = allComplete(p)
                 const wedstrOk = p.predictions === totalGroupMatches
                 const jokersOk = p.jokers === 12
@@ -600,10 +646,13 @@ function DeelnemersTab({
                   <tr key={p.id} className={complete ? 'bg-wk-green/5' : ''}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-wk-bg2 border border-white/10 flex items-center justify-center text-xs font-bold text-wk-gold font-mono shrink-0">
-                          {p.username.charAt(0).toUpperCase()}
+                        <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={36} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-wk-text whitespace-nowrap">{p.username}</p>
+                          {p.email && (
+                            <p className="font-mono text-[10px] text-wk-muted tracking-wide truncate">{p.email}</p>
+                          )}
                         </div>
-                        <span className="text-sm font-medium text-wk-text">{p.username}</span>
                       </div>
                     </td>
                     <td className="px-3 py-3 text-right">
