@@ -769,7 +769,7 @@ function MatchRow({
   }
 
   return (
-    <div className={exactScore ? "bg-wk-gold/[0.12]" : ""}>
+    <div className={exactScore ? "bg-wk-green/[0.08]" : ""}>
       {/* Date + joker row */}
       <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4">
         {/* Datum-rij: joker links · datum midden · punten rechts */}

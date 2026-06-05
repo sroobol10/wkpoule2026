@@ -24,34 +24,26 @@ export async function toggleJoker(matchId: string): Promise<JokerResult> {
   const groupName = (match.home_team as { group_name: string } | null)?.group_name
   if (!groupName) return { ok: false, error: 'Groep niet gevonden.' }
 
-  // Zodra er een wedstrijd in deze groep gespeeld is, mag de joker niet meer worden gewijzigd
-  const { data: groupTeams } = await supabase
-    .from('teams')
-    .select('id')
-    .eq('group_name', groupName)
-
-  const teamIds = (groupTeams ?? []).map((t) => t.id)
-  if (teamIds.length > 0) {
-    const { data: playedMatch } = await supabase
-      .from('matches')
-      .select('id')
-      .eq('stage', 'group')
-      .eq('result_entered', true)
-      .or(`home_team_id.in.(${teamIds.join(',')}),away_team_id.in.(${teamIds.join(',')})`)
-      .limit(1)
-      .maybeSingle()
-
-    if (playedMatch) {
-      return { ok: false, error: `De joker voor groep ${groupName} kan niet meer worden gewijzigd — er is al een wedstrijd gespeeld.` }
-    }
-  }
-
+  // Haal bestaande joker voor deze groep op
   const { data: existing } = await supabase
     .from('jokers')
     .select('id, match_id')
     .eq('user_id', user.id)
     .eq('group_name', groupName)
     .maybeSingle()
+
+  // Joker mag alleen gewijzigd worden als de wedstrijd waarop hij staat nog niet is begonnen
+  if (existing) {
+    const { data: jokerMatch } = await supabase
+      .from('matches')
+      .select('kickoff_at, result_entered')
+      .eq('id', existing.match_id)
+      .single()
+
+    if (jokerMatch && (jokerMatch.result_entered || new Date(jokerMatch.kickoff_at) <= new Date())) {
+      return { ok: false, error: `De joker voor groep ${groupName} kan niet meer worden gewijzigd — de wedstrijd waarop je joker staat is al begonnen.` }
+    }
+  }
 
   if (existing?.match_id === matchId) {
     // Zelfde wedstrijd: joker uitzetten

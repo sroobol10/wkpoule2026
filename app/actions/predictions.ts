@@ -52,8 +52,15 @@ export async function saveGroupAdvancement(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
 
-  // Verwijder bestaande selecties en sla opnieuw op
-  await supabase.from('group_advancement').delete().eq('user_id', user.id)
+  // Verwijder alleen picks voor de teams die nu worden aangeboden
+  // (picks voor al gespeelde groepen blijven behouden)
+  if (selections.length > 0) {
+    await supabase
+      .from('group_advancement')
+      .delete()
+      .eq('user_id', user.id)
+      .in('team_id', selections.map((s) => s.teamId))
+  }
 
   if (selections.length === 0) return { ok: true }
 
