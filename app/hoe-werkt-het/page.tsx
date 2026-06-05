@@ -32,7 +32,7 @@ const STEPS = [
     icon: '★',
     title: 'Zet je joker in',
     desc: 'Per groep mag je op één wedstrijd een joker inzetten. De joker verdubbelt het aantal behaalde punten voor die wedstrijd.',
-    detail: 'Je hebt 12 jokers (één per groep A t/m L). Kies slim — de joker is niet meer te wijzigen zodra er een wedstrijd in die groep is gespeeld.',
+    detail: 'Je hebt 12 jokers (één per groep A t/m L). Kies slim — de joker voor een groep is niet meer te wijzigen zodra de wedstrijd waarop je joker staat is begonnen.',
     scores: null,
   },
   {
@@ -41,7 +41,7 @@ const STEPS = [
     icon: '🏆',
     title: 'Voorspel de KO-fase',
     desc: 'Vul vóór het toernooi je bracket in: wie wint de Ronde van 32, de achtste finales, de kwartfinales, de halve finales en de finale?',
-    detail: 'Je hoeft niet het exacte slot te raden — het gaat erom of je het juiste land in die ronde hebt voorspeld als winnaar.',
+    detail: 'Het bracket vult zich automatisch op basis van jouw groepsfasevoorspellingen. Klik op een land om het door te laten gaan naar de volgende ronde. Je hoeft niet het exacte slot te raden — het gaat erom of je het juiste land in die ronde hebt voorspeld als winnaar.',
     scores: [
       { label: 'Ronde van 32', pts: '15' },
       { label: 'Achtste finale', pts: '25' },

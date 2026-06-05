@@ -534,9 +534,9 @@ export default function PredictionsClient({
                 match.away_score !== null &&
                 pred.predicted_home === match.home_score &&
                 pred.predicted_away === match.away_score;
-              // Joker-wijziging geblokkeerd als er al een wedstrijd in de groep gespeeld is
+              // Joker-wijziging geblokkeerd als de wedstrijd waarop de joker staat al is begonnen
               const anyGroupMatchPlayed = groupMatches.some(
-                (m) => m.result_entered,
+                (m) => jokerSet.has(m.id) && (m.result_entered || new Date(m.kickoff_at) <= now),
               );
               return (
                 <MatchRow
