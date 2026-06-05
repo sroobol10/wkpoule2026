@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { GROUP_DATA } from '@/lib/group-data'
+import { GROUP_PREVIEWS } from '@/lib/group-previews'
+import { GroupPreviewToggle } from './group-preview-toggle'
 
 const ALL_GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
 
@@ -13,6 +15,7 @@ export default function GroepenPage() {
         {ALL_GROUPS.map((letter) => {
           const data = GROUP_DATA[letter]
           const available = !!data
+          const preview = GROUP_PREVIEWS.find((p) => p.group === letter)
 
           if (!available) {
             return (
@@ -77,6 +80,8 @@ export default function GroepenPage() {
               >
                 Bekijk details →
               </Link>
+
+              {preview && <GroupPreviewToggle preview={preview} />}
             </div>
           )
         })}
