@@ -63,10 +63,12 @@ type Props = Readonly<{
 
 const GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 
-function ptsBadgeClass(pts: number) {
-  if (pts >= 5) return "bg-wk-green/10 border-wk-green/30 text-wk-green";
-  if (pts > 0) return "bg-wk-gold/10 border-wk-gold/30 text-wk-gold";
-  return "bg-white/5 border-white/10 text-wk-muted";
+// Groen = exacte score (base 10 pt), geel = gedeeltelijk, rood = nul
+function ptsBadgeClass(pts: number, hasJoker: boolean) {
+  if (pts === 0) return "bg-wk-red/10 border-wk-red/30 text-wk-red";
+  const base = hasJoker ? pts / 2 : pts;
+  if (base === 10) return "bg-wk-green/10 border-wk-green/30 text-wk-green";
+  return "bg-wk-gold/10 border-wk-gold/30 text-wk-gold";
 }
 
 export default function PredictionsClient({
@@ -792,7 +794,7 @@ function MatchRow({
           <div className="flex justify-end">
             {match.result_entered && pts !== null && pts !== undefined && (
               <span
-                className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts)}`}
+                className={`font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-full border tracking-[0.12em] uppercase ${ptsBadgeClass(pts, hasJoker)}`}
               >
                 {pts} pt
               </span>

@@ -310,24 +310,74 @@ function QuestionCard({
           {/* Answer area */}
           {!closed ? (
             inputMode === 'options' ? (
-              /* ── Keuze uit voorgedefinieerde opties ── */
-              <div className="flex flex-wrap gap-2">
-                {(question.answer_options ?? []).map((opt) => (
+              (question.answer_options?.length ?? 0) > 8 ? (
+                /* ── Doorzoekbare dropdown voor grote lijsten (spelers) ── */
+                <div className="space-y-2">
                   <button
-                    key={opt}
-                    onClick={() => { setAnswer(opt); setSaved(false); handleSave(opt) }}
-                    disabled={isPending}
-                    className={`rounded border px-4 py-2.5 text-sm font-semibold transition-colors ${
-                      answer === opt
-                        ? 'border-wk-gold/60 bg-wk-gold/15 text-wk-gold'
-                        : 'border-white/10 bg-wk-bg2 text-wk-soft hover:border-white/20'
+                    onClick={() => setShowPicker((v) => !v)}
+                    className={`w-full flex items-center justify-between gap-3 rounded border px-3 py-2.5 text-left transition-colors ${
+                      showPicker ? 'border-wk-gold/50 bg-wk-gold/5' : 'border-white/10 bg-wk-bg2 hover:border-white/20'
                     }`}
                   >
-                    {opt}
-                    {answer === opt && <span className="ml-1.5 font-mono text-[10px]">✓</span>}
+                    <span className={`flex-1 text-sm font-semibold ${answer ? 'text-wk-gold' : 'text-wk-muted'}`}>
+                      {answer || 'Kies een speler…'}
+                    </span>
+                    {answer && <span className="font-mono text-[10px] text-wk-gold">✓</span>}
+                    <svg className={`w-4 h-4 text-wk-muted shrink-0 transition-transform ${showPicker ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
-                ))}
-              </div>
+                  {showPicker && (
+                    <div className="rounded-xl border border-white/10 bg-wk-bg2 overflow-hidden">
+                      <div className="px-3 py-2 border-b border-white/10">
+                        <input
+                          type="text"
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder="Zoek speler…"
+                          autoFocus
+                          className="w-full bg-transparent text-sm text-wk-text placeholder:text-wk-muted outline-none"
+                        />
+                      </div>
+                      <div className="max-h-52 overflow-y-auto divide-y divide-white/5">
+                        {(question.answer_options ?? [])
+                          .filter((opt) => opt.toLowerCase().includes(search.toLowerCase()))
+                          .map((opt) => (
+                            <button
+                              key={opt}
+                              onClick={() => { setAnswer(opt); setSaved(false); setShowPicker(false); setSearch(''); handleSave(opt) }}
+                              disabled={isPending}
+                              className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                                answer === opt ? 'text-wk-gold bg-wk-gold/5' : 'text-wk-soft hover:bg-white/5'
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* ── Knoppen voor kleine lijsten ── */
+                <div className="flex flex-wrap gap-2">
+                  {(question.answer_options ?? []).map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => { setAnswer(opt); setSaved(false); handleSave(opt) }}
+                      disabled={isPending}
+                      className={`rounded border px-4 py-2.5 text-sm font-semibold transition-colors ${
+                        answer === opt
+                          ? 'border-wk-gold/60 bg-wk-gold/15 text-wk-gold'
+                          : 'border-white/10 bg-wk-bg2 text-wk-soft hover:border-white/20'
+                      }`}
+                    >
+                      {opt}
+                      {answer === opt && <span className="ml-1.5 font-mono text-[10px]">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )
             ) : inputMode === 'yesno' ? (
               /* ── Ja / Nee ── */
               <div className="flex gap-2">

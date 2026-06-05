@@ -549,7 +549,7 @@ export async function scoreGroupAdvancement(group: string): Promise<AdminResult>
   if (!picks || picks.length === 0) return { ok: true }
 
   for (const pick of picks) {
-    const pts = (actualPosition[pick.team_id] ?? 99) === pick.predicted_position ? 3 : 0
+    const pts = (actualPosition[pick.team_id] ?? 99) === pick.predicted_position ? 5 : 0
     await supabase.from('group_advancement').update({ points_awarded: pts }).eq('id', pick.id)
   }
 
