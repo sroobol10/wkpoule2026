@@ -1,5 +1,5 @@
 // Deadline voor groepsfase voorspellingen: eerste wedstrijd WK 2026
-export const GROUP_STAGE_DEADLINE = new Date('2026-06-11T15:00:00Z')
+export const GROUP_STAGE_DEADLINE = new Date('2026-06-11T19:00:00Z')
 
 export const STAGE_LABELS: Record<string, string> = {
   group:       'Groepsfase',
