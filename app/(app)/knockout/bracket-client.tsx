@@ -179,6 +179,9 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
   }
 
   if (!advancementComplete) {
+    const allGroupsFilled = pos12Count === 24
+    // Hoeveel groepen heeft de gebruiker volledig ingevuld (pos 1 én pos 2 bekend)
+    const completeGroups = Object.values(advMap).filter((gm) => gm[1] && gm[2]).length
     return (
       <div className="bg-wk-surface border border-white/10 rounded-xl p-8 text-center space-y-3">
         <div className="w-12 h-12 rounded-full bg-wk-gold/10 border border-wk-gold/20 flex items-center justify-center mx-auto">
@@ -188,12 +191,21 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
           </svg>
         </div>
         <p className="font-display text-base text-wk-text uppercase">Knockoutfase niet volledig</p>
-        <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-          Vul eerst alle 32 doorgestoten teams in via de Voorspellingen-pagina
-        </p>
-        <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-          {pos12Count}/24 groepswinnaars/nummers 2 · {pos3Count}/8 beste nummers 3
-        </p>
+        {allGroupsFilled ? (
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+            Ga naar <a href="/voorspellingen" className="text-wk-gold underline underline-offset-2">Voorspellingen</a>, pas één uitslag aan en zet hem terug — dan worden de beste nummers 3 automatisch bijgewerkt.
+          </p>
+        ) : (
+          <>
+            <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+              Vul eerst alle 12 groepen in via de{" "}
+              <a href="/voorspellingen" className="text-wk-gold underline underline-offset-2">Voorspellingen-pagina</a>
+            </p>
+            <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+              {completeGroups}/12 groepen volledig ingevuld
+            </p>
+          </>
+        )}
       </div>
     )
   }

@@ -16,8 +16,7 @@ export default function JoinPouleForm() {
     startTransition(async () => {
       const result = await joinPoule(code)
       if (result.ok) {
-        router.refresh()
-        setCode('')
+        router.push(`/poules/${result.pouleId}`)
       } else {
         setError(result.error)
       }

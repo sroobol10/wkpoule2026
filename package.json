@@ -10,7 +10,9 @@
     "seed": "npx tsx --env-file=.env.local scripts/seed.ts",
     "bonus:reset": "npx tsx scripts/reset-bonus.ts",
     "ko:create": "npx tsx scripts/create-ko-matches.ts",
-    "seed:ai": "npx tsx --env-file=.env.local scripts/seed-ai-predictions.ts"
+    "seed:ai": "npx tsx --env-file=.env.local scripts/seed-ai-predictions.ts",
+    "generate:ai": "npx tsx --env-file=.env.local scripts/generate-ai-predictions.ts",
+    "parse:teams": "npx tsx scripts/parse-team-data.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.97.0",

@@ -12,6 +12,7 @@ import { toggleJoker } from "@/app/actions/jokers";
 import { getMatchPrediction } from "@/app/actions/ai-prediction";
 import { formatInAmsterdam } from "@/lib/format";
 import { compareThirds, type ThirdEntry } from "@/lib/third-place";
+import { getTeamProfile } from "@/lib/team-profiles";
 import type { AiPrediction } from "@/app/actions/ai-prediction";
 
 type Team = { id: string; name: string; flag_url: string; group_name: string };
@@ -958,6 +959,61 @@ function MatchRow({
 }
 
 
+// ─── Player spotlight card ────────────────────────────────────────────────────
+
+function PlayerSpotlightCard({
+  teamName,
+  fallbackText,
+}: {
+  teamName: string;
+  fallbackText: string;
+}) {
+  const profile = getTeamProfile(teamName);
+  const player = profile?.playerToWatchData ?? null;
+
+  if (!player) {
+    return (
+      <div className="rounded bg-wk-surface border border-white/5 px-3 py-2">
+        <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mb-1">
+          Sleutelspeler
+        </p>
+        <p className="text-xs text-wk-text leading-snug">{fallbackText}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded bg-wk-surface border border-white/5 overflow-hidden">
+      <div className="px-3 py-2.5">
+        <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mb-2">
+          Speler om op te letten
+        </p>
+        <div className="flex items-center gap-2.5">
+          {player.image && (
+            <div className="relative w-10 h-10 shrink-0 rounded-full overflow-hidden bg-wk-bg2">
+              <Image
+                src={player.image}
+                alt=""
+                fill
+                className="object-cover object-top"
+                sizes="40px"
+              />
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-wk-text leading-tight truncate">
+              {player.name}
+            </p>
+            <p className="font-mono text-[9px] text-wk-muted tracking-wide truncate mt-0.5">
+              {player.position} · {player.club}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── AI prediction panel ──────────────────────────────────────────────────────
 
 function AiPredictionPanel({
@@ -1024,7 +1080,7 @@ function AiPredictionPanel({
           AI Voorspelling
         </span>
         <span className="ml-auto font-mono text-[9px] text-wk-muted tracking-widest uppercase">
-          Op basis van FIFA-ranking & statistieken
+          Op basis van teamdata & statistieken
         </span>
       </div>
 
@@ -1083,22 +1139,14 @@ function AiPredictionPanel({
         <p className="text-xs text-wk-soft leading-relaxed">{state.analyse}</p>
 
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded bg-wk-surface border border-white/5 px-3 py-2">
-            <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mb-1">
-              Sleutelspeler
-            </p>
-            <p className="text-xs text-wk-text leading-snug">
-              {state.sleutelspelerThuis}
-            </p>
-          </div>
-          <div className="rounded bg-wk-surface border border-white/5 px-3 py-2">
-            <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase mb-1">
-              Sleutelspeler
-            </p>
-            <p className="text-xs text-wk-text leading-snug">
-              {state.sleutelspelerUit}
-            </p>
-          </div>
+          <PlayerSpotlightCard
+            teamName={homeName}
+            fallbackText={state.sleutelspelerThuis}
+          />
+          <PlayerSpotlightCard
+            teamName={awayName}
+            fallbackText={state.sleutelspelerUit}
+          />
         </div>
       </div>
     </div>

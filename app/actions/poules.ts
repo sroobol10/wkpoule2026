@@ -61,7 +61,7 @@ export async function deletePoule(pouleId: string): Promise<SaveResult> {
   return { ok: true }
 }
 
-export async function joinPoule(inviteCode: string): Promise<SaveResult> {
+export async function joinPoule(inviteCode: string): Promise<{ ok: true; pouleId: string } | { ok: false; error: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
@@ -105,5 +105,5 @@ export async function joinPoule(inviteCode: string): Promise<SaveResult> {
     )
 
   revalidatePath('/poules')
-  return { ok: true }
+  return { ok: true, pouleId: poule.id }
 }
