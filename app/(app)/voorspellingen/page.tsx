@@ -129,14 +129,14 @@ export default async function VoorspellingenPage() {
   }
 
   // Bouw per-poule, per-groep ranglijst
-  type GroupEntry = { userId: string; username: string; pts: number }
+  type GroupEntry = { userId: string; username: string; avatarUrl: string | null; pts: number }
   const GROUPS_LIST = ['A','B','C','D','E','F','G','H','I','J','K','L']
 
   const pouleGroupStandings = pouleStandings.map((poule) => {
     const byGroup: Record<string, GroupEntry[]> = {}
     for (const group of GROUPS_LIST) {
       byGroup[group] = poule.entries
-        .map((e) => ({ userId: e.userId, username: e.username, pts: userGroupPts[e.userId]?.[group] ?? 0 }))
+        .map((e) => ({ userId: e.userId, username: e.username, avatarUrl: e.avatarUrl, pts: userGroupPts[e.userId]?.[group] ?? 0 }))
         .sort((a, b) => b.pts - a.pts)
     }
     return { pouleId: poule.pouleId, byGroup }

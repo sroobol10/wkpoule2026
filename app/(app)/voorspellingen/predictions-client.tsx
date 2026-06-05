@@ -45,7 +45,7 @@ type PouleStanding = {
   isGeneral: boolean;
   entries: PouleEntry[];
 };
-type GroupEntry = { userId: string; username: string; pts: number };
+type GroupEntry = { userId: string; username: string; avatarUrl: string | null; pts: number };
 type PouleGroupStanding = {
   pouleId: string;
   byGroup: Record<string, GroupEntry[]>;
@@ -706,6 +706,7 @@ function PouleMiniLeaderboard({
                     </span>
                   )}
                 </div>
+                <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={22} />
                 <span
                   className={`flex-1 text-xs truncate ${isCurrentUser ? "font-bold text-wk-gold" : "text-wk-text"}`}
                 >
