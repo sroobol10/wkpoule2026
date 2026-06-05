@@ -118,7 +118,9 @@ export default function PredictionsClient({
   // - Positie 3 voor de beste 8 nummers 3 (cross-groep vergelijking)
   // Sla ALLEEN op voor groepen zonder gespeelde wedstrijden: zodra admin heeft
   // gescoord overschrijft de auto-save de points_awarded waarden niet meer.
-  function computeGroupStandings(): { teamId: string; position: number }[] {
+  function computeGroupStandings(
+    scoresSnapshot: Record<string, { home: string; away: string }> = scores
+  ): { teamId: string; position: number }[] {
     const picks: { teamId: string; position: number }[] = [];
     const thirds: ThirdEntry[] = [];
 
@@ -134,7 +136,7 @@ export default function PredictionsClient({
 
       // Picks alleen opslaan als alle 6 wedstrijden in de groep zijn ingevuld
       const allFilled = gm.length === 6 && gm.every((m) => {
-        const s = scores[m.id];
+        const s = scoresSnapshot[m.id];
         return s && s.home !== "" && s.away !== "";
       });
       if (!allFilled) continue;
@@ -145,7 +147,7 @@ export default function PredictionsClient({
         if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 };
       }
       for (const m of gm) {
-        const s = scores[m.id];
+        const s = scoresSnapshot[m.id];
         if (!m.home_team || !m.away_team) continue;
         const h = Number(s!.home), a = Number(s!.away);
         st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a;
@@ -306,7 +308,10 @@ export default function PredictionsClient({
           { matchId, home: Number(newScore.home), away: Number(newScore.away) },
         ]);
         if (result.ok) {
-          const standingPicks = computeGroupStandings();
+          // Patch de stale scores-closure met de juist ingevulde score van
+          // dit match — anders ziet computeGroupStandings de away-score als ""
+          const patchedScores = { ...scores, [matchId]: newScore };
+          const standingPicks = computeGroupStandings(patchedScores);
           if (standingPicks.length > 0) {
             saveGroupAdvancement(standingPicks).catch(() => {});
           }

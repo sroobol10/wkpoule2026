@@ -3,7 +3,10 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import JoinPouleForm from './join-poule-form'
 
-export default async function PoulesPage() {
+export default async function PoulesPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ join_error?: string }> }>) {
+  const { join_error } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -78,7 +81,7 @@ export default async function PoulesPage() {
       {/* Join */}
       <section>
         <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-2">Deelnemen</p>
-        <JoinPouleForm />
+        <JoinPouleForm initialError={join_error} />
       </section>
     </div>
   )

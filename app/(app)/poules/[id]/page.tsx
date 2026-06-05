@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { AvatarCircle } from '@/components/avatar-circle'
 import DeletePouleButton from './delete-poule-button'
+import SharePouleButton from './share-poule-button'
 
 export default async function PoulePage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params
@@ -100,9 +101,14 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
             </p>
           </div>
           {!poule.is_general && (
-            <div className="bg-wk-surface border border-white/10 rounded-xl px-4 py-3 text-right">
-              <p className="font-mono text-[9px] text-wk-muted tracking-[0.16em] uppercase mb-1">Uitnodigingscode</p>
-              <p className="font-display text-2xl text-wk-gold tracking-wider">{poule.invite_code}</p>
+            <div className="bg-wk-surface border border-white/10 rounded-xl px-4 py-3 text-right space-y-2">
+              <div>
+                <p className="font-mono text-[9px] text-wk-muted tracking-[0.16em] uppercase mb-1">Uitnodigingscode</p>
+                <p className="font-display text-2xl text-wk-gold tracking-wider">{poule.invite_code}</p>
+              </div>
+              <div className="flex justify-end">
+                <SharePouleButton inviteCode={poule.invite_code} />
+              </div>
             </div>
           )}
         </div>

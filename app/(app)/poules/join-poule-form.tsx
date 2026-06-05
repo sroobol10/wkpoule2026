@@ -4,9 +4,9 @@ import { useState, useTransition } from 'react'
 import { joinPoule } from '@/app/actions/poules'
 import { useRouter } from 'next/navigation'
 
-export default function JoinPouleForm() {
+export default function JoinPouleForm({ initialError }: { initialError?: string }) {
   const [code, setCode] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError ?? null)
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
 
