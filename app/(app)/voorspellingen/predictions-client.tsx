@@ -131,39 +131,28 @@ export default function PredictionsClient({
     for (const group of GROUPS) {
       const gm = matches.filter((m) => m.home_team?.group_name === group);
 
-      // Groep overgeslagen als er al een wedstrijd is gespeeld (admin scoort die groepen)
-      if (gm.some((m) => m.result_entered)) continue;
+      // Picks alleen opslaan als alle 6 wedstrijden in de groep zijn ingevuld
+      const allFilled = gm.length === 6 && gm.every((m) => {
+        const s = scores[m.id];
+        return s && s.home !== "" && s.away !== "";
+      });
+      if (!allFilled) continue;
+
       const st: Record<string, { points: number; gd: number; gf: number }> = {};
       for (const m of gm) {
         if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 };
         if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 };
       }
-      let hasScore = false;
       for (const m of gm) {
         const s = scores[m.id];
-        if (
-          !s ||
-          s.home === "" ||
-          s.away === "" ||
-          !m.home_team ||
-          !m.away_team
-        )
-          continue;
-        hasScore = true;
-        const h = Number(s.home),
-          a = Number(s.away);
-        st[m.home_team.id].gf += h;
-        st[m.home_team.id].gd += h - a;
-        st[m.away_team.id].gf += a;
-        st[m.away_team.id].gd += a - h;
+        if (!m.home_team || !m.away_team) continue;
+        const h = Number(s!.home), a = Number(s!.away);
+        st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a;
+        st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h;
         if (h > a) st[m.home_team.id].points += 3;
         else if (h < a) st[m.away_team.id].points += 3;
-        else {
-          st[m.home_team.id].points += 1;
-          st[m.away_team.id].points += 1;
-        }
+        else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1; }
       }
-      if (!hasScore) continue;
 
       const sorted = Object.entries(st).sort(
         ([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf,
@@ -316,13 +305,9 @@ export default function PredictionsClient({
           { matchId, home: Number(newScore.home), away: Number(newScore.away) },
         ]);
         if (result.ok) {
-          // Groepsstand-koppeling bevroren zodra toernooi is gestart (eerste match gespeeld)
-          const tournamentStarted = matches.some((m) => m.result_entered);
-          if (!tournamentStarted) {
-            const standingPicks = computeGroupStandings();
-            if (standingPicks.length > 0) {
-              saveGroupAdvancement(standingPicks).catch(() => {});
-            }
+          const standingPicks = computeGroupStandings();
+          if (standingPicks.length > 0) {
+            saveGroupAdvancement(standingPicks).catch(() => {});
           }
         }
         setSaveStatus(result.ok ? "saved" : "error");
