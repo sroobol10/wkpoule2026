@@ -137,7 +137,7 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                     </div>
                     <RankBadge change={score.rank_change} />
                     <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={24} />
-                    <span className={`flex-1 text-sm font-medium ${isCurrentUser ? 'text-wk-gold font-bold' : 'text-wk-text'}`}>{profile.username}</span>
+                    <Link href={`/deelnemers/${profile.id}`} className={`flex-1 text-sm font-medium hover:underline underline-offset-2 ${isCurrentUser ? 'text-wk-gold font-bold' : 'text-wk-text hover:text-wk-gold'}`}>{profile.username}</Link>
                     <span className="font-display text-base text-wk-gold shrink-0">{score.total_pts}<span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span></span>
                   </div>
                   {/* Rij 2 + 3: categorieën bovenop, waarden eronder */}
@@ -221,9 +221,9 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
                       <td className="sticky left-14 z-10 bg-inherit pl-2 pr-4 py-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={28} />
-                          <span className={`text-sm ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text'} whitespace-nowrap`}>
+                          <Link href={`/deelnemers/${profile.id}`} className={`text-sm whitespace-nowrap hover:underline underline-offset-2 ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text hover:text-wk-gold'}`}>
                             {profile.username}
-                          </span>
+                          </Link>
                         </div>
                       </td>
 
