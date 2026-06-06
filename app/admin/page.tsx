@@ -99,52 +99,29 @@ export default async function AdminPage() {
   const allUserIds = Object.keys(uniqueUsers)
   const groupMatchIds = (matches ?? []).filter((m) => m.stage === 'group').map((m) => m.id)
 
-  // Voorspellingen geteld per gebruiker
-  const { data: predCounts } = allUserIds.length > 0
-    ? await supabase
-        .from('predictions')
-        .select('user_id')
-        .in('user_id', allUserIds)
-        .in('match_id', groupMatchIds)
-        .not('predicted_home', 'is', null)
-    : { data: [] }
-
-  const predCountMap: Record<string, number> = {}
-  for (const p of predCounts ?? []) {
-    predCountMap[p.user_id] = (predCountMap[p.user_id] ?? 0) + 1
+  // Tel per gebruiker via individuele HEAD-count queries (parallel).
+  // .in() met 80+ UUIDs overschrijdt de PostgREST URL-limiet; .eq() per user is betrouwbaar.
+  async function countForUsers(table: string, userIds: string[]): Promise<Record<string, number>> {
+    const entries = await Promise.all(
+      userIds.map(async (uid) => {
+        const { count } = await sc.from(table)
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', uid)
+        return [uid, count ?? 0] as const
+      })
+    )
+    return Object.fromEntries(entries)
   }
 
-  // Jokers per gebruiker
-  const { data: jokerCounts } = allUserIds.length > 0
-    ? await supabase.from('jokers').select('user_id').in('user_id', allUserIds)
-    : { data: [] }
-
-  const jokerCountMap: Record<string, number> = {}
-  for (const j of jokerCounts ?? []) {
-    jokerCountMap[j.user_id] = (jokerCountMap[j.user_id] ?? 0) + 1
-  }
-
-  // Bracket picks per gebruiker
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: bracketCounts } = allUserIds.length > 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? await (supabase as any).from('bracket_predictions').select('user_id').in('user_id', allUserIds)
-    : { data: [] }
-
-  const bracketCountMap: Record<string, number> = {}
-  for (const b of (bracketCounts ?? []) as { user_id: string }[]) {
-    bracketCountMap[b.user_id] = (bracketCountMap[b.user_id] ?? 0) + 1
-  }
-
-  // Bonusvragen per gebruiker
-  const { data: bonusCounts } = allUserIds.length > 0
-    ? await supabase.from('bonus_answers').select('user_id').in('user_id', allUserIds)
-    : { data: [] }
-
-  const bonusCountMap: Record<string, number> = {}
-  for (const b of bonusCounts ?? []) {
-    bonusCountMap[b.user_id] = (bonusCountMap[b.user_id] ?? 0) + 1
-  }
+  const [predCountMap, jokerCountMap, bracketCountMap, bonusCountMap] =
+    allUserIds.length > 0
+      ? await Promise.all([
+          countForUsers('predictions', allUserIds),
+          countForUsers('jokers', allUserIds),
+          countForUsers('bracket_predictions', allUserIds),
+          countForUsers('bonus_answers', allUserIds),
+        ])
+      : [{}, {}, {}, {}]
 
   const totalGroupMatches = groupMatchIds.length
   const totalBonusQuestions = (questions ?? []).filter((q) => q.type === 'pre_tournament').length
