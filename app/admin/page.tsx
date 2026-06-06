@@ -58,24 +58,28 @@ export default async function AdminPage() {
   }
 
   // ── Deelnemers-overzicht ───────────────────────────────────────────────────
-  // Service client gebruiken zodat RLS niet blokkeert (admin ziet alle poules)
+  // Service client om RLS te omzeilen zodat admin ALLE poules en leden ziet
   const serviceClient = createServiceClient()
-  const { data: memberRows } = await serviceClient
-    .from('poule_members')
-    .select('user_id, poule_id, poules(id, name, is_general)')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sc = serviceClient as any
 
-  const memberUserIds = [...new Set((memberRows ?? []).map((m) => m.user_id))]
+  const [{ data: allPouleRows }, { data: memberRows }] = await Promise.all([
+    sc.from('poules').select('id, name, is_general'),
+    sc.from('poule_members').select('user_id, poule_id'),
+  ])
+
+  const memberUserIds = [...new Set(((memberRows ?? []) as { user_id: string }[]).map((m) => m.user_id))]
 
   // Poule-filter data: unieke poules + per user welke poules
   type PouleRef = { id: string; name: string; isGeneral: boolean }
   const poulesMap: Record<string, PouleRef> = {}
-  const userPouleIds: Record<string, string[]> = {}
-  for (const row of memberRows ?? []) {
-    const p = row.poules as { id: string; name: string; is_general: boolean } | null
-    if (!p) continue
+  for (const p of (allPouleRows ?? []) as { id: string; name: string; is_general: boolean }[]) {
     poulesMap[p.id] = { id: p.id, name: p.name, isGeneral: p.is_general }
+  }
+  const userPouleIds: Record<string, string[]> = {}
+  for (const row of (memberRows ?? []) as { user_id: string; poule_id: string }[]) {
     userPouleIds[row.user_id] ??= []
-    if (!userPouleIds[row.user_id].includes(p.id)) userPouleIds[row.user_id].push(p.id)
+    if (!userPouleIds[row.user_id].includes(row.poule_id)) userPouleIds[row.user_id].push(row.poule_id)
   }
   const allPoules = Object.values(poulesMap)
     .filter((p) => !p.isGeneral)

@@ -113,12 +113,12 @@ export default function DeelnemerClient({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0 border-b border-white/10">
+      <div className="flex overflow-x-auto scrollbar-none border-b border-white/10">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 font-mono text-[10px] tracking-[0.14em] uppercase border-b-2 -mb-px transition-colors whitespace-nowrap ${
+            className={`shrink-0 flex items-center gap-1.5 px-3 sm:px-4 py-2.5 font-mono text-[10px] tracking-[0.14em] uppercase border-b-2 -mb-px transition-colors whitespace-nowrap ${
               tab === t.id
                 ? 'border-wk-gold text-wk-gold'
                 : 'border-transparent text-wk-muted hover:text-wk-soft'
