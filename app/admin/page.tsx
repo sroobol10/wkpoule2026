@@ -62,11 +62,8 @@ export default async function AdminPage() {
   const serviceClient = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sc = serviceClient as any
-
-  const [{ data: allPouleRows }, { data: memberRows }] = await Promise.all([
-    sc.from('poules').select('id, name, is_general'),
-    sc.from('poule_members').select('user_id, poule_id'),
-  ])
+  const { data: allPouleRows } = await sc.from('poules').select('id, name, is_general')
+  const { data: memberRows }   = await sc.from('poule_members').select('user_id, poule_id')
 
   const memberUserIds = [...new Set(((memberRows ?? []) as { user_id: string }[]).map((m) => m.user_id))]
 
