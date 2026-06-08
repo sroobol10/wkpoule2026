@@ -1,14 +1,22 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { login } from '@/app/actions/auth'
 
+function LinkErrorBanner() {
+  const searchParams = useSearchParams()
+  if (searchParams.get('error') !== 'link_verlopen') return null
+  return (
+    <p className="text-sm text-wk-red bg-wk-red/10 border border-wk-red/30 rounded-lg px-3 py-2">
+      De resetlink is verlopen. Vraag een nieuwe aan via &ldquo;Wachtwoord vergeten&rdquo;.
+    </p>
+  )
+}
+
 export default function LoginPage() {
   const [state, formAction, isPending] = useActionState(login, null)
-  const searchParams = useSearchParams()
-  const linkError = searchParams.get('error') === 'link_verlopen'
 
   return (
     <div className="w-full max-w-md">
@@ -48,11 +56,9 @@ export default function LoginPage() {
             />
           </div>
 
-          {linkError && (
-            <p className="text-sm text-wk-red bg-wk-red/10 border border-wk-red/30 rounded-lg px-3 py-2">
-              De resetlink is verlopen. Vraag een nieuwe aan via "Wachtwoord vergeten".
-            </p>
-          )}
+          <Suspense>
+            <LinkErrorBanner />
+          </Suspense>
           {state?.error && (
             <p className="text-sm text-wk-red bg-wk-red/10 border border-wk-red/30 rounded-lg px-3 py-2">
               {state.error}
