@@ -26,6 +26,7 @@ export default async function AppLayout({
   const isAdmin = profile?.is_admin ?? false;
   const theme = profile?.theme ?? "default";
   const isRetro = theme === "retro-1988";
+  const isOostenrijk = theme === "oostenrijk";
 
   // Controleer of de gebruiker in een poule genaamd "ennovate" zit
   const { data: ennovatePoule } = await supabase
@@ -38,10 +39,36 @@ export default async function AppLayout({
 
   const isEnnovate = !!ennovatePoule;
   const defaultHeaderImg = isEnnovate ? "/world-cup-banner.jpg" : "/hero.jpg";
-  const headerImg = isRetro ? "/retro-1988.jpg" : defaultHeaderImg;
+  let headerImg = defaultHeaderImg;
+  if (isRetro) headerImg = "/retro-1988.jpg";
+  else if (isOostenrijk) headerImg = "/julia-hero.jpg";
+
+  let headerAlt = "WK 2026";
+  if (isRetro) headerAlt = "EK 1988 Retro";
+  else if (isOostenrijk) headerAlt = "Alpengloed";
+
+  let gradientB = "from-black/55 via-black/10 to-black/85";
+  if (isRetro)
+    gradientB =
+      "from-orange-900/60 via-transparent to-orange-900/80 animate-retro-shimmer";
+  else if (isOostenrijk)
+    gradientB = "from-red-900/60 via-transparent to-red-900/80";
+
+  let gradientR = "from-black/50 via-transparent to-black/40";
+  if (isRetro)
+    gradientR = "from-orange-900/50 via-transparent to-orange-900/40";
+  else if (isOostenrijk)
+    gradientR = "from-red-900/50 via-transparent to-red-900/40";
+
+  const gradientBClass = `absolute inset-0 bg-linear-to-b ${gradientB}`;
+  const gradientRClass = `absolute inset-0 bg-linear-to-r ${gradientR}`;
+
+  let themeClass = "";
+  if (isRetro) themeClass = "theme-retro";
+  else if (isOostenrijk) themeClass = "theme-oostenrijk";
 
   return (
-    <div className={`min-h-screen bg-wk-bg ${isRetro ? "theme-retro" : ""}`}>
+    <div className={`min-h-screen bg-wk-bg ${themeClass}`}>
       <NavProgress />
       <Sidebar isAdmin={isAdmin} username={username} />
       <BottomNav isAdmin={isAdmin} />
@@ -51,18 +78,14 @@ export default async function AppLayout({
         <div className="relative h-44 md:h-[346px] lg:h-86.5 xl:h-100.75 min-[1600px]:h-170 w-full overflow-hidden">
           <Image
             src={headerImg}
-            alt={isRetro ? "EK 1988 Retro" : "WK 2026"}
+            alt={headerAlt}
             fill
             className={`object-cover object-center ${isRetro ? "animate-ken-burns" : ""}`}
             priority
           />
           {/* Gradient overlays */}
-          <div
-            className={`absolute inset-0 bg-gradient-to-b ${isRetro ? "from-orange-900/60 via-transparent to-orange-900/80 animate-retro-shimmer" : "from-black/55 via-black/10 to-black/85"}`}
-          />
-          <div
-            className={`absolute inset-0 bg-gradient-to-r ${isRetro ? "from-orange-900/50 via-transparent to-orange-900/40" : "from-black/50 via-transparent to-black/40"}`}
-          />
+          <div className={gradientBClass} />
+          <div className={gradientRClass} />
 
           {/* Top chrome */}
           <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-6 md:px-8 pt-5">

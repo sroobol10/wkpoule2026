@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 
 export type ProfileResult = { ok: true } | { ok: false; error: string }
 
-export async function setTheme(theme: 'default' | 'retro-1988'): Promise<ProfileResult> {
+export async function setTheme(theme: 'default' | 'retro-1988' | 'oostenrijk'): Promise<ProfileResult> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }

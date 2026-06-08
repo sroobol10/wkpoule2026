@@ -395,20 +395,31 @@ export default function ProfielClient({
           {(
             [
               {
-                id: "default",
+                id: "default" as const,
                 label: "Standaard",
                 desc: "Donker stadion-thema",
                 preview: "bg-[#0B0E14] border-[#F4B92E]/30",
                 dot: "bg-[#F4B92E]",
               },
               {
-                id: "retro-1988",
+                id: "retro-1988" as const,
                 label: "EK 1988 Retro",
                 desc: "Oranje · Strijd · Passie · Glorie",
                 preview: "bg-[#2A0800] border-[#FF6600]/40",
                 dot: "bg-[#FF6600]",
               },
-            ] as const
+              ...(profile.id === "47121e9c-2ea2-463c-aa48-21fe28d33b57"
+                ? [
+                    {
+                      id: "oostenrijk" as const,
+                      label: "Alpengloed",
+                      desc: "Rood · Wit · Berglucht · Glorie",
+                      preview: "bg-[#1A0000] border-[#EF3340]/40",
+                      dot: "bg-[#EF3340]",
+                    },
+                  ]
+                : []),
+            ]
           ).map((t) => {
             const active = currentTheme === t.id;
             return (
