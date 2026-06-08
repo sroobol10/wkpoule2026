@@ -565,13 +565,17 @@ function DeelnemersTab({
 }) {
   const [filterPoule, setFilterPoule] = useState<string | null>(null)
 
+  const privatePouleIds = new Set(allPoules.map((p) => p.id))
+
   const allComplete = (p: Participant) =>
     p.predictions === totalGroupMatches &&
     p.jokers === 12 &&
     p.bracketPicks === 32 &&
     p.bonusAnswers >= totalBonusQuestions
 
-  const visible = filterPoule
+  const visible = filterPoule === '__geen_prive__'
+    ? participants.filter((p) => !p.pouleIds.some((id) => privatePouleIds.has(id)))
+    : filterPoule
     ? participants.filter((p) => p.pouleIds.includes(filterPoule))
     : participants
 
@@ -588,6 +592,16 @@ function DeelnemersTab({
           }`}
         >
           Alle ({participants.length})
+        </button>
+        <button
+          onClick={() => setFilterPoule('__geen_prive__')}
+          className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
+            filterPoule === '__geen_prive__'
+              ? 'bg-wk-red/10 border-wk-red/40 text-wk-red'
+              : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+          }`}
+        >
+          Geen privé-poule ({participants.filter((p) => !p.pouleIds.some((id) => privatePouleIds.has(id))).length})
         </button>
         {allPoules.map((poule) => {
           const count = participants.filter((p) => p.pouleIds.includes(poule.id)).length
