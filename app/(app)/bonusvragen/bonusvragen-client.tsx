@@ -89,7 +89,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
               { label: 'Topscorer',                    pts: '25 punten' },
               { label: 'Beste speler',                 pts: '15 punten' },
               { label: 'GOAT-duel',                    pts: '10 punten' },
-              { label: 'Gedoseerde groepsfase',        pts: 'Max. 15 punten' },
+              { label: 'Gedoseerde groepsfase',        pts: 'Max. 10 punten' },
               { label: 'Dagelijkse vragen',            pts: '1 punt' },
             ].map(({ label, pts }) => (
               <div key={label} className="flex items-center justify-between gap-4">
@@ -98,7 +98,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
               </div>
             ))}
             <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-              Gedoseerde groepsfase: maximaal 15 punten, -1 voor elk gelijkspel dat je ernaast zit.
+              Gedoseerde groepsfase: maximaal 10 punten, -1 voor elk gelijkspel dat je ernaast zit.
             </p>
           </div>
         )}

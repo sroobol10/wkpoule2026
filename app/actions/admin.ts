@@ -290,14 +290,11 @@ export async function setBonusCorrectAnswer(
   const { supabase } = await assertAdmin()
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
-  // Fetch question to determine point value
   const { data: question } = await supabase
     .from('bonus_questions')
-    .select('type')
+    .select('type, question')
     .eq('id', questionId)
     .single()
-
-  const pointsForCorrect = question?.type === 'pre_tournament' ? 5 : 2
 
   const { error } = await supabase
     .from('bonus_questions')
@@ -312,9 +309,21 @@ export async function setBonusCorrectAnswer(
     .eq('question_id', questionId)
 
   if (answers && answers.length > 0) {
+    // "Gedoseerde groepsfase": max 10 pt, -1 per gelijkspel ernaast, min 0
+    const isGedoseerd = question?.question?.toLowerCase().includes('gedoseerd')
+    const correctNum = isGedoseerd ? parseInt(correctAnswer.trim(), 10) : NaN
+
+    const pointsForCorrect = question?.type === 'pre_tournament' ? 5 : 2
     const normalized = correctAnswer.trim().toLowerCase()
+
     for (const ans of answers) {
-      const pts = ans.answer.trim().toLowerCase() === normalized ? pointsForCorrect : 0
+      let pts: number
+      if (isGedoseerd && !isNaN(correctNum)) {
+        const userNum = parseInt(ans.answer.trim(), 10)
+        pts = isNaN(userNum) ? 0 : Math.max(0, 10 - Math.abs(userNum - correctNum))
+      } else {
+        pts = ans.answer.trim().toLowerCase() === normalized ? pointsForCorrect : 0
+      }
       await supabase.from('bonus_answers').update({ points_awarded: pts }).eq('id', ans.id)
     }
     await recalcPouleScores(supabase, [...new Set(answers.map((a) => a.user_id))])
