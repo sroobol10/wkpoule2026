@@ -73,13 +73,14 @@ export default async function KnockoutPage() {
   // Sleutel = de ronde waaruit ze komen (r32 → wie staat in r16, etc.)
   const { data: koMatches } = await supabase
     .from('matches')
-    .select('match_number, stage, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .select('match_number, stage, kickoff_at, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .order('kickoff_at', { ascending: true })
     .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
 
   // slot → werkelijke winnaar (voor weergave in de bracket)
   const actualWinners: Record<number, string> = {}
   for (const m of koMatches ?? []) {
-    if (m.result_entered && m.match_number && m.home_score !== null && m.away_score !== null && m.home_team_id && m.away_team_id) {
+    if (m.match_number && m.result_entered && m.home_score !== null && m.away_score !== null && m.home_team_id && m.away_team_id) {
       actualWinners[m.match_number] = m.home_score > m.away_score ? m.home_team_id : m.away_team_id
     }
   }

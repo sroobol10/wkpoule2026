@@ -3,7 +3,8 @@
 import { useState, useTransition, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { saveBracketPick, clearBracketSlots } from '@/app/actions/bracket'
-import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
+import { BRACKET, KO_KICKOFFS, assignThirdPlaceSlots } from '@/lib/bracket'
+import { formatInAmsterdam } from '@/lib/format'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -281,6 +282,7 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               isPending={isPending}
               onPick={(teamId) => pickWinner(m.slot, teamId)}
               actualWinnerId={actualWinners[matchDef.slot] ?? null}
+              kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
               advancedTeams={advancedSet}
               stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
               pts={ptsPerSlot[matchDef.slot] ?? null}
@@ -301,6 +303,7 @@ function BracketMatchCard({
   isPending,
   onPick,
   actualWinnerId,
+  kickoffAt,
   advancedTeams,
   stageHasResults,
   pts,
@@ -311,6 +314,7 @@ function BracketMatchCard({
   isPending: boolean
   onPick: (teamId: string) => void
   actualWinnerId: string | null
+  kickoffAt: string | null
   advancedTeams: Set<string>
   stageHasResults: boolean
   pts: number | null
@@ -330,9 +334,16 @@ function BracketMatchCard({
     }`}>
       {/* Header */}
       <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
-        <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
-          Wedstrijd {match.slot}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
+            Wedstrijd {match.slot}
+          </span>
+          {kickoffAt && (
+            <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest">
+              · {formatInAmsterdam(kickoffAt, 'd MMM HH:mm')}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {isCorrect && (
             <span className="font-mono text-[9px] font-bold text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase">

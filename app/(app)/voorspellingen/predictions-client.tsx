@@ -12,6 +12,7 @@ import { toggleJoker } from "@/app/actions/jokers";
 import { getMatchPrediction } from "@/app/actions/ai-prediction";
 import { formatInAmsterdam } from "@/lib/format";
 import { compareThirds, type ThirdEntry } from "@/lib/third-place";
+import { sortGroupStandings, type TeamStat } from "@/lib/group-standings";
 import { getTeamProfile } from "@/lib/team-profiles";
 import type { AiPrediction } from "@/app/actions/ai-prediction";
 
@@ -178,9 +179,14 @@ export default function PredictionsClient({
         else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1; }
       }
 
-      const sorted = Object.entries(st).sort(
-        ([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf,
-      );
+      const groupMatchData = gm
+        .filter((m) => m.home_team && m.away_team)
+        .map((m) => {
+          const s = scoresSnapshot[m.id]!;
+          return { homeTeamId: m.home_team!.id, awayTeamId: m.away_team!.id, homeGoals: Number(s.home), awayGoals: Number(s.away) };
+        });
+
+      const sorted = sortGroupStandings(Object.entries(st) as [string, TeamStat][], groupMatchData, teamNames);
 
       if (sorted[0]) picks.push({ teamId: sorted[0][0], position: 1 });
       if (sorted[1]) picks.push({ teamId: sorted[1][0], position: 2 });
@@ -248,9 +254,13 @@ export default function PredictionsClient({
           st[m.away_team.id].points += 1;
         }
       }
-      const sorted = Object.entries(st).sort(
-        ([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf,
-      );
+      const groupMatchData = gm
+        .filter((m) => { const s = scores[m.id]; return s && s.home !== "" && s.away !== "" && m.home_team && m.away_team; })
+        .map((m) => {
+          const s = scores[m.id]!;
+          return { homeTeamId: m.home_team!.id, awayTeamId: m.away_team!.id, homeGoals: Number(s.home), awayGoals: Number(s.away) };
+        });
+      const sorted = sortGroupStandings(Object.entries(st) as [string, TeamStat][], groupMatchData, teamNames);
       result[group] = [
         sorted[0]?.[0] ?? null,
         sorted[1]?.[0] ?? null,
@@ -1232,9 +1242,20 @@ function ActualGroupStandingsInline({
 
   if (playedCount === 0) return null;
 
-  const sorted = Object.entries(st).sort(
-    ([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf,
-  );
+  const teamNamesActual: Record<string, string> = {};
+  for (const m of groupMatches) {
+    if (m.home_team) teamNamesActual[m.home_team.id] = m.home_team.name;
+    if (m.away_team) teamNamesActual[m.away_team.id] = m.away_team.name;
+  }
+  const playedGroupMatches = groupMatches
+    .filter((m) => m.result_entered && m.home_score != null && m.away_score != null && m.home_team && m.away_team)
+    .map((m) => ({ homeTeamId: m.home_team!.id, awayTeamId: m.away_team!.id, homeGoals: m.home_score!, awayGoals: m.away_score! }));
+  const sortedIds = sortGroupStandings(
+    Object.entries(st).map(([id, s]) => [id, { points: s.points, gd: s.gd, gf: s.gf }]) as [string, TeamStat][],
+    playedGroupMatches,
+    teamNamesActual,
+  ).map(([id]) => id);
+  const sorted = sortedIds.map((id) => [id, st[id]] as [string, typeof st[string]]);
 
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
@@ -1337,9 +1358,18 @@ function GroupStandingsInline({
     }
   }
 
-  const sorted = Object.entries(st).sort(
-    ([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf,
-  );
+  const teamNamesInline: Record<string, string> = {};
+  for (const m of groupMatches) {
+    if (m.home_team) teamNamesInline[m.home_team.id] = m.home_team.name;
+    if (m.away_team) teamNamesInline[m.away_team.id] = m.away_team.name;
+  }
+  const filledGroupMatches = groupMatches
+    .filter((m) => { const s = scores[m.id]; return s && s.home !== "" && s.away !== "" && m.home_team && m.away_team; })
+    .map((m) => {
+      const s = scores[m.id]!;
+      return { homeTeamId: m.home_team!.id, awayTeamId: m.away_team!.id, homeGoals: Number(s.home), awayGoals: Number(s.away) };
+    });
+  const sorted = sortGroupStandings(Object.entries(st) as [string, TeamStat][], filledGroupMatches, teamNamesInline);
 
   // Nummer 3 die door is, op basis van beste-8-berekening
   const advancingThird = advancementPicks[2];

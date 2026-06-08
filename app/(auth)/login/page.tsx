@@ -2,10 +2,13 @@
 
 import { useActionState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { login } from '@/app/actions/auth'
 
 export default function LoginPage() {
   const [state, formAction, isPending] = useActionState(login, null)
+  const searchParams = useSearchParams()
+  const linkError = searchParams.get('error') === 'link_verlopen'
 
   return (
     <div className="w-full max-w-md">
@@ -45,6 +48,11 @@ export default function LoginPage() {
             />
           </div>
 
+          {linkError && (
+            <p className="text-sm text-wk-red bg-wk-red/10 border border-wk-red/30 rounded-lg px-3 py-2">
+              De resetlink is verlopen. Vraag een nieuwe aan via "Wachtwoord vergeten".
+            </p>
+          )}
           {state?.error && (
             <p className="text-sm text-wk-red bg-wk-red/10 border border-wk-red/30 rounded-lg px-3 py-2">
               {state.error}
@@ -60,7 +68,12 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-wk-muted">
+        <p className="mt-4 text-center">
+          <Link href="/wachtwoord-vergeten" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-widest uppercase transition-colors">
+            Wachtwoord vergeten?
+          </Link>
+        </p>
+        <p className="mt-3 text-center text-sm text-wk-muted">
           Nog geen account?{' '}
           <Link href="/registreren" className="font-semibold text-wk-gold hover:opacity-80 transition-opacity">
             Registreren
