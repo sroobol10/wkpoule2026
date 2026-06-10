@@ -99,32 +99,32 @@ export default async function AdminPage() {
   const allUserIds = Object.keys(uniqueUsers)
   const groupMatchIds = (matches ?? []).filter((m) => m.stage === 'group').map((m) => m.id)
 
-  // Tel per gebruiker via individuele HEAD-count queries (parallel).
-  // .in() met 80+ UUIDs overschrijdt de PostgREST URL-limiet; .eq() per user is betrouwbaar.
-  async function countForUsers(table: string, userIds: string[]): Promise<Record<string, number>> {
-    const entries = await Promise.all(
-      userIds.map(async (uid) => {
-        const { count } = await sc.from(table)
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', uid)
-        return [uid, count ?? 0] as const
-      })
+  // Chunked .in() queries: max 20 user-IDs per request → URL blijft kort (~740 chars).
+  // Voorkomt zowel URL-lengte issues als call-stack problemen van 200 parallelle requests.
+  async function countPerUser(table: string, userIds: string[], rowLimit = 2000): Promise<Record<string, number>> {
+    if (userIds.length === 0) return {}
+    const CHUNK = 20
+    const chunks: string[][] = []
+    for (let i = 0; i < userIds.length; i += CHUNK) chunks.push(userIds.slice(i, i + CHUNK))
+    const results = await Promise.all(
+      chunks.map((chunk) => sc.from(table).select('user_id').in('user_id', chunk).limit(rowLimit))
     )
-    return Object.fromEntries(entries)
+    const map: Record<string, number> = {}
+    for (const { data } of results)
+      for (const row of (data ?? []) as { user_id: string }[])
+        map[row.user_id] = (map[row.user_id] ?? 0) + 1
+    return map
   }
 
-  const [predCountMap, jokerCountMap, bracketCountMap, bonusCountMap] =
-    allUserIds.length > 0
-      ? await Promise.all([
-          countForUsers('predictions', allUserIds),
-          countForUsers('jokers', allUserIds),
-          countForUsers('bracket_predictions', allUserIds),
-          countForUsers('bonus_answers', allUserIds),
-        ])
-      : [{}, {}, {}, {}]
+  const [predCountMap, jokerCountMap, bracketCountMap, bonusCountMap] = await Promise.all([
+    countPerUser('predictions',        allUserIds),
+    countPerUser('jokers',             allUserIds),
+    countPerUser('bracket_predictions',allUserIds),
+    countPerUser('bonus_answers',      allUserIds),
+  ])
 
   const totalGroupMatches = groupMatchIds.length
-  const totalBonusQuestions = (questions ?? []).filter((q) => q.type === 'pre_tournament').length
+  const totalBonusQuestions = (questions ?? []).length
 
   // Emails ophalen via service role (auth.users is niet toegankelijk via reguliere client)
   const { data: { users: authUsers } } = await serviceClient.auth.admin.listUsers({ perPage: 1000 })
