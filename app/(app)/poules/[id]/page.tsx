@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { AvatarCircle } from '@/components/avatar-circle'
 import DeletePouleButton from './delete-poule-button'
 import SharePouleButton from './share-poule-button'
+import { Podium } from './podium'
 
 export default async function PoulePage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params
@@ -113,6 +114,19 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
           )}
         </div>
       </div>
+
+      {/* Podium voor de top 3 */}
+      {ranked.length > 0 && (
+        <Podium
+          currentUserId={user.id}
+          entries={ranked.slice(0, 3).map(({ profile, score }) => ({
+            id: profile.id,
+            username: profile.username,
+            avatarUrl: profile.avatar_url,
+            totalPts: score.total_pts,
+          }))}
+        />
+      )}
 
       {/* Leaderboard tabel */}
       <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
