@@ -49,14 +49,13 @@ export default async function AppLayout({
 
   let gradientB = "from-black/55 via-black/10 to-black/85";
   if (isRetro)
-    gradientB =
-      "from-orange-900/60 via-transparent to-orange-900/80 animate-retro-shimmer";
+    gradientB = "from-black/70 via-transparent to-black/90";
   else if (isOostenrijk)
     gradientB = "from-red-900/60 via-transparent to-red-900/80";
 
   let gradientR = "from-black/50 via-transparent to-black/40";
   if (isRetro)
-    gradientR = "from-orange-900/50 via-transparent to-orange-900/40";
+    gradientR = "from-black/60 via-transparent to-black/50";
   else if (isOostenrijk)
     gradientR = "from-red-900/50 via-transparent to-red-900/40";
 

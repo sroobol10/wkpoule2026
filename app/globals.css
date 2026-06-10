@@ -129,17 +129,18 @@
 /* Alle wk-* kleuren worden overschreven voor het retro-thema */
 
 .theme-retro {
-  /* ORANJE — wij zijn Nederlanders, je moet het VOELEN */
-  --color-wk-bg:      #3A1200;   /* echt donker oranje — duidelijk geen blauw-zwart */
-  --color-wk-bg2:     #4D1A00;   /* warmer, meer oranje */
-  --color-wk-surface: #622400;   /* kaartjes: fel oranje-bruin */
-  --color-wk-text:    #FFF8EE;   /* warm crème — goed contrast op oranje */
-  --color-wk-soft:    #FFD070;   /* helder amber — zichtbaar als tekst */
-  --color-wk-muted:   #DD9050;   /* oranje-bruin, leesbaar */
-  --color-wk-red:     #FF6200;   /* de échte Nederlandse Oranje */
-  --color-wk-gold:    #FFCC00;   /* leeuw-goud, helder */
-  --color-wk-blue:    #1A4EB8;   /* Nederlandse vlag blauw */
-  --color-wk-green:   #2A8A40;   /* groen */
+  /* ZWART · WIT · ORANJE — EK 1988, maximale leesbaarheid */
+  --color-wk-bg:      #080808;   /* bijna zwart */
+  --color-wk-bg2:     #141414;   /* donker antraciet */
+  --color-wk-surface: #1E1E1E;   /* kaartjes: donker grijs */
+  --color-wk-text:    #FFFFFF;   /* puur wit — maximaal contrast */
+  --color-wk-soft:    #E8E8E8;   /* licht grijs voor subtekst */
+  --color-wk-muted:   #888888;   /* neutraal grijs */
+  --color-wk-red:     #FF5500;   /* Neder­lands oranje — de kleur */
+  --color-wk-gold:    #FF5500;   /* oranje als primair accent */
+  --color-wk-gold-raw: 255 85 0; /* voor opacity-varianten */
+  --color-wk-blue:    #0055A4;   /* Nederlandse vlag blauw */
+  --color-wk-green:   #00AA44;   /* helder groen */
 }
 
 .theme-retro body,
