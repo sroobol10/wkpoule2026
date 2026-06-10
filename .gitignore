@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# lokale hulpscripts (niet committen)
+scripts/reset-password.ts
+scripts/diagnose-advancement.ts
+scripts/fix-advancement.ts
+scripts/check-ko-matches.ts

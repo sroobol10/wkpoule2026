@@ -88,7 +88,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
             {[
               { label: 'Topscorer',                    pts: '25 punten' },
               { label: 'Beste speler',                 pts: '15 punten' },
-              { label: 'GOAT-duel',                    pts: '10 punten' },
+              { label: 'GOAT-duel',                    pts: '5 punten' },
               { label: 'Gedoseerde groepsfase',        pts: 'Max. 10 punten' },
               { label: 'Dagelijkse vragen',            pts: '1 punt' },
             ].map(({ label, pts }) => (
@@ -105,33 +105,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
       </div>
 
       <div className={daily.length > 0 ? "lg:grid lg:grid-cols-2 lg:gap-8 space-y-8 lg:space-y-0" : "space-y-8"}>
-        {/* Links: Vóór het toernooi */}
-        {preTournament.length > 0 && (
-          <section>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="font-mono text-[10px] text-wk-red border border-wk-red/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-                Vóór het toernooi
-              </span>
-              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-                {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} beantwoord
-              </span>
-            </div>
-            <div className="space-y-3">
-              {preTournament.map((q) => (
-                <QuestionCard
-                  key={q.id}
-                  question={q}
-                  existingAnswer={answerMap[q.id] ?? null}
-                  accentClass="text-wk-red"
-                  teams={isTeamQuestion(q.question) ? teams : []}
-                  tournamentStarted={anyMatchPlayed}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Rechts: Dagelijkse vragen */}
+        {/* Links: Dagelijkse vragen (eerst) */}
         {daily.length > 0 && (
           <section>
             <div className="flex items-center gap-3 mb-3">
@@ -148,10 +122,34 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                   key={q.id}
                   question={q}
                   existingAnswer={answerMap[q.id] ?? null}
-                  accentClass="text-wk-blue"
                   teams={[]}
                   effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
                   dayMatches={q.unlock_date ? (matchesByDay[q.unlock_date] ?? []) : []}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Rechts: Vóór het toernooi */}
+        {preTournament.length > 0 && (
+          <section>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="font-mono text-[10px] text-wk-red border border-wk-red/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+                Vóór het toernooi
+              </span>
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+                {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} beantwoord
+              </span>
+            </div>
+            <div className="space-y-3">
+              {preTournament.map((q) => (
+                <QuestionCard
+                  key={q.id}
+                  question={q}
+                  existingAnswer={answerMap[q.id] ?? null}
+                  teams={isTeamQuestion(q.question) ? teams : []}
+                  tournamentStarted={anyMatchPlayed}
                 />
               ))}
             </div>
@@ -171,7 +169,6 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
 function QuestionCard({
   question,
   existingAnswer,
-  accentClass,
   teams,
   tournamentStarted = false,
   effectiveDeadline = null,
@@ -179,7 +176,6 @@ function QuestionCard({
 }: {
   question: Question
   existingAnswer: AnswerEntry | null
-  accentClass: string
   teams: Team[]
   tournamentStarted?: boolean
   effectiveDeadline?: string | null
@@ -235,7 +231,7 @@ function QuestionCard({
     handleSave(team.name)
   }
 
-  const accentBg = accentClass === 'text-wk-red' ? 'bg-wk-red' : 'bg-wk-blue'
+  const accentBg = (saved || !!existingAnswer?.answer) ? 'bg-wk-blue' : 'bg-wk-gold'
 
   return (
     <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
@@ -358,8 +354,21 @@ function QuestionCard({
                     </div>
                   )}
                 </div>
+              ) : question.type === 'daily' ? (
+                /* ── Dropdown voor dagelijkse vragen met opties ── */
+                <select
+                  value={answer}
+                  onChange={(e) => { setAnswer(e.target.value); setSaved(false); handleSave(e.target.value) }}
+                  disabled={isPending}
+                  className="w-full rounded bg-wk-bg2 border border-white/10 px-3 py-2.5 text-sm text-wk-text focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition appearance-none"
+                >
+                  <option value="" disabled>Kies een optie…</option>
+                  {(question.answer_options ?? []).map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
               ) : (
-                /* ── Knoppen voor kleine lijsten ── */
+                /* ── Knoppen voor kleine lijsten (pre-tournament) ── */
                 <div className="flex flex-wrap gap-2">
                   {(question.answer_options ?? []).map((opt) => (
                     <button

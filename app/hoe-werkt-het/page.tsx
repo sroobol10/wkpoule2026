@@ -61,8 +61,8 @@ const STEPS = [
     scores: [
       { label: 'Topscorer', pts: '25' },
       { label: 'Beste speler', pts: '15' },
-      { label: 'GOAT-duel', pts: '10' },
-      { label: 'Gedoseerde groepsfase', pts: 'max. 15' },
+      { label: 'GOAT-duel', pts: '5' },
+      { label: 'Gedoseerde groepsfase', pts: 'max. 10' },
       { label: 'Dagelijkse vraag', pts: '1' },
     ],
   },
