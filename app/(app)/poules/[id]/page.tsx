@@ -5,6 +5,8 @@ import { AvatarCircle } from '@/components/avatar-circle'
 import DeletePouleButton from './delete-poule-button'
 import SharePouleButton from './share-poule-button'
 import { Podium } from './podium'
+import { Bergetappe } from './bergetappe'
+import { LeaderboardTabs } from './leaderboard-tabs'
 
 export default async function PoulePage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params
@@ -80,6 +82,22 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
 
   const isOwner = poule.creator_id === user.id
 
+  // De bergetappe-weergave is voorlopig alleen beschikbaar in de Ennovate-poule
+  const showBergetappe = poule.name.toLowerCase().includes('ennovate')
+
+  // Toernooivoortgang voor de bergetappe: gespeelde wedstrijden t.o.v. het totaal
+  let tournamentProgress = 0
+  if (showBergetappe) {
+    const { count: totalMatches } = await supabase
+      .from('matches')
+      .select('id', { count: 'exact', head: true })
+    const { count: playedMatches } = await supabase
+      .from('matches')
+      .select('id', { count: 'exact', head: true })
+      .eq('result_entered', true)
+    tournamentProgress = totalMatches ? (playedMatches ?? 0) / totalMatches : 0
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -114,6 +132,24 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
           )}
         </div>
       </div>
+
+      {/* Twee weergaven: klassiek klassement of de bergetappe */}
+      <LeaderboardTabs
+        bergetappe={
+          showBergetappe ? (
+            <Bergetappe
+              currentUserId={user.id}
+              progress={tournamentProgress}
+              entries={ranked.map(({ profile, score }) => ({
+                id: profile.id,
+                username: profile.username,
+                avatarUrl: profile.avatar_url,
+                totalPts: score.total_pts,
+              }))}
+            />
+          ) : undefined
+        }
+      >
 
       {/* Podium voor de top 3 */}
       {ranked.length > 0 && (
@@ -292,6 +328,8 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
           </div>
         ))}
       </div>
+
+      </LeaderboardTabs>
 
       {/* Owner info */}
       {isOwner && !poule.is_general && (

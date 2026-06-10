@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { isTournamentLocked } from '@/lib/tournament-lock'
 export type SaveResult = { ok: true } | { ok: false; error: string }
 
 export async function saveBonusAnswer(
@@ -20,16 +21,9 @@ export async function saveBonusAnswer(
 
   if (!question) return { ok: false, error: 'Vraag niet gevonden.' }
 
-  // Pre-tournament vragen gaan op slot zodra de eerste wedstrijd gespeeld is
-  if (question.type === 'pre_tournament') {
-    const { count } = await supabase
-      .from('matches')
-      .select('id', { count: 'exact', head: true })
-      .eq('stage', 'group')
-      .eq('result_entered', true)
-    if ((count ?? 0) > 0) {
-      return { ok: false, error: 'De deadline voor pre-tournament vragen is verstreken.' }
-    }
+  // Pre-tournament vragen gaan op slot bij de aftrap van de eerste WK-wedstrijd
+  if (question.type === 'pre_tournament' && (await isTournamentLocked(supabase))) {
+    return { ok: false, error: 'De deadline voor pre-tournament vragen is verstreken.' }
   }
 
   if (question.unlock_date) {

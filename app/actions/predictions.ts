@@ -2,8 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { isTournamentLocked } from '@/lib/tournament-lock'
 
 export type SaveResult = { ok: true } | { ok: false; error: string }
+
+const LOCKED_ERROR = 'Het WK is begonnen — voorspellingen zijn vergrendeld.'
 
 export async function savePredictions(
   predictions: { matchId: string; home: number; away: number }[]
@@ -11,6 +14,8 @@ export async function savePredictions(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
+
+  if (await isTournamentLocked(supabase)) return { ok: false, error: LOCKED_ERROR }
 
   // Filter op wedstrijden die nog niet begonnen zijn
   const matchIds = predictions.map((p) => p.matchId)
@@ -51,6 +56,8 @@ export async function saveGroupAdvancement(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
+
+  if (await isTournamentLocked(supabase)) return { ok: false, error: LOCKED_ERROR }
 
   // Verwijder altijd alle bestaande entries en schrijf volledig opnieuw.
   // Partieel deleten op team_id laat stale entries achter als een team

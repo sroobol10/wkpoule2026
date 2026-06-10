@@ -2,13 +2,18 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { isTournamentLocked } from '@/lib/tournament-lock'
 
 export type BracketResult = { ok: true } | { ok: false; error: string }
+
+const LOCKED_ERROR = 'Het WK is begonnen — de bracket is vergrendeld.'
 
 export async function saveBracketPick(slot: number, teamId: string): Promise<BracketResult> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
+
+  if (await isTournamentLocked(supabase)) return { ok: false, error: LOCKED_ERROR }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (supabase as any)
@@ -28,6 +33,8 @@ export async function clearBracketSlots(slots: number[]): Promise<BracketResult>
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
+
+  if (await isTournamentLocked(supabase)) return { ok: false, error: LOCKED_ERROR }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (supabase as any)

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { isTournamentLocked } from '@/lib/tournament-lock'
 
 export type KnockoutSaveResult = { ok: true } | { ok: false; error: string }
 
@@ -12,6 +13,12 @@ export async function saveKnockoutPrediction(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Niet ingelogd.' }
+
+  // KO-voorspellingen (wie gaat door t/m de finale) horen bij de
+  // pre-tournament invul-ronde en gaan dicht bij de eerste aftrap
+  if (await isTournamentLocked(supabase)) {
+    return { ok: false, error: 'Het WK is begonnen — voorspellingen zijn vergrendeld.' }
+  }
 
   // Controleer of wedstrijd nog niet begonnen is
   const { data: match } = await supabase

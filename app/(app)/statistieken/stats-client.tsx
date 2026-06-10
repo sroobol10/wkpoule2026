@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { AvatarCircle } from '@/components/avatar-circle'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -148,6 +149,37 @@ export default function StatsClient({
           {totalDeelnemers} {totalDeelnemers === 1 ? 'deelnemer' : 'deelnemers'}
         </p>
       </div>
+
+      {/* GOAT-duel teaser */}
+      <Link
+        href="/goat"
+        className="block animate-fade-up bg-wk-surface border border-white/10 rounded-xl hover:border-wk-gold/40 transition-colors group overflow-hidden"
+        style={{ animationDelay: '25ms' }}
+      >
+        <div className="flex items-stretch gap-3 sm:gap-5 px-4 sm:px-5">
+          <Image
+            src="/messi.png"
+            alt="Lionel Messi"
+            width={96}
+            height={128}
+            className="h-20 sm:h-28 w-auto object-contain object-bottom self-end shrink-0 drop-shadow-lg group-hover:scale-105 transition-transform"
+          />
+          <div className="min-w-0 flex-1 py-4 self-center text-center">
+            <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Bonusvraag · Het duel</p>
+            <p className="font-display text-lg text-wk-text uppercase leading-none">🐐 Messi vs Ronaldo</p>
+            <p className="font-mono text-[10px] text-wk-muted mt-1.5 tracking-[0.12em]">
+              Bekijk de tussenstand van het GOAT-duel en wie er voor wie koos
+            </p>
+          </div>
+          <Image
+            src="/ronaldo.png"
+            alt="Cristiano Ronaldo"
+            width={96}
+            height={128}
+            className="h-20 sm:h-28 w-auto object-contain object-bottom self-end shrink-0 drop-shadow-lg group-hover:scale-105 transition-transform"
+          />
+        </div>
+      </Link>
 
       {/* Nauwkeurigheid */}
       {accuracyStats && (
@@ -547,6 +579,17 @@ function MatchDistRow({
           {match.total_predictions === 0 && (
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">Geen voorspellingen.</p>
           )}
+          <div className="pt-2">
+            <Link
+              href={`/wedstrijd/${match.id}`}
+              className="inline-flex items-center gap-1 font-mono text-[10px] text-wk-gold tracking-[0.14em] uppercase hover:underline underline-offset-2"
+            >
+              Bekijk het duel — wie koos wat
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          </div>
         </div>
       )}
     </div>

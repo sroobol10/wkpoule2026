@@ -11,6 +11,7 @@ import {
 import { toggleJoker } from "@/app/actions/jokers";
 import { getMatchPrediction } from "@/app/actions/ai-prediction";
 import { formatInAmsterdam } from "@/lib/format";
+import { GROUP_STAGE_DEADLINE } from "@/lib/constants";
 import { compareThirds, type ThirdEntry } from "@/lib/third-place";
 import { sortGroupStandings, type TeamStat } from "@/lib/group-standings";
 import { getTeamProfile } from "@/lib/team-profiles";
@@ -545,7 +546,9 @@ export default function PredictionsClient({
           <div className="divide-y divide-white/5">
             {groupMatches.map((match) => {
               const locked =
-                new Date(match.kickoff_at) <= now || match.result_entered;
+                now >= GROUP_STAGE_DEADLINE ||
+                new Date(match.kickoff_at) <= now ||
+                match.result_entered;
               const score = scores[match.id];
               const pred = predMap[match.id];
               const pts = pred?.points_awarded;
