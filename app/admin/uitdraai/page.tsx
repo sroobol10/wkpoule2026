@@ -47,9 +47,9 @@ export default async function UitdraaiPage() {
   const teamMap = Object.fromEntries((allTeams ?? []).map((t: { id: string; name: string }) => [t.id, t.name]))
 
   // Chunked queries — max 20 user-IDs per request om URL-lengte limiet te vermijden
-  async function fetchAllChunked(table: string, select: string, rowLimitPerChunk = 2000) {
+  async function fetchAllChunked(table: string, select: string, rowLimitPerChunk = 1000) {
     if (userIds.length === 0) return []
-    const CHUNK = 20
+    const CHUNK = 10  // 10 users × max 72 rows = 720 < PostgREST default max_rows (1000)
     const chunks: string[][] = []
     for (let i = 0; i < userIds.length; i += CHUNK) chunks.push(userIds.slice(i, i + CHUNK))
     const results = await Promise.all(

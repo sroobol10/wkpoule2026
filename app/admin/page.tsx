@@ -101,9 +101,9 @@ export default async function AdminPage() {
 
   // Chunked .in() queries: max 20 user-IDs per request → URL blijft kort (~740 chars).
   // Voorkomt zowel URL-lengte issues als call-stack problemen van 200 parallelle requests.
-  async function countPerUser(table: string, userIds: string[], rowLimit = 2000): Promise<Record<string, number>> {
+  async function countPerUser(table: string, userIds: string[], rowLimit = 1000): Promise<Record<string, number>> {
     if (userIds.length === 0) return {}
-    const CHUNK = 20
+    const CHUNK = 10  // 10 users × max 72 rows = 720 < PostgREST default max_rows (1000)
     const chunks: string[][] = []
     for (let i = 0; i < userIds.length; i += CHUNK) chunks.push(userIds.slice(i, i + CHUNK))
     const results = await Promise.all(
@@ -124,7 +124,7 @@ export default async function AdminPage() {
   ])
 
   const totalGroupMatches = groupMatchIds.length
-  const totalBonusQuestions = (questions ?? []).length
+  const totalBonusQuestions = (questions ?? []).filter((q) => q.type === 'pre_tournament').length
 
   // Emails ophalen via service role (auth.users is niet toegankelijk via reguliere client)
   const { data: { users: authUsers } } = await serviceClient.auth.admin.listUsers({ perPage: 1000 })
