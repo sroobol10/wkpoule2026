@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { formatInAmsterdam } from '@/lib/format'
 import { BRACKET } from '@/lib/bracket'
@@ -34,14 +34,21 @@ type Props = {
   bonusQuestions: { id: string; question: string; type: string; unlock_date: string | null; correct_answer: string | null; correct_answer_set: boolean }[]
   bonusAnswerRows: { question_id: string; answer: string; points_awarded: number | null }[]
   canSeeData: boolean
+  userId: string
 }
 
 type Tab = 'groepsfase' | 'eindstand' | 'knockout' | 'bonus'
 
 export default function DeelnemerClient({
   matches, predRows, jokerRows, bracketRows, allTeams,
-  bonusQuestions, bonusAnswerRows, advancementRows, canSeeData,
+  bonusQuestions, bonusAnswerRows, advancementRows, canSeeData, userId,
 }: Props) {
+  useEffect(() => {
+    if (userId === 'c412bb3d-0868-4b11-bcee-1e36174bb803') {
+      new Audio('/ronaldo-siuuuu.mp3').play().catch(() => {})
+    }
+  }, [userId])
+
   // Slot → stage mapping uit de statische bracket definitie (geen DB nodig)
   const slotStageMap = Object.fromEntries(BRACKET.map((m) => [m.slot, m.stage]))
   const [tab, setTab] = useState<Tab>('groepsfase')

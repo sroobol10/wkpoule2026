@@ -114,6 +114,7 @@ export default async function DeelnemerProfilePage({
         bonusQuestions={visibleBonusQuestions}
         bonusAnswerRows={bonusAnswerRows ?? []}
         canSeeData={canSeeData}
+        userId={userId}
       />
     </div>
     </>

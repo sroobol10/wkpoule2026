@@ -217,6 +217,9 @@ function QuestionCard({
   function handleSave(val?: string) {
     const finalAnswer = val ?? answer
     if (!finalAnswer.trim() || closed) return
+    const lower = finalAnswer.toLowerCase()
+    if (lower.includes('ronaldo')) new Audio('/ronaldo-siuuuu.mp3').play().catch(() => {})
+    else if (lower.includes('messi')) new Audio('/ankara-messi-best-sound.mp3').play().catch(() => {})
     startTransition(async () => {
       const result = await saveBonusAnswer(question.id, finalAnswer)
       if (result.ok) { setSaved(true); setShowPicker(false) }
