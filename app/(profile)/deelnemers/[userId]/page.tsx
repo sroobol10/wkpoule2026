@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { AvatarCircle } from '@/components/avatar-circle'
 import DeelnemerClient from './deelnemer-client'
+import DeelnemerBackground from './deelnemer-background'
 
 export default async function DeelnemerProfilePage({
   params,
@@ -90,7 +91,9 @@ export default async function DeelnemerProfilePage({
   }
 
   return (
-    <div className="space-y-8">
+    <>
+      <DeelnemerBackground avatarUrl={targetProfile.avatar_url} />
+    <div className="relative z-10 space-y-8">
       <ProfileHeader
         profile={targetProfile}
         totalPts={generalScore?.total_pts ?? 0}
@@ -113,6 +116,7 @@ export default async function DeelnemerProfilePage({
         canSeeData={canSeeData}
       />
     </div>
+    </>
   )
 }
 
@@ -143,49 +147,69 @@ function ProfileHeader({
   } | null
 }) {
   return (
-    <div className="flex flex-col items-center text-center gap-4 pt-2">
-      <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={144} />
-      <div>
-        <h1 className="font-display text-2xl text-wk-text uppercase leading-none">
-          {profile.username}
-        </h1>
-        {totalPts > 0 && (
-          <p className="font-display text-3xl text-wk-gold mt-1">
-            {totalPts}
-            <span className="font-mono text-sm text-wk-muted ml-1">pt</span>
-          </p>
-        )}
-      </div>
+    <div className="relative rounded-2xl overflow-hidden bg-wk-surface border border-white/10">
+      {/* Blurry background */}
+      {profile.avatar_url ? (
+        <div className="absolute inset-0 overflow-hidden">
+          <img src={profile.avatar_url} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover scale-150 blur-3xl opacity-30 saturate-150" />
+          <div className="absolute inset-0 bg-gradient-to-b from-wk-bg/40 via-wk-bg/60 to-wk-bg/90" />
+        </div>
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-br from-wk-gold/5 via-transparent to-wk-blue/5" />
+      )}
 
-      <div className="flex flex-wrap justify-center gap-2">
-        {[
-          { label: 'Wedstrijden', value: `${predCount}/72` },
-          { label: 'Jokers',      value: `${jokerCount}/12` },
-          { label: 'Bracket',     value: `${bracketCount}/32` },
-          { label: 'Bonus',       value: String(bonusCount) },
-        ].map(({ label, value }) => (
-          <div key={label} className="bg-wk-surface border border-white/10 rounded-full px-3 py-1.5 flex items-center gap-1.5">
-            <span className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">{label}</span>
-            <span className="font-mono text-xs font-bold text-wk-gold">{value}</span>
-          </div>
-        ))}
-      </div>
+      {/* Content */}
+      <div className="relative flex flex-col items-center text-center gap-4 px-6 pt-8 pb-6 animate-fade-up">
+        {/* Ring glow around avatar */}
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-wk-gold/20 blur-xl scale-125" />
+          <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={96} />
+        </div>
 
-      {score && totalPts > 0 && (
-        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+        <div style={{ animationDelay: '60ms' }} className="animate-fade-up">
+          <h1 className="font-display text-2xl text-wk-text uppercase leading-none drop-shadow">
+            {profile.username}
+          </h1>
+          {totalPts > 0 && (
+            <p className="font-display text-4xl text-wk-gold mt-1 drop-shadow-lg">
+              {totalPts}
+              <span className="font-mono text-sm text-wk-muted ml-1">pt</span>
+            </p>
+          )}
+        </div>
+
+        {/* Stat pills */}
+        <div className="flex flex-wrap justify-center gap-2" style={{ animationDelay: '120ms' }}>
           {[
-            { label: 'Wedstr.',  val: score.group_match_pts },
-            { label: 'Stand',    val: score.group_standings_pts },
-            { label: 'KO',       val: score.knockout_pts },
-            { label: 'Bonus',    val: score.bonus_pre_pts + score.bonus_daily_pts },
-            { label: 'Exact',    val: score.exact_hits, suffix: '×' },
-          ].filter(({ val }) => val > 0).map(({ label, val, suffix }) => (
-            <span key={label} className="font-mono text-[10px] text-wk-muted tracking-wide">
-              <span className="text-wk-soft">{val}{suffix ?? 'pt'}</span> {label}
-            </span>
+            { label: 'Wedstrijden', value: `${predCount}/72` },
+            { label: 'Jokers',      value: `${jokerCount}/12` },
+            { label: 'Bracket',     value: `${bracketCount}/32` },
+            { label: 'Bonus',       value: String(bonusCount) },
+          ].map(({ label, value }) => (
+            <div key={label} className="bg-wk-bg/60 border border-white/10 rounded-full px-3 py-1.5 flex items-center gap-1.5">
+              <span className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">{label}</span>
+              <span className="font-mono text-xs font-bold text-wk-gold [text-shadow:0_0_10px_rgba(var(--color-wk-gold-raw),0.6)]">{value}</span>
+            </div>
           ))}
         </div>
-      )}
+
+        {/* Score breakdown */}
+        {score && totalPts > 0 && (
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1" style={{ animationDelay: '180ms' }}>
+            {[
+              { label: 'Wedstr.',  val: score.group_match_pts },
+              { label: 'Stand',    val: score.group_standings_pts },
+              { label: 'KO',       val: score.knockout_pts },
+              { label: 'Bonus',    val: score.bonus_pre_pts + score.bonus_daily_pts },
+              { label: 'Exact',    val: score.exact_hits, suffix: '×' },
+            ].filter(({ val }) => val > 0).map(({ label, val, suffix }) => (
+              <span key={label} className="font-mono text-[10px] text-wk-muted tracking-wide">
+                <span className="text-wk-soft">{val}{suffix ?? 'pt'}</span> {label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

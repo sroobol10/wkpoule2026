@@ -717,11 +717,12 @@ function PouleMiniLeaderboard({
                   )}
                 </div>
                 <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={22} />
-                <span
-                  className={`flex-1 text-xs truncate ${isCurrentUser ? "font-bold text-wk-gold" : "text-wk-text"}`}
+                <a
+                  href={`/deelnemers/${entry.userId}`}
+                  className={`flex-1 text-xs truncate hover:underline underline-offset-2 transition-colors ${isCurrentUser ? "font-bold text-wk-gold hover:text-wk-gold/80" : "text-wk-text hover:text-wk-gold"}`}
                 >
                   {entry.username}
-                </span>
+                </a>
                 <span className="font-display text-sm text-wk-gold shrink-0">
                   {entry.pts}
                 </span>

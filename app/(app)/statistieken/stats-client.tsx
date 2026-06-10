@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
+import { AvatarCircle } from '@/components/avatar-circle'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,22 @@ export type BonusQuestionStat = {
   top_answers: { answer: string; count: number; pct: number; is_correct: boolean }[]
 }
 
+export type TopStandingEntry = {
+  userId: string
+  username: string
+  avatarUrl: string | null
+  totalPts: number
+  rank: number
+}
+
+export type JokerStat = {
+  matchId: string
+  homeTeam: string
+  awayTeam: string
+  group: string
+  count: number
+}
+
 type Props = {
   tournamentStarted: boolean
   kampioenStats: KampioenverdeligEntry[]
@@ -54,9 +71,54 @@ type Props = {
   totalDeelnemers: number
   accuracyStats: AccuracyStats | null
   bonusQuestionStats: BonusQuestionStat[]
+  topStandings: TopStandingEntry[]
+  jokerStats: JokerStat[]
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
+const MEDAL = ['🥇', '🥈', '🥉']
+
+// ─── Animated bar ─────────────────────────────────────────────────────────────
+
+function AnimatedBar({ pct, color }: { pct: number; color: string }) {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const t = setTimeout(() => setWidth(pct), 150)
+    return () => clearTimeout(t)
+  }, [pct])
+  return (
+    <div
+      className={`h-full rounded-full ${color}`}
+      style={{ width: `${width}%`, transition: 'width 1.2s cubic-bezier(0.4,0,0.2,1)' }}
+    />
+  )
+}
+
+// ─── Count-up hook ────────────────────────────────────────────────────────────
+
+function useCountUp(target: number, duration = 1200): number {
+  const [value, setValue] = useState(0)
+  const frameRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (target === 0) { setValue(0); return }
+    const steps = Math.max(1, Math.round(duration / 16))
+    let current = 0
+    frameRef.current = setInterval(() => {
+      current++
+      setValue(Math.round((current / steps) * target))
+      if (current >= steps) {
+        clearInterval(frameRef.current!)
+        setValue(target)
+      }
+    }, 16)
+    return () => { if (frameRef.current) clearInterval(frameRef.current) }
+  }, [target, duration])
+
+  return value
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function StatsClient({
   tournamentStarted,
@@ -65,6 +127,8 @@ export default function StatsClient({
   totalDeelnemers,
   accuracyStats,
   bonusQuestionStats,
+  topStandings,
+  jokerStats,
 }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [openMatch, setOpenMatch] = useState<string | null>(null)
@@ -77,7 +141,7 @@ export default function StatsClient({
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
+      <div className="animate-fade-up" style={{ animationDelay: '0ms' }}>
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Overzicht</p>
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Statistieken</h1>
         <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
@@ -87,7 +151,7 @@ export default function StatsClient({
 
       {/* Nauwkeurigheid */}
       {accuracyStats && (
-        <section>
+        <section className="animate-fade-up" style={{ animationDelay: '50ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Nauwkeurigheid · {accuracyStats.playedMatches} wedstrijden gespeeld
           </p>
@@ -110,9 +174,23 @@ export default function StatsClient({
         </section>
       )}
 
+      {/* Top 10 klassement */}
+      {topStandings.length > 0 && tournamentStarted && (
+        <section className="animate-fade-up" style={{ animationDelay: '100ms' }}>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Top 10 klassement
+          </p>
+          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            {topStandings.map((entry) => (
+              <StandingRow key={entry.userId} entry={entry} maxPts={topStandings[0]?.totalPts ?? 1} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* WK-kampioen verdeling */}
       {tournamentStarted ? (
-        <section>
+        <section className="animate-fade-up" style={{ animationDelay: '150ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Voorspeld wereldkampioen
           </p>
@@ -143,10 +221,7 @@ export default function StatsClient({
                       </span>
                     </div>
                     <div className="mt-2 ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'}`}
-                        style={{ width: `${pct}%` }}
-                      />
+                      <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
                     </div>
                   </div>
                 )
@@ -155,7 +230,7 @@ export default function StatsClient({
           )}
         </section>
       ) : (
-        <section>
+        <section className="animate-fade-up" style={{ animationDelay: '150ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Voorspeld wereldkampioen
           </p>
@@ -169,7 +244,7 @@ export default function StatsClient({
 
       {/* Uitslagverdeling per wedstrijd */}
       {availableGroups.length > 0 && (
-        <section>
+        <section className="animate-fade-up" style={{ animationDelay: '200ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Uitslagverdeling — gespeelde wedstrijden
           </p>
@@ -209,7 +284,7 @@ export default function StatsClient({
       )}
 
       {availableGroups.length === 0 && (
-        <section>
+        <section className="animate-fade-up" style={{ animationDelay: '200ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Uitslagverdeling
           </p>
@@ -221,9 +296,43 @@ export default function StatsClient({
         </section>
       )}
 
+      {/* Joker hotspots */}
+      {jokerStats.length > 0 && tournamentStarted && (
+        <section className="animate-fade-up" style={{ animationDelay: '250ms' }}>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Joker hotspots — meest gekozen wedstrijden
+          </p>
+          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            {jokerStats.map((stat, i) => {
+              const maxCount = jokerStats[0]?.count ?? 1
+              const pct = Math.round((stat.count / maxCount) * 100)
+              const isTop = i === 0
+              return (
+                <div key={stat.matchId} className="px-5 py-3">
+                  <div className="flex items-center gap-3 mb-1.5">
+                    <span className="font-mono text-[10px] text-wk-muted w-5 text-center shrink-0">
+                      {stat.group}
+                    </span>
+                    <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
+                      {stat.homeTeam} – {stat.awayTeam}
+                    </span>
+                    <span className={`font-mono text-xs font-bold shrink-0 ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                      {stat.count}×
+                    </span>
+                  </div>
+                  <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                    <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Bonus-vraag statistieken */}
       {bonusQuestionStats.length > 0 && (
-        <section>
+        <section className="animate-fade-up" style={{ animationDelay: '300ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
             Bonusvragen — antwoordverdeling
           </p>
@@ -255,6 +364,34 @@ export default function StatsClient({
   )
 }
 
+// ─── Standing row ─────────────────────────────────────────────────────────────
+
+function StandingRow({ entry, maxPts }: { entry: TopStandingEntry; maxPts: number }) {
+  const pts = useCountUp(entry.totalPts)
+  const pct = maxPts > 0 ? Math.round((entry.totalPts / maxPts) * 100) : 0
+  const medal = entry.rank <= 3 ? MEDAL[entry.rank - 1] : null
+
+  return (
+    <div className="px-5 py-3">
+      <div className="flex items-center gap-3 mb-1.5">
+        <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
+          {medal ?? entry.rank}
+        </span>
+        <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
+        <span className={`flex-1 text-sm font-semibold truncate ${entry.rank === 1 ? 'text-wk-gold' : 'text-wk-text'}`}>
+          {entry.username}
+        </span>
+        <span className={`font-mono text-xs font-bold shrink-0 ${entry.rank === 1 ? 'text-wk-gold' : 'text-wk-soft'}`}>
+          {pts} pts
+        </span>
+      </div>
+      <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+        <AnimatedBar pct={pct} color={entry.rank === 1 ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+      </div>
+    </div>
+  )
+}
+
 // ─── Accuracy row ─────────────────────────────────────────────────────────────
 
 function AccuracyRow({ label, count, total, accent = false }: {
@@ -274,10 +411,7 @@ function AccuracyRow({ label, count, total, accent = false }: {
         </span>
       </div>
       <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${accent ? 'bg-wk-gold' : 'bg-wk-muted/40'}`}
-          style={{ width: `${pct}%` }}
-        />
+        <AnimatedBar pct={pct} color={accent ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
       </div>
     </div>
   )
@@ -317,10 +451,7 @@ function BonusQuestionCard({ stat }: { stat: BonusQuestionStat }) {
                 {is_correct && <span className="ml-1 text-wk-green">✓</span>}
               </span>
               <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'}`}
-                  style={{ width: `${pct}%` }}
-                />
+                <AnimatedBar pct={pct} color={is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'} />
               </div>
               <span className="font-mono text-[10px] text-wk-muted shrink-0 w-16 text-right">
                 {count}× ({pct}%)
@@ -400,10 +531,7 @@ function MatchDistRow({
                   {predicted_home}–{predicted_away}
                 </span>
                 <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${i === 0 ? 'bg-wk-gold' : 'bg-wk-muted/40'}`}
-                    style={{ width: `${pct}%` }}
-                  />
+                  <AnimatedBar pct={pct} color={i === 0 ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
                 </div>
                 <span className="font-mono text-[10px] text-wk-muted w-12 text-right shrink-0">
                   {count}× ({pct}%)

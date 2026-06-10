@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
-import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type TopStandingEntry, type JokerStat } from './stats-client'
 
 export default async function StatistiekenPage() {
   const supabase = await createClient()
@@ -181,6 +181,99 @@ export default async function StatistiekenPage() {
     }
   }
 
+  // ── Top 10 algemeen klassement ───────────────────────────────────────────
+  let topStandings: TopStandingEntry[] = []
+
+  if (tournamentStarted) {
+    // Find the general poule
+    const { data: generalPoule } = await supabase
+      .from('poules')
+      .select('id')
+      .eq('is_general', true)
+      .maybeSingle()
+
+    if (generalPoule) {
+      const { data: scoreRows } = await supabase
+        .from('poule_scores')
+        .select('user_id, total_pts')
+        .eq('poule_id', generalPoule.id)
+        .order('total_pts', { ascending: false })
+        .limit(10)
+
+      if (scoreRows && scoreRows.length > 0) {
+        const userIds = scoreRows.map((s) => s.user_id)
+        const { data: profileRows } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .in('id', userIds)
+
+        const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
+        for (const p of profileRows ?? []) profileById[p.id] = p
+
+        topStandings = scoreRows.map((s, i) => ({
+          userId: s.user_id,
+          username: profileById[s.user_id]?.username ?? s.user_id,
+          avatarUrl: profileById[s.user_id]?.avatar_url ?? null,
+          totalPts: s.total_pts,
+          rank: i + 1,
+        }))
+      }
+    }
+  }
+
+  // ── Joker hotspots ───────────────────────────────────────────────────────
+  let jokerStats: JokerStat[] = []
+
+  if (tournamentStarted) {
+    const { data: allJokers } = await supabase
+      .from('jokers')
+      .select('match_id')
+
+    if (allJokers && allJokers.length > 0) {
+      // Count per match
+      const jokerCountByMatch: Record<string, number> = {}
+      for (const j of allJokers) {
+        jokerCountByMatch[j.match_id] = (jokerCountByMatch[j.match_id] ?? 0) + 1
+      }
+
+      // Top 8 match IDs
+      const topMatchIds = Object.entries(jokerCountByMatch)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 8)
+        .map(([id]) => id)
+
+      // Fetch match details (could be started or upcoming)
+      const { data: jokerMatches } = await supabase
+        .from('matches')
+        .select(`
+          id,
+          home_team:teams!matches_home_team_id_fkey(name, group_name),
+          away_team:teams!matches_away_team_id_fkey(name, group_name)
+        `)
+        .in('id', topMatchIds)
+
+      type JokerTeamRef = { name: string; group_name: string }
+      const matchInfoById: Record<string, { homeTeam: string; awayTeam: string; group: string }> = {}
+      for (const m of jokerMatches ?? []) {
+        const home = m.home_team as JokerTeamRef | null
+        const away = m.away_team as JokerTeamRef | null
+        if (home && away) {
+          matchInfoById[m.id] = { homeTeam: home.name, awayTeam: away.name, group: home.group_name }
+        }
+      }
+
+      jokerStats = topMatchIds
+        .filter((id) => matchInfoById[id])
+        .map((id) => ({
+          matchId: id,
+          homeTeam: matchInfoById[id].homeTeam,
+          awayTeam: matchInfoById[id].awayTeam,
+          group: matchInfoById[id].group,
+          count: jokerCountByMatch[id],
+        }))
+    }
+  }
+
   // ── Bonus-vraag statistieken ─────────────────────────────────────────────
   const { data: bonusQuestions } = await supabase
     .from('bonus_questions')
@@ -247,6 +340,8 @@ export default async function StatistiekenPage() {
       totalDeelnemers={totalDeelnemers ?? 0}
       accuracyStats={accuracyStats}
       bonusQuestionStats={bonusQuestionStats}
+      topStandings={topStandings}
+      jokerStats={jokerStats}
     />
   )
 }
