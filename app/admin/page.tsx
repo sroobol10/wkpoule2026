@@ -116,15 +116,40 @@ export default async function AdminPage() {
     return map
   }
 
+  const preTournamentIds = (questions ?? [])
+    .filter((q) => q.type === 'pre_tournament')
+    .map((q) => q.id)
+
+  // Bonus-count apart: alleen pre_tournament vragen meetellen
+  async function countPreTournamentBonusPerUser(userIds: string[]): Promise<Record<string, number>> {
+    if (userIds.length === 0 || preTournamentIds.length === 0) return {}
+    const CHUNK = 10
+    const chunks: string[][] = []
+    for (let i = 0; i < userIds.length; i += CHUNK) chunks.push(userIds.slice(i, i + CHUNK))
+    const results = await Promise.all(
+      chunks.map((chunk) =>
+        sc.from('bonus_answers').select('user_id')
+          .in('user_id', chunk)
+          .in('question_id', preTournamentIds)
+          .limit(1000)
+      )
+    )
+    const map: Record<string, number> = {}
+    for (const { data } of results)
+      for (const row of (data ?? []) as { user_id: string }[])
+        map[row.user_id] = (map[row.user_id] ?? 0) + 1
+    return map
+  }
+
   const [predCountMap, jokerCountMap, bracketCountMap, bonusCountMap] = await Promise.all([
     countPerUser('predictions',        allUserIds),
     countPerUser('jokers',             allUserIds),
     countPerUser('bracket_predictions',allUserIds),
-    countPerUser('bonus_answers',      allUserIds),
+    countPreTournamentBonusPerUser(allUserIds),
   ])
 
   const totalGroupMatches = groupMatchIds.length
-  const totalBonusQuestions = (questions ?? []).filter((q) => q.type === 'pre_tournament').length
+  const totalBonusQuestions = preTournamentIds.length
 
   // Emails ophalen via service role (auth.users is niet toegankelijk via reguliere client)
   const { data: { users: authUsers } } = await serviceClient.auth.admin.listUsers({ perPage: 1000 })
