@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useEffect, useTransition } from 'react'
 import Image from 'next/image'
 import { saveBonusAnswer } from '@/app/actions/bonus'
 import { formatInAmsterdam } from '@/lib/format'
+import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 
 type Question = {
   id: string
@@ -193,9 +194,17 @@ function QuestionCard({
     ? new Date(effectiveDeadline)
     : (question.unlock_date ? new Date(question.unlock_date + 'T00:00:00Z') : null)
 
-  const closed = question.type === 'pre_tournament'
-    ? tournamentStarted
-    : (deadline ? deadline <= new Date() : false)
+  // Tikkende klok zodat een openstaande tab vanzelf op slot gaat na de deadline
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const closedAt = (at: Date) => question.type === 'pre_tournament'
+    ? tournamentStarted || at >= GROUP_STAGE_DEADLINE
+    : (deadline ? deadline <= at : false)
+  const closed = closedAt(now)
   const pts = existingAnswer?.points_awarded
 
   // Input mode: answer_type field has priority over legacy keyword detection
@@ -217,6 +226,14 @@ function QuestionCard({
   function handleSave(val?: string) {
     const finalAnswer = val ?? answer
     if (!finalAnswer.trim() || closed) return
+    // Verse check op het moment van opslaan — een stilstaande tab mag niet
+    // alsnog na de deadline opslaan (de server weigert het sowieso ook)
+    if (closedAt(new Date())) {
+      setNow(new Date())
+      setToast({ msg: 'De deadline voor deze vraag is verstreken.', ok: false })
+      setTimeout(() => setToast(null), 3000)
+      return
+    }
     const lower = finalAnswer.toLowerCase()
     if (lower.includes('ronaldo')) new Audio('/ronaldo-siuuuu.mp3').play().catch(() => {})
     else if (lower.includes('messi')) new Audio('/ankara-messi-best-sound.mp3').play().catch(() => {})
