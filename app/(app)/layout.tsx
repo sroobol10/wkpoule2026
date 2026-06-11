@@ -79,7 +79,6 @@ export default async function AppLayout({
             src={headerImg}
             pouleSrc={isEnnovate && !isRetro && !isOostenrijk ? "/management.jpg" : null}
             alt={headerAlt}
-            kenBurns={isRetro}
           />
           {/* Gradient overlays */}
           <div className={gradientBClass} />
@@ -102,6 +101,9 @@ export default async function AppLayout({
 
           {/* Bottom title block — client component zodat usePathname() live updatet */}
           <HeroTitle isRetro={isRetro} />
+
+          {/* Gouden accentlijn met trage glans */}
+          <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-wk-gold/70 to-transparent animate-retro-shimmer" />
         </div>
 
         {/* Page content */}

@@ -32,11 +32,12 @@ export default function HeroTitle({ isRetro }: { isRetro: boolean }) {
 
   return (
     <>
-      <div className="absolute bottom-0 left-0 px-6 md:px-8 pb-5 md:pb-6">
-        <p className="font-display text-3xl md:text-5xl text-white uppercase leading-none tracking-tight drop-shadow-lg">
+      {/* key={pathname}: titel animeert opnieuw bij elke routewissel */}
+      <div key={pathname} className="absolute bottom-0 left-0 px-6 md:px-8 pb-5 md:pb-6">
+        <p className="animate-fade-up font-display text-3xl md:text-5xl text-white uppercase leading-none tracking-tight drop-shadow-lg">
           {main} <span className="text-wk-gold">{accent}</span>
         </p>
-        <p className="font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1.5">
+        <p className="animate-fade-up font-mono text-white/60 text-[10px] tracking-[0.18em] uppercase mt-1.5" style={{ animationDelay: '90ms' }}>
           {sub}
         </p>
       </div>

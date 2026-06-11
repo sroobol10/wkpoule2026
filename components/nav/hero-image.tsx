@@ -12,23 +12,22 @@ export default function HeroImage({
   src,
   pouleSrc,
   alt,
-  kenBurns,
 }: {
   src: string
   pouleSrc: string | null
   alt: string
-  kenBurns: boolean
 }) {
   const pathname = usePathname()
   const finalSrc = pouleSrc && pathname.startsWith(ENNOVATE_POULE_PATH) ? pouleSrc : src
 
+  // key zorgt voor remount bij beeldwissel → fade-in speelt opnieuw af
   return (
     <Image
       key={finalSrc}
       src={finalSrc}
       alt={alt}
       fill
-      className={`object-cover object-center ${kenBurns ? 'animate-ken-burns' : ''}`}
+      className="object-cover object-center animate-hero-in"
       priority
     />
   )
