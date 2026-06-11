@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Image from 'next/image'
 import { AvatarCircle } from '@/components/avatar-circle'
 
 export type BergEntry = {
@@ -121,7 +122,13 @@ export function Bergetappe({
                       'radial-gradient(closest-side, color-mix(in srgb, var(--color-wk-gold) 35%, transparent), transparent)',
                   }}
                 />
-                <span className="relative text-2xl sm:text-4xl drop-shadow-lg">🏆</span>
+                <Image
+                  src="/cup.png"
+                  alt="WK-beker"
+                  width={313}
+                  height={781}
+                  className="relative h-10 w-auto sm:h-14 drop-shadow-lg"
+                />
               </div>
             </div>
 
