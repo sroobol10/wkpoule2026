@@ -1133,3 +1133,22 @@ export async function simulateFullKo(): Promise<AdminResult> {
   }
   return { ok: true }
 }
+
+// ─── Deelnemers: actief/inactief ──────────────────────────────────────────────
+// Inactieve deelnemers worden uit alle klassementen gefilterd.
+export async function setDeelnemerActive(userId: string, isActive: boolean): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const service = createServiceClient()
+  const { error } = await service
+    .from('profiles')
+    .update({ is_active: isActive })
+    .eq('id', userId)
+
+  if (error) return { ok: false, error: 'Opslaan mislukt.' }
+
+  revalidatePath('/admin')
+  revalidatePath('/poules')
+  return { ok: true }
+}

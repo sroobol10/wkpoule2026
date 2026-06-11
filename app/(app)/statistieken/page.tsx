@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
+import { getActivePlayerIds } from '@/lib/active-players'
 import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry, type VerloopData, type HeatmapData, type DayPointsEntry } from './stats-client'
 
 // '2026-06-12' → '12/6'
@@ -22,9 +23,8 @@ export default async function StatistiekenPage() {
   const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
 
   // ── Totaal deelnemers ────────────────────────────────────────────────────
-  const { count: totalDeelnemers } = await supabase
-    .from('profiles')
-    .select('id', { count: 'exact', head: true })
+  // Alleen wie alle groepswedstrijden heeft voorspeld doet mee
+  const totalDeelnemers = (await getActivePlayerIds(supabase)).size
 
   // ── Effectieve deadline per dag (voor bonus stats) ───────────────────────
   const { data: allGroupMatches } = await supabase

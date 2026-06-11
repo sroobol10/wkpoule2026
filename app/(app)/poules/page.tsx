@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { getActivePlayerIds } from '@/lib/active-players'
 import JoinPouleForm from './join-poule-form'
 
 export default async function PoulesPage({
@@ -23,11 +24,15 @@ export default async function PoulesPage({
 
   const pouleIds = poules.map((p) => p.id)
   const { data: memberCounts } = pouleIds.length > 0
-    ? await supabase.from('poule_members').select('poule_id').in('poule_id', pouleIds)
+    ? await supabase.from('poule_members').select('poule_id, user_id').in('poule_id', pouleIds)
     : { data: [] }
 
+  // Alleen actieve deelnemers meetellen, net als op de klassementen
+  const activeIds = await getActivePlayerIds(supabase)
   const countMap: Record<string, number> = {}
-  for (const m of memberCounts ?? []) countMap[m.poule_id] = (countMap[m.poule_id] ?? 0) + 1
+  for (const m of memberCounts ?? []) {
+    if (activeIds.has(m.user_id)) countMap[m.poule_id] = (countMap[m.poule_id] ?? 0) + 1
+  }
 
   const general = poules.find((p) => p.is_general)
   const custom = poules.filter((p) => !p.is_general)

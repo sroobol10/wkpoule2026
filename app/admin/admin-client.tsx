@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, updateBonusAnswerConfig, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, updateBonusAnswerConfig, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus, setDeelnemerActive } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 import { AvatarCircle } from '@/components/avatar-circle'
 
@@ -36,6 +36,7 @@ type Participant = {
   id: string
   username: string
   avatarUrl: string | null
+  isActive: boolean
   email: string
   pouleIds: string[]
   predictions: number
@@ -645,6 +646,7 @@ function DeelnemersTab({
                 <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-right">Bracket</th>
                 <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-right">Bonus</th>
                 <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">Status</th>
+                <th className="px-3 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">Actief</th>
                 <th className="px-3 py-2.5"></th>
               </tr>
             </thead>
@@ -657,7 +659,7 @@ function DeelnemersTab({
                 const bonusOk   = p.bonusAnswers >= totalBonusQuestions
 
                 return (
-                  <tr key={p.id} className={complete ? 'bg-wk-green/5' : ''}>
+                  <tr key={p.id} className={`${complete ? 'bg-wk-green/5' : ''} ${!p.isActive ? 'opacity-50' : ''}`}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={36} />
@@ -695,6 +697,9 @@ function DeelnemersTab({
                         : <span className="font-mono text-[9px] text-wk-gold border border-wk-gold/30 rounded-full px-2 py-0.5 tracking-widest">Onvolledig</span>
                       }
                     </td>
+                    <td className="px-3 py-3 text-center">
+                      <ActiveToggle userId={p.id} isActive={p.isActive} />
+                    </td>
                     <td className="px-3 py-3">
                       <a
                         href={`/admin/deelnemer/${p.id}`}
@@ -712,6 +717,32 @@ function DeelnemersTab({
         </div>
       </div>
     </div>
+  )
+}
+
+// Aan/uit-knop: inactieve deelnemers tellen nergens mee in de klassementen
+function ActiveToggle({ userId, isActive }: { userId: string; isActive: boolean }) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  return (
+    <button
+      type="button"
+      disabled={isPending}
+      onClick={() =>
+        startTransition(async () => {
+          await setDeelnemerActive(userId, !isActive)
+          router.refresh()
+        })
+      }
+      title={isActive ? 'Zet op inactief — telt dan niet mee in de klassementen' : 'Zet op actief'}
+      className={`font-mono text-[9px] tracking-widest uppercase rounded-full px-2.5 py-0.5 border transition-colors disabled:opacity-50 ${
+        isActive
+          ? 'text-wk-green border-wk-green/30 hover:border-wk-green'
+          : 'text-wk-red border-wk-red/30 hover:border-wk-red'
+      }`}
+    >
+      {isPending ? '…' : isActive ? '✓ Actief' : '✗ Inactief'}
+    </button>
   )
 }
 

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getActivePlayerIds } from '@/lib/active-players'
 import PredictionsClient from './predictions-client'
 
 export default async function VoorspellingenPage() {
@@ -60,13 +61,17 @@ export default async function VoorspellingenPage() {
     return a.name.localeCompare(b.name)
   })
 
+  // Alleen deelnemers die alle groepswedstrijden hebben voorspeld doen mee
+  const activeIds = await getActivePlayerIds(supabase)
+
   const pouleStandings = await Promise.all(
     userPoules.map(async (poule) => {
-      const { data: scores } = await supabase
+      const { data: allScores } = await supabase
         .from('poule_scores')
         .select('user_id, total_pts, rank_change')
         .eq('poule_id', poule.id)
         .order('total_pts', { ascending: false })
+      const scores = (allScores ?? []).filter((s) => activeIds.has(s.user_id))
 
       if (!scores?.length) return { pouleId: poule.id, pouleName: poule.name, isGeneral: poule.is_general, entries: [] }
 

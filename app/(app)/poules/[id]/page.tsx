@@ -6,6 +6,7 @@ import { AvatarCircle } from '@/components/avatar-circle'
 import DeletePouleButton from './delete-poule-button'
 import SharePouleButton from './share-poule-button'
 import { Podium } from './podium'
+import { getActivePlayerIds } from '@/lib/active-players'
 import { Bergetappe } from './bergetappe'
 import { LeaderboardTabs } from './leaderboard-tabs'
 
@@ -73,7 +74,11 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
   const scoreMap: Record<string, ScoreRow> = {}
   for (const s of scores ?? []) scoreMap[s.user_id] = s as ScoreRow
 
+  // Alleen deelnemers die alle groepswedstrijden hebben voorspeld doen mee
+  const activeIds = await getActivePlayerIds(supabase)
+
   const ranked = Object.keys(profileMap)
+    .filter((uid) => activeIds.has(uid))
     .map((uid) => ({
       profile: profileMap[uid],
       score: scoreMap[uid] ?? {

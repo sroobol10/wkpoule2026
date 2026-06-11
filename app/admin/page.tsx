@@ -85,12 +85,12 @@ export default async function AdminPage() {
   const { data: profileRows } = memberUserIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('id, username, avatar_url')
+        .select('id, username, avatar_url, is_active')
         .in('id', memberUserIds)
         .order('username')
     : { data: [] }
 
-  type ProfileRef = { id: string; username: string; avatar_url: string | null }
+  type ProfileRef = { id: string; username: string; avatar_url: string | null; is_active: boolean }
   const uniqueUsers: Record<string, ProfileRef> = {}
   for (const p of profileRows ?? []) {
     uniqueUsers[p.id] = p
@@ -162,6 +162,7 @@ export default async function AdminPage() {
     id: p.id,
     username: p.username,
     avatarUrl: p.avatar_url ?? null,
+    isActive: p.is_active ?? true,
     email: emailMap[p.id] ?? '',
     pouleIds: userPouleIds[p.id] ?? [],
     predictions: predCountMap[p.id] ?? 0,
