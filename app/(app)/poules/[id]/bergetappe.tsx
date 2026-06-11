@@ -76,7 +76,7 @@ export function Bergetappe({
 
   return (
     <div className="space-y-2">
-      <div className="relative h-80 sm:h-[440px] bg-gradient-to-b from-wk-bg2 to-wk-surface border border-white/10 rounded-xl overflow-hidden">
+      <div className="relative h-[420px] sm:h-[580px] bg-gradient-to-b from-wk-bg2 to-wk-surface border border-white/10 rounded-xl overflow-hidden">
         {entries.length === 0 ? (
           <div className="h-full flex items-center justify-center font-mono text-xs text-wk-muted tracking-[0.12em]">
             Nog geen deelnemers.
