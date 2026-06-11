@@ -545,10 +545,11 @@ export default function PredictionsClient({
 
           <div className="divide-y divide-white/5">
             {groupMatches.map((match) => {
-              const locked =
-                now >= GROUP_STAGE_DEADLINE ||
-                new Date(match.kickoff_at) <= now ||
-                match.result_entered;
+              // Score-invoer is vergrendeld vanaf de toernooistart; de joker
+              // blijft per wedstrijd wijzigbaar tot die wedstrijd begint
+              const matchStarted =
+                new Date(match.kickoff_at) <= now || match.result_entered;
+              const locked = now >= GROUP_STAGE_DEADLINE || matchStarted;
               const score = scores[match.id];
               const pred = predMap[match.id];
               const pts = pred?.points_awarded;
@@ -570,6 +571,7 @@ export default function PredictionsClient({
                   score={score}
                   pts={pts}
                   locked={locked}
+                  matchStarted={matchStarted}
                   hasJoker={jokerSet.has(match.id)}
                   jokerLocked={anyGroupMatchPlayed}
                   exactScore={exactScore}
@@ -757,6 +759,7 @@ type MatchRowProps = {
   score: { home: string; away: string } | undefined;
   pts: number | null | undefined;
   locked: boolean;
+  matchStarted: boolean;
   hasJoker: boolean;
   jokerLocked: boolean;
   exactScore: boolean;
@@ -769,6 +772,7 @@ function MatchRow({
   score,
   pts,
   locked,
+  matchStarted,
   hasJoker,
   jokerLocked,
   exactScore,
@@ -780,8 +784,9 @@ function MatchRow({
     AiPrediction | "loading" | "error" | null
   >(null);
 
-  // Joker-knop zichtbaar: match nog niet gespeeld én geen wedstrijd in de groep gespeeld
-  const jokerable = !locked && !jokerLocked;
+  // Joker-knop zichtbaar: deze wedstrijd nog niet begonnen én de joker van
+  // deze groep staat niet vast (jokerwedstrijd al gestart)
+  const jokerable = !matchStarted && !jokerLocked;
 
   async function handleAiToggle() {
     if (showAi) {
@@ -803,7 +808,7 @@ function MatchRow({
         <div className="grid grid-cols-[1fr_auto_1fr] items-center mb-3">
           {/* Joker-indicator links bovenin (zodra wedstrijd gespeeld) */}
           <div className="flex justify-start">
-            {hasJoker && locked && (
+            {hasJoker && !jokerable && (
               <span className="flex items-center gap-1 font-mono text-[10px] font-bold text-wk-gold border border-wk-gold/60 bg-wk-gold/15 rounded-full px-2 py-0.5 tracking-[0.12em] uppercase">
                 <span className="text-xs">★</span> Joker
               </span>

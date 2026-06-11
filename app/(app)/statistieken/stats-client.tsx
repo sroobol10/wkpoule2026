@@ -103,13 +103,6 @@ export type VerloopData = {
   }[]
 }
 
-export type HeatmapData = {
-  predicted: number[][]
-  actual: number[][]
-  totalPredicted: number
-  totalActual: number
-}
-
 export type DayPointsEntry = { day: string; pts: number }
 
 type Props = {
@@ -124,7 +117,6 @@ type Props = {
   kuddeStats: KuddeEntry[]
   jokerRendement: JokerRendement | null
   verloop: VerloopData | null
-  heatmap: HeatmapData | null
   dayPoints: DayPointsEntry[]
 }
 
@@ -164,7 +156,6 @@ export default function StatsClient({
   kuddeStats,
   jokerRendement,
   verloop,
-  heatmap,
   dayPoints,
 }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
@@ -409,16 +400,6 @@ export default function StatsClient({
               🔒 Zichtbaar na start van het toernooi
             </p>
           </div>
-        </section>
-      )}
-
-      {/* Uitslag-heatmap */}
-      {heatmap && tournamentStarted && (
-        <section className="animate-fade-up" style={{ animationDelay: '175ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Uitslag-heatmap 🟨 — welke scores tipt de poule?
-          </p>
-          <ScoreHeatmap data={heatmap} />
         </section>
       )}
 

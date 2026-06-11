@@ -87,6 +87,8 @@ export default async function StatistiekenPage() {
   }
 
   // ── Uitslagverdeling + nauwkeurigheid ────────────────────────────────────
+  // Vanaf de aftrap is de verdeling zichtbaar; statistieken die de uitslag
+  // nodig hebben (nauwkeurigheid, heatmap) filteren verderop op home_score.
   const { data: startedMatches } = await supabase
     .from('matches')
     .select(`
@@ -96,7 +98,7 @@ export default async function StatistiekenPage() {
       away_team:teams!matches_away_team_id_fkey(name, flag_url, group_name)
     `)
     .eq('stage', 'group')
-    .eq('result_entered', true)
+    .lte('kickoff_at', new Date().toISOString())
     .order('kickoff_at')
 
   type TeamRef = { name: string; flag_url: string; group_name: string }

@@ -938,13 +938,38 @@ function BonusRow({ question }: { question: BonusQuestion }) {
         <div className="flex items-center gap-2">
           {editingAnswer ? (
             <>
-              <input
-                type="text" value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveAnswer()}
-                placeholder="Correct antwoord…"
-                className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text placeholder:text-wk-muted focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
-              />
+              {/* KEUZE/JA-NEE: kies uit de vaste opties zodat het antwoord altijd
+                  exact matcht met wat deelnemers konden invullen */}
+              {question.answer_type === 'options' && question.answer_options?.length ? (
+                <select
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                >
+                  <option value="" disabled>Kies het juiste antwoord…</option>
+                  {question.answer_options.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              ) : question.answer_type === 'yesno' ? (
+                <select
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                >
+                  <option value="" disabled>Kies het juiste antwoord…</option>
+                  <option value="Ja">Ja</option>
+                  <option value="Nee">Nee</option>
+                </select>
+              ) : (
+                <input
+                  type="text" value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveAnswer()}
+                  placeholder="Correct antwoord…"
+                  className="flex-1 rounded bg-wk-bg2 border border-white/10 px-3 py-1.5 text-sm text-wk-text placeholder:text-wk-muted focus:border-wk-gold focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition"
+                />
+              )}
               <button onClick={saveAnswer} disabled={isPending || !answer.trim()}
                 className="rounded bg-wk-green px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
                 {isPending ? '…' : 'Opslaan'}

@@ -313,7 +313,12 @@ export async function setBonusCorrectAnswer(
     const isGedoseerd = question?.question?.toLowerCase().includes('gedoseerd')
     const correctNum = isGedoseerd ? parseInt(correctAnswer.trim(), 10) : NaN
 
-    const pointsForCorrect = question?.type === 'pre_tournament' ? 5 : 2
+    // Punten conform de puntentelling op de bonusvragenpagina:
+    // Topscorer 25 · Beste speler 15 · overige pre-tournament (GOAT) 5 · dagelijks 1
+    const qLower = question?.question?.toLowerCase() ?? ''
+    const pointsForCorrect = question?.type === 'pre_tournament'
+      ? (qLower.includes('topscorer') ? 25 : qLower.includes('beste speler') ? 15 : 5)
+      : 1
     const normalized = correctAnswer.trim().toLowerCase()
 
     for (const ans of answers) {
