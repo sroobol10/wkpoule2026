@@ -588,7 +588,10 @@ export async function saveMatchCards(
   const { supabase } = await assertAdmin()
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
-  const { error } = await supabase
+  // match_cards heeft alleen een SELECT-policy (RLS) — schrijven kan
+  // uitsluitend via de service role
+  const service = createServiceClient()
+  const { error } = await service
     .from('match_cards')
     .upsert(
       [

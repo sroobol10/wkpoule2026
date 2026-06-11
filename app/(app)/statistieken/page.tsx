@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
-import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry, type VerloopData, type DayPointsEntry } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type JokerRendement, type JokerBestEntry, type VerloopData, type DayPointsEntry } from './stats-client'
 
 // '2026-06-12' → '12/6'
 const dayLabel = (d: string) => `${parseInt(d.slice(8), 10)}/${parseInt(d.slice(5, 7), 10)}`
@@ -106,9 +106,7 @@ export default async function StatistiekenPage() {
   const groupedMatches: Record<string, MatchStat[]> = {}
   let accuracyStats: AccuracyStats | null = null
 
-  // Voor "Tegen de stroom in" en joker-rendement
-  type FlowEntry = { userId: string; contraWins: number; contra: number; withMaj: number; total: number }
-  let flowEntries: FlowEntry[] = []
+  // Voor joker-rendement
   const predPtsByUserMatch: Record<string, number | null> = {}
   const matchInfoForJoker: Record<string, { label: string; group: string }> = {}
 
@@ -162,37 +160,10 @@ export default async function StatistiekenPage() {
       }
     }
 
-    // ── Tegen de stroom in: per wedstrijd het meerderheidresultaat (1/X/2) ──
-    const signCounts: Record<string, Record<string, number>> = {}
-    for (const p of predictions ?? []) {
-      if (!scoreByMatchId[p.match_id]) continue
-      const s = String(Math.sign(p.predicted_home - p.predicted_away))
-      signCounts[p.match_id] ??= {}
-      signCounts[p.match_id][s] = (signCounts[p.match_id][s] ?? 0) + 1
-    }
-    const majorityByMatch: Record<string, number | null> = {}
-    for (const [mid, counts] of Object.entries(signCounts)) {
-      const sorted = Object.entries(counts).sort(([, a], [, b]) => b - a)
-      // Geen duidelijke meerderheid (gelijkspel tussen kampen) → wedstrijd telt niet mee
-      majorityByMatch[mid] = sorted.length > 1 && sorted[0][1] === sorted[1][1] ? null : Number(sorted[0][0])
-    }
-
-    const flowByUser: Record<string, { contraWins: number; contra: number; withMaj: number; total: number }> = {}
+    // Punten per voorspelling (voor joker-rendement)
     for (const p of predictions ?? []) {
       predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
-      const maj = majorityByMatch[p.match_id]
-      if (maj == null || !scoreByMatchId[p.match_id]) continue
-      const s = Math.sign(p.predicted_home - p.predicted_away)
-      const u = (flowByUser[p.user_id] ??= { contraWins: 0, contra: 0, withMaj: 0, total: 0 })
-      u.total++
-      if (s === maj) {
-        u.withMaj++
-      } else {
-        u.contra++
-        if ((p.points_awarded ?? 0) > 0) u.contraWins++
-      }
     }
-    flowEntries = Object.entries(flowByUser).map(([userId, f]) => ({ userId, ...f }))
 
     // ── Grafiekdata: speeldag per wedstrijd (CEST) ───────────────────────────
     const dayByMatch: Record<string, string> = {}
@@ -340,25 +311,9 @@ export default async function StatistiekenPage() {
     }
   }
 
-  // ── Tegen de stroom in + joker-rendement: ranglijsten met profielen ──────
-  let contrarianStats: ContrarianEntry[] = []
-  let kuddeStats: KuddeEntry[] = []
-
-  if (tournamentStarted && (flowEntries.length > 0 || bestJokersRaw.length > 0 || verloopRaw.length > 0)) {
-    const contrarianRaw = flowEntries
-      .filter((f) => f.contraWins > 0)
-      .sort((a, b) => b.contraWins - a.contraWins || a.contra - b.contra)
-      .slice(0, 10)
-
-    const kuddeRaw = flowEntries
-      .filter((f) => f.total >= 3)
-      .map((f) => ({ ...f, pct: Math.round((f.withMaj / f.total) * 100) }))
-      .sort((a, b) => b.pct - a.pct || b.total - a.total)
-      .slice(0, 5)
-
+  // ── Joker-rendement + verloop: ranglijsten met profielen ─────────────────
+  if (tournamentStarted && (bestJokersRaw.length > 0 || verloopRaw.length > 0)) {
     const userIds = [...new Set([
-      ...contrarianRaw.map((f) => f.userId),
-      ...kuddeRaw.map((f) => f.userId),
       ...bestJokersRaw.map((b) => b.userId),
       ...verloopRaw.map((s) => s.userId),
     ])]
@@ -371,24 +326,6 @@ export default async function StatistiekenPage() {
 
       const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
       for (const p of profileRows ?? []) profileById[p.id] = p
-
-      contrarianStats = contrarianRaw.map((f) => ({
-        userId: f.userId,
-        username: profileById[f.userId]?.username ?? '?',
-        avatarUrl: profileById[f.userId]?.avatar_url ?? null,
-        contraWins: f.contraWins,
-        contra: f.contra,
-        total: f.total,
-      }))
-
-      kuddeStats = kuddeRaw.map((f) => ({
-        userId: f.userId,
-        username: profileById[f.userId]?.username ?? '?',
-        avatarUrl: profileById[f.userId]?.avatar_url ?? null,
-        pct: f.pct,
-        withMaj: f.withMaj,
-        total: f.total,
-      }))
 
       if (verloopRaw.length > 0 && verloopDays.length >= 2) {
         verloopData = {
@@ -484,8 +421,6 @@ export default async function StatistiekenPage() {
       accuracyStats={accuracyStats}
       bonusQuestionStats={bonusQuestionStats}
       jokerStats={jokerStats}
-      contrarianStats={contrarianStats}
-      kuddeStats={kuddeStats}
       jokerRendement={jokerRendement}
       verloop={verloopData}
       dayPoints={dayPointsData}

@@ -57,24 +57,6 @@ export type JokerStat = {
   count: number
 }
 
-export type ContrarianEntry = {
-  userId: string
-  username: string
-  avatarUrl: string | null
-  contraWins: number
-  contra: number
-  total: number
-}
-
-export type KuddeEntry = {
-  userId: string
-  username: string
-  avatarUrl: string | null
-  pct: number
-  withMaj: number
-  total: number
-}
-
 export type JokerBestEntry = {
   userId: string
   username: string
@@ -113,8 +95,6 @@ type Props = {
   accuracyStats: AccuracyStats | null
   bonusQuestionStats: BonusQuestionStat[]
   jokerStats: JokerStat[]
-  contrarianStats: ContrarianEntry[]
-  kuddeStats: KuddeEntry[]
   jokerRendement: JokerRendement | null
   verloop: VerloopData | null
   dayPoints: DayPointsEntry[]
@@ -152,8 +132,6 @@ export default function StatsClient({
   accuracyStats,
   bonusQuestionStats,
   jokerStats,
-  contrarianStats,
-  kuddeStats,
   jokerRendement,
   verloop,
   dayPoints,
@@ -253,70 +231,6 @@ export default function StatsClient({
             Punten-regen 🌧️ — gescoorde punten per speeldag
           </p>
           <DayPointsChart data={dayPoints} />
-        </section>
-      )}
-
-      {/* Tegen de stroom in */}
-      {contrarianStats.length > 0 && tournamentStarted && (
-        <section className="animate-fade-up" style={{ animationDelay: '125ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Tegen de stroom in 🐟 — eigenwijze winnaars
-          </p>
-          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {contrarianStats.map((entry, i) => {
-              const maxWins = contrarianStats[0]?.contraWins ?? 1
-              const pct = Math.round((entry.contraWins / maxWins) * 100)
-              const isTop = i === 0
-              return (
-                <div key={entry.userId} className="px-5 py-3">
-                  <div className="flex items-center gap-3 mb-1.5">
-                    <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
-                      {i + 1}
-                    </span>
-                    <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
-                    <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
-                      {entry.username}
-                    </span>
-                    <span className="font-mono text-[10px] text-wk-muted shrink-0">
-                      {entry.contra}× tegendraads
-                    </span>
-                    <span className={`font-mono text-xs font-bold shrink-0 ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
-                      {entry.contraWins}× raak
-                    </span>
-                  </div>
-                  <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                    <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
-            Punten gepakt met een voorspelling die inging tegen het meerderheidresultaat (1/X/2)
-          </p>
-
-          {kuddeStats.length > 0 && (
-            <div className="mt-4">
-              <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-                Kuddedieren 🐑 — zwemmen met de school mee
-              </p>
-              <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-                {kuddeStats.map((entry, i) => (
-                  <div key={entry.userId} className="flex items-center gap-3 px-5 py-2.5">
-                    <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">{i + 1}</span>
-                    <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
-                    <span className="flex-1 text-sm font-semibold text-wk-text truncate">{entry.username}</span>
-                    <span className="font-mono text-[10px] text-wk-muted shrink-0">
-                      {entry.withMaj}/{entry.total} met de meerderheid
-                    </span>
-                    <span className="font-mono text-xs font-bold text-wk-soft shrink-0 w-10 text-right">
-                      {entry.pct}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </section>
       )}
 
