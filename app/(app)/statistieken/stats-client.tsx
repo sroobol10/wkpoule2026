@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { AvatarCircle } from '@/components/avatar-circle'
@@ -49,14 +49,6 @@ export type BonusQuestionStat = {
   top_answers: { answer: string; count: number; pct: number; is_correct: boolean }[]
 }
 
-export type TopStandingEntry = {
-  userId: string
-  username: string
-  avatarUrl: string | null
-  totalPts: number
-  rank: number
-}
-
 export type JokerStat = {
   matchId: string
   homeTeam: string
@@ -101,6 +93,25 @@ export type JokerRendement = {
   best: JokerBestEntry[]
 }
 
+export type VerloopData = {
+  days: string[]
+  series: {
+    userId: string
+    username: string
+    isCurrentUser: boolean
+    values: number[]
+  }[]
+}
+
+export type HeatmapData = {
+  predicted: number[][]
+  actual: number[][]
+  totalPredicted: number
+  totalActual: number
+}
+
+export type DayPointsEntry = { day: string; pts: number }
+
 type Props = {
   tournamentStarted: boolean
   kampioenStats: KampioenverdeligEntry[]
@@ -108,15 +119,20 @@ type Props = {
   totalDeelnemers: number
   accuracyStats: AccuracyStats | null
   bonusQuestionStats: BonusQuestionStat[]
-  topStandings: TopStandingEntry[]
   jokerStats: JokerStat[]
   contrarianStats: ContrarianEntry[]
   kuddeStats: KuddeEntry[]
   jokerRendement: JokerRendement | null
+  verloop: VerloopData | null
+  heatmap: HeatmapData | null
+  dayPoints: DayPointsEntry[]
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
 const MEDAL = ['🥇', '🥈', '🥉']
+
+// flagcdn-URLs in de database zijn w80 (80px breed) — voor grote tegels te wazig
+const hiResFlag = (url: string) => url.replace('/w80/', '/w640/')
 
 // ─── Animated bar ─────────────────────────────────────────────────────────────
 
@@ -134,30 +150,6 @@ function AnimatedBar({ pct, color }: { pct: number; color: string }) {
   )
 }
 
-// ─── Count-up hook ────────────────────────────────────────────────────────────
-
-function useCountUp(target: number, duration = 1200): number {
-  const [value, setValue] = useState(0)
-  const frameRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    if (target === 0) { setValue(0); return }
-    const steps = Math.max(1, Math.round(duration / 16))
-    let current = 0
-    frameRef.current = setInterval(() => {
-      current++
-      setValue(Math.round((current / steps) * target))
-      if (current >= steps) {
-        clearInterval(frameRef.current!)
-        setValue(target)
-      }
-    }, 16)
-    return () => { if (frameRef.current) clearInterval(frameRef.current) }
-  }, [target, duration])
-
-  return value
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function StatsClient({
@@ -167,11 +159,13 @@ export default function StatsClient({
   totalDeelnemers,
   accuracyStats,
   bonusQuestionStats,
-  topStandings,
   jokerStats,
   contrarianStats,
   kuddeStats,
   jokerRendement,
+  verloop,
+  heatmap,
+  dayPoints,
 }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [openMatch, setOpenMatch] = useState<string | null>(null)
@@ -248,17 +242,26 @@ export default function StatsClient({
         </section>
       )}
 
-      {/* Top 10 klassement */}
-      {topStandings.length > 0 && tournamentStarted && (
+      {/* Klassementverloop */}
+      {verloop && tournamentStarted && (
+        <section className="animate-fade-up" style={{ animationDelay: '75ms' }}>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Klassementverloop 📈 — top 5 per speeldag
+          </p>
+          <VerloopChart data={verloop} />
+          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
+            Cumulatieve wedstrijdpunten uit de groepsfase
+          </p>
+        </section>
+      )}
+
+      {/* Punten per speeldag */}
+      {dayPoints.length > 1 && tournamentStarted && (
         <section className="animate-fade-up" style={{ animationDelay: '100ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Top 10 klassement
+            Punten-regen 🌧️ — gescoorde punten per speeldag
           </p>
-          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {topStandings.map((entry) => (
-              <StandingRow key={entry.userId} entry={entry} maxPts={topStandings[0]?.totalPts ?? 1} />
-            ))}
-          </div>
+          <DayPointsChart data={dayPoints} />
         </section>
       )}
 
@@ -361,7 +364,7 @@ export default function StatsClient({
                     >
                       {flag_url ? (
                         <Image
-                          src={flag_url}
+                          src={hiResFlag(flag_url)}
                           alt={answer}
                           fill
                           sizes="(max-width: 640px) 50vw, 33vw"
@@ -406,6 +409,16 @@ export default function StatsClient({
               🔒 Zichtbaar na start van het toernooi
             </p>
           </div>
+        </section>
+      )}
+
+      {/* Uitslag-heatmap */}
+      {heatmap && tournamentStarted && (
+        <section className="animate-fade-up" style={{ animationDelay: '175ms' }}>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Uitslag-heatmap 🟨 — welke scores tipt de poule?
+          </p>
+          <ScoreHeatmap data={heatmap} />
         </section>
       )}
 
@@ -590,30 +603,199 @@ export default function StatsClient({
   )
 }
 
-// ─── Standing row ─────────────────────────────────────────────────────────────
+// ─── Klassementverloop lijngrafiek ────────────────────────────────────────────
 
-function StandingRow({ entry, maxPts }: { entry: TopStandingEntry; maxPts: number }) {
-  const pts = useCountUp(entry.totalPts)
-  const pct = maxPts > 0 ? Math.round((entry.totalPts / maxPts) * 100) : 0
-  const medal = entry.rank <= 3 ? MEDAL[entry.rank - 1] : null
+// Kleuren voor de niet-eigen series; de ingelogde gebruiker is altijd goud
+const SERIES_COLORS = ['#2D6BE5', '#E63946', '#2EA84B', '#A78BFA', '#C8CCD6']
+
+function VerloopChart({ data }: { data: VerloopData }) {
+  const [drawn, setDrawn] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setDrawn(true), 200)
+    return () => clearTimeout(t)
+  }, [])
+
+  const W = 600, H = 240, PL = 36, PR = 14, PT = 12, PB = 26
+  const maxVal = Math.max(...data.series.flatMap((s) => s.values), 1)
+  const x = (i: number) => PL + (i / Math.max(data.days.length - 1, 1)) * (W - PL - PR)
+  const y = (v: number) => PT + (1 - v / maxVal) * (H - PT - PB)
+  const colorOf = (s: VerloopData['series'][number], si: number) =>
+    s.isCurrentUser ? '#F4B92E' : SERIES_COLORS[si % SERIES_COLORS.length]
+  // Maximaal ~8 x-labels, anders wordt het een brij
+  const labelEvery = Math.max(1, Math.ceil(data.days.length / 8))
 
   return (
-    <div className="px-5 py-3">
-      <div className="flex items-center gap-3 mb-1.5">
-        <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
-          {medal ?? entry.rank}
-        </span>
-        <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
-        <span className={`flex-1 text-sm font-semibold truncate ${entry.rank === 1 ? 'text-wk-gold' : 'text-wk-text'}`}>
-          {entry.username}
-        </span>
-        <span className={`font-mono text-xs font-bold shrink-0 ${entry.rank === 1 ? 'text-wk-gold' : 'text-wk-soft'}`}>
-          {pts} pts
+    <div className="bg-wk-surface border border-white/10 rounded-xl p-4">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Puntenverloop per speeldag">
+        {/* Horizontale gridlijnen + y-as labels */}
+        {Array.from({ length: 5 }, (_, i) => {
+          const v = Math.round((maxVal / 4) * i)
+          return (
+            <g key={i}>
+              <line x1={PL} x2={W - PR} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
+              <text x={PL - 7} y={y(v) + 3} textAnchor="end" fontSize="9" fill="#7C8398" fontFamily="ui-monospace, monospace">
+                {v}
+              </text>
+            </g>
+          )
+        })}
+        {/* X-as labels */}
+        {data.days.map((d, i) =>
+          i % labelEvery === 0 ? (
+            <text key={`${d}-${i}`} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="#7C8398" fontFamily="ui-monospace, monospace">
+              {d}
+            </text>
+          ) : null
+        )}
+        {/* Lijnen — tekenen zich in via stroke-dashoffset */}
+        {data.series.map((s, si) => {
+          const color = colorOf(s, si)
+          const points = s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')
+          const last = s.values[s.values.length - 1]
+          return (
+            <g key={s.userId}>
+              <polyline
+                points={points}
+                fill="none"
+                stroke={color}
+                strokeWidth={s.isCurrentUser ? 2.5 : 1.8}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                opacity={0.9}
+                pathLength={1}
+                strokeDasharray={1}
+                strokeDashoffset={drawn ? 0 : 1}
+                style={{ transition: `stroke-dashoffset 1.3s ease-out ${si * 0.12}s` }}
+              />
+              <circle
+                cx={x(s.values.length - 1)}
+                cy={y(last)}
+                r={3}
+                fill={color}
+                opacity={drawn ? 1 : 0}
+                style={{ transition: 'opacity 0.3s', transitionDelay: `${1.1 + si * 0.12}s` }}
+              />
+            </g>
+          )
+        })}
+      </svg>
+
+      {/* Legenda */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3">
+        {data.series.map((s, si) => (
+          <span key={s.userId} className="flex items-center gap-1.5 font-mono text-[10px] text-wk-soft">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: colorOf(s, si) }} />
+            <span className={`truncate max-w-28 ${s.isCurrentUser ? 'text-wk-gold font-bold' : ''}`}>
+              {s.username}{s.isCurrentUser ? ' (jij)' : ''}
+            </span>
+            <span className="text-wk-muted">{s.values[s.values.length - 1]}pt</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Punten per speeldag ──────────────────────────────────────────────────────
+
+function DayPointsChart({ data }: { data: DayPointsEntry[] }) {
+  const max = Math.max(...data.map((d) => d.pts), 1)
+  return (
+    <div className="bg-wk-surface border border-white/10 rounded-xl px-4 pt-4 pb-3">
+      <div className="flex items-end gap-1 sm:gap-1.5 h-36">
+        {data.map((d, i) => {
+          const isMax = d.pts === max && d.pts > 0
+          return (
+            <div key={`${d.day}-${i}`} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
+              <span className={`font-mono text-[8px] mb-1 ${isMax ? 'text-wk-gold font-bold' : 'text-wk-muted'}`}>
+                {d.pts}
+              </span>
+              <div
+                className={`w-full rounded-t animate-podium-rise ${
+                  isMax ? 'bg-gradient-to-t from-wk-gold/50 to-wk-gold' : 'bg-white/15'
+                }`}
+                style={{ height: `${Math.max((d.pts / max) * 100, 2)}%`, animationDelay: `${i * 70}ms` }}
+              />
+              <span className="font-mono text-[8px] text-wk-muted mt-1 truncate max-w-full">{d.day}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Uitslag-heatmap ──────────────────────────────────────────────────────────
+
+const HEAT_LABELS = ['0', '1', '2', '3', '4', '5+']
+
+function ScoreHeatmap({ data }: { data: HeatmapData }) {
+  const [mode, setMode] = useState<'predicted' | 'actual'>('predicted')
+  const grid = mode === 'predicted' ? data.predicted : data.actual
+  const total = mode === 'predicted' ? data.totalPredicted : data.totalActual
+  const max = Math.max(...grid.flat(), 1)
+
+  return (
+    <div className="bg-wk-surface border border-white/10 rounded-xl p-4">
+      {/* Toggle */}
+      <div className="flex gap-1 mb-4">
+        {([['predicted', 'Voorspeld'], ['actual', 'Gevallen']] as const).map(([m, label]) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.14em] uppercase border transition-colors duration-200 ${
+              mode === m
+                ? 'bg-wk-gold/15 border-wk-gold/30 text-wk-gold'
+                : 'border-white/10 text-wk-muted hover:text-wk-soft hover:bg-white/5'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="ml-auto self-center font-mono text-[9px] text-wk-muted tracking-widest">
+          {total.toLocaleString('nl')} {mode === 'predicted' ? 'voorspellingen' : 'uitslagen'}
         </span>
       </div>
-      <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-        <AnimatedBar pct={pct} color={entry.rank === 1 ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+
+      <div className="max-w-sm mx-auto">
+        {/* Kolomkoppen (uit-doelpunten) */}
+        <div className="grid grid-cols-[1.5rem_repeat(6,1fr)] gap-1 mb-1">
+          <span className="font-mono text-[8px] text-wk-muted self-end text-center leading-tight">thuis ↓<br/>uit →</span>
+          {HEAT_LABELS.map((l) => (
+            <span key={l} className="font-mono text-[9px] text-wk-muted text-center">{l}</span>
+          ))}
+        </div>
+        {/* Cellen — key={mode} zodat de stagger opnieuw afspeelt bij toggle */}
+        <div key={mode} className="space-y-1">
+          {grid.map((row, h) => (
+            <div key={h} className="grid grid-cols-[1.5rem_repeat(6,1fr)] gap-1">
+              <span className="font-mono text-[9px] text-wk-muted self-center text-center">{HEAT_LABELS[h]}</span>
+              {row.map((count, a) => (
+                <div
+                  key={a}
+                  style={{
+                    animationDelay: `${(h * 6 + a) * 14}ms`,
+                    background: count > 0
+                      ? `color-mix(in srgb, var(--color-wk-gold) ${Math.round(12 + (count / max) * 78)}%, transparent)`
+                      : 'rgba(255,255,255,0.04)',
+                  }}
+                  className="animate-scale-in aspect-square rounded flex items-center justify-center"
+                  title={`${HEAT_LABELS[h]}–${HEAT_LABELS[a]}: ${count}×`}
+                >
+                  {count > 0 && (
+                    <span className={`font-mono text-[9px] font-bold ${count / max > 0.55 ? 'text-wk-bg' : 'text-wk-text'}`}>
+                      {count}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
+      <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-3 text-center">
+        Rijen = thuisdoelpunten, kolommen = uitdoelpunten · hoe feller, hoe vaker
+      </p>
     </div>
   )
 }
@@ -719,12 +901,23 @@ function MatchDistRow({
 }) {
   const top3 = match.distribution.slice(0, 3)
 
+  // 1/X/2-verdeling afgeleid uit de scoreverdeling
+  let homeWin = 0, draw = 0, awayWin = 0
+  for (const d of match.distribution) {
+    if (d.predicted_home > d.predicted_away) homeWin += d.count
+    else if (d.predicted_home < d.predicted_away) awayWin += d.count
+    else draw += d.count
+  }
+  const tugTotal = homeWin + draw + awayWin
+  const tugPct = (n: number) => (tugTotal > 0 ? Math.round((n / tugTotal) * 100) : 0)
+
   return (
     <div>
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-white/5 transition-colors"
+        className="w-full px-5 py-3.5 text-left hover:bg-white/5 transition-colors"
       >
+      <div className="flex items-center gap-3">
         <span className="font-mono text-[10px] text-wk-muted w-5 shrink-0">#{match.match_number}</span>
 
         <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -755,6 +948,23 @@ function MatchDistRow({
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
+      </div>
+
+      {/* Tug-of-war: waar leunt de poule? (1 / X / 2) */}
+      {tugTotal > 0 && (
+        <div className="mt-2.5 ml-8">
+          <div className="flex h-1.5 rounded-full overflow-hidden bg-white/10 gap-px">
+            <AnimatedBar pct={tugPct(homeWin)} color="bg-wk-blue/80" />
+            <AnimatedBar pct={tugPct(draw)} color="bg-wk-soft/40" />
+            <AnimatedBar pct={tugPct(awayWin)} color="bg-wk-red/80" />
+          </div>
+          <div className="flex justify-between mt-1 font-mono text-[8px] text-wk-muted tracking-widest">
+            <span className="text-wk-blue">1 · {tugPct(homeWin)}%</span>
+            <span>X · {tugPct(draw)}%</span>
+            <span className="text-wk-red">2 · {tugPct(awayWin)}%</span>
+          </div>
+        </div>
+      )}
       </button>
 
       {isOpen && (

@@ -1,6 +1,6 @@
 import Link from "next/link";
-import Image from "next/image";
 import { AvatarCircle } from "@/components/avatar-circle";
+import { SummitCup } from "./summit-cup";
 
 export type BergEntry = {
   id: string;
@@ -125,7 +125,7 @@ export function Bergetappe({
               className="absolute"
               style={{ left: `${SUMMIT[0]}%`, top: `${SUMMIT[1]}%` }}
             >
-              <div className="relative -translate-x-1/2 -translate-y-full flex flex-col items-center pb-1">
+              <div className="relative -translate-x-1/2 -translate-y-[78%] flex flex-col items-center pb-1">
                 <div
                   className="absolute -inset-4 rounded-full blur-md animate-pulse"
                   style={{
@@ -133,13 +133,7 @@ export function Bergetappe({
                       "radial-gradient(closest-side, color-mix(in srgb, var(--color-wk-gold) 35%, transparent), transparent)",
                   }}
                 />
-                <Image
-                  src="/pim-cup.png"
-                  alt="WK-beker"
-                  width={313}
-                  height={781}
-                  className="relative h-10 w-auto sm:h-14 drop-shadow-lg"
-                />
+                <SummitCup />
               </div>
             </div>
 

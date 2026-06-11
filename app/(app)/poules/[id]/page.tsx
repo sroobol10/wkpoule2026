@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
 import { AvatarCircle } from '@/components/avatar-circle'
 import DeletePouleButton from './delete-poule-button'
@@ -7,6 +8,9 @@ import SharePouleButton from './share-poule-button'
 import { Podium } from './podium'
 import { Bergetappe } from './bergetappe'
 import { LeaderboardTabs } from './leaderboard-tabs'
+
+// Deze poule krijgt het Ennovate-logo als titel i.p.v. de poulenaam
+const ENNOVATE_POULE_ID = '14ccff59-b97a-41d9-9856-5c6413cd2c05'
 
 export default async function PoulePage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const { id } = await params
@@ -114,7 +118,13 @@ export default async function PoulePage({ params }: Readonly<{ params: Promise<{
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Klassement</p>
-            <h1 className="font-display text-2xl text-wk-text uppercase leading-none">{poule.name}</h1>
+            {poule.id === ENNOVATE_POULE_ID ? (
+              <h1 className="leading-none">
+                <Image src="/ennovate.png" alt={poule.name} width={500} height={80} className="h-7 sm:h-8 w-auto" />
+              </h1>
+            ) : (
+              <h1 className="font-display text-2xl text-wk-text uppercase leading-none">{poule.name}</h1>
+            )}
             <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
               {ranked.length} {ranked.length === 1 ? 'deelnemer' : 'deelnemers'}
             </p>

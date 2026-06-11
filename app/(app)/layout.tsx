@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import HeroTitle from "@/components/nav/hero-title";
+import HeroImage from "@/components/nav/hero-image";
 import Sidebar from "@/components/nav/sidebar";
 import BottomNav from "@/components/nav/bottom-nav";
 import NavProgress from "@/components/nav/nav-progress";
@@ -75,12 +75,11 @@ export default async function AppLayout({
       <div className="md:pl-56 pb-20 md:pb-0 min-h-screen">
         {/* Header banner */}
         <div className="relative h-44 md:h-[346px] lg:h-86.5 xl:h-100.75 min-[1600px]:h-170 w-full overflow-hidden">
-          <Image
+          <HeroImage
             src={headerImg}
+            pouleSrc={isEnnovate && !isRetro && !isOostenrijk ? "/management.jpg" : null}
             alt={headerAlt}
-            fill
-            className={`object-cover object-center ${isRetro ? "animate-ken-burns" : ""}`}
-            priority
+            kenBurns={isRetro}
           />
           {/* Gradient overlays */}
           <div className={gradientBClass} />

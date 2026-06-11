@@ -1,7 +1,10 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
-import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type TopStandingEntry, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry, type VerloopData, type HeatmapData, type DayPointsEntry } from './stats-client'
+
+// '2026-06-12' → '12/6'
+const dayLabel = (d: string) => `${parseInt(d.slice(8), 10)}/${parseInt(d.slice(5, 7), 10)}`
 
 export default async function StatistiekenPage() {
   const supabase = await createClient()
@@ -16,7 +19,9 @@ export default async function StatistiekenPage() {
     .select('id', { count: 'exact', head: true })
     .eq('stage', 'group')
     .eq('result_entered', true)
-  const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
+  // DEMO: restrictie tijdelijk uit — terugzetten naar de regel hieronder
+  // const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
+  const tournamentStarted = true
 
   // ── Totaal deelnemers ────────────────────────────────────────────────────
   const { count: totalDeelnemers } = await supabase
@@ -107,6 +112,13 @@ export default async function StatistiekenPage() {
   const predPtsByUserMatch: Record<string, number | null> = {}
   const matchInfoForJoker: Record<string, { label: string; group: string }> = {}
 
+  // Voor de grafieken: klassementverloop, heatmap en punten per speeldag
+  let verloopRaw: { userId: string; isCurrentUser: boolean; values: number[] }[] = []
+  let verloopDays: string[] = []
+  let verloopData: VerloopData | null = null
+  let heatmapData: HeatmapData | null = null
+  let dayPointsData: DayPointsEntry[] = []
+
   if (startedMatches && startedMatches.length > 0) {
     const matchIds = startedMatches.map((m) => m.id)
 
@@ -183,6 +195,58 @@ export default async function StatistiekenPage() {
     }
     flowEntries = Object.entries(flowByUser).map(([userId, f]) => ({ userId, ...f }))
 
+    // ── Grafiekdata: speeldag per wedstrijd (CEST) ───────────────────────────
+    const dayByMatch: Record<string, string> = {}
+    for (const m of startedMatches) {
+      const cest = new Date(new Date(m.kickoff_at).getTime() + 2 * 60 * 60 * 1000)
+      dayByMatch[m.id] = cest.toISOString().slice(0, 10)
+    }
+    verloopDays = [...new Set(Object.values(dayByMatch))].sort()
+
+    // Heatmap: voorspelde + werkelijke uitslagen (doelpunten boven 5 tellen als 5)
+    const cap = (n: number) => Math.min(n, 5)
+    const heatPredicted = Array.from({ length: 6 }, () => Array(6).fill(0) as number[])
+    const heatActual = Array.from({ length: 6 }, () => Array(6).fill(0) as number[])
+    let heatPredTotal = 0
+    for (const p of predictions ?? []) {
+      heatPredicted[cap(p.predicted_home)][cap(p.predicted_away)]++
+      heatPredTotal++
+    }
+    let heatActualTotal = 0
+    for (const m of startedMatches) {
+      if (m.home_score == null || m.away_score == null) continue
+      heatActual[cap(m.home_score)][cap(m.away_score)]++
+      heatActualTotal++
+    }
+    if (heatPredTotal > 0) {
+      heatmapData = { predicted: heatPredicted, actual: heatActual, totalPredicted: heatPredTotal, totalActual: heatActualTotal }
+    }
+
+    // Punten per speeldag (poule-breed) + cumulatief verloop per deelnemer
+    const ptsByDay: Record<string, number> = {}
+    const ptsByUserDay: Record<string, Record<string, number>> = {}
+    for (const p of predictions ?? []) {
+      const day = dayByMatch[p.match_id]
+      if (!day || p.points_awarded == null) continue
+      ptsByDay[day] = (ptsByDay[day] ?? 0) + p.points_awarded
+      ;(ptsByUserDay[p.user_id] ??= {})[day] = (ptsByUserDay[p.user_id][day] ?? 0) + p.points_awarded
+    }
+    dayPointsData = verloopDays.map((day) => ({ day: dayLabel(day), pts: ptsByDay[day] ?? 0 }))
+
+    const totals = Object.entries(ptsByUserDay)
+      .map(([uid, byDay]) => [uid, Object.values(byDay).reduce((a, b) => a + b, 0)] as const)
+      .sort((a, b) => b[1] - a[1])
+    const chartIds = totals.slice(0, 5).map(([uid]) => uid)
+    if (ptsByUserDay[user.id] && !chartIds.includes(user.id)) chartIds.push(user.id)
+    verloopRaw = chartIds.map((uid) => {
+      let cum = 0
+      return {
+        userId: uid,
+        isCurrentUser: uid === user.id,
+        values: verloopDays.map((d) => (cum += ptsByUserDay[uid][d] ?? 0)),
+      }
+    })
+
     for (const m of startedMatches) {
       const homeTeam = m.home_team as TeamRef | null
       const awayTeam = m.away_team as TeamRef | null
@@ -218,46 +282,6 @@ export default async function StatistiekenPage() {
         total_predictions: matchPreds.length,
         distribution,
       })
-    }
-  }
-
-  // ── Top 10 algemeen klassement ───────────────────────────────────────────
-  let topStandings: TopStandingEntry[] = []
-
-  if (tournamentStarted) {
-    // Find the general poule
-    const { data: generalPoule } = await supabase
-      .from('poules')
-      .select('id')
-      .eq('is_general', true)
-      .maybeSingle()
-
-    if (generalPoule) {
-      const { data: scoreRows } = await supabase
-        .from('poule_scores')
-        .select('user_id, total_pts')
-        .eq('poule_id', generalPoule.id)
-        .order('total_pts', { ascending: false })
-        .limit(10)
-
-      if (scoreRows && scoreRows.length > 0) {
-        const userIds = scoreRows.map((s) => s.user_id)
-        const { data: profileRows } = await supabase
-          .from('profiles')
-          .select('id, username, avatar_url')
-          .in('id', userIds)
-
-        const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
-        for (const p of profileRows ?? []) profileById[p.id] = p
-
-        topStandings = scoreRows.map((s, i) => ({
-          userId: s.user_id,
-          username: profileById[s.user_id]?.username ?? s.user_id,
-          avatarUrl: profileById[s.user_id]?.avatar_url ?? null,
-          totalPts: s.total_pts,
-          rank: i + 1,
-        }))
-      }
     }
   }
 
@@ -340,7 +364,7 @@ export default async function StatistiekenPage() {
   let contrarianStats: ContrarianEntry[] = []
   let kuddeStats: KuddeEntry[] = []
 
-  if (tournamentStarted && (flowEntries.length > 0 || bestJokersRaw.length > 0)) {
+  if (tournamentStarted && (flowEntries.length > 0 || bestJokersRaw.length > 0 || verloopRaw.length > 0)) {
     const contrarianRaw = flowEntries
       .filter((f) => f.contraWins > 0)
       .sort((a, b) => b.contraWins - a.contraWins || a.contra - b.contra)
@@ -356,6 +380,7 @@ export default async function StatistiekenPage() {
       ...contrarianRaw.map((f) => f.userId),
       ...kuddeRaw.map((f) => f.userId),
       ...bestJokersRaw.map((b) => b.userId),
+      ...verloopRaw.map((s) => s.userId),
     ])]
 
     if (userIds.length > 0) {
@@ -384,6 +409,18 @@ export default async function StatistiekenPage() {
         withMaj: f.withMaj,
         total: f.total,
       }))
+
+      if (verloopRaw.length > 0 && verloopDays.length >= 2) {
+        verloopData = {
+          days: verloopDays.map(dayLabel),
+          series: verloopRaw.map((s) => ({
+            userId: s.userId,
+            username: profileById[s.userId]?.username ?? '?',
+            isCurrentUser: s.isCurrentUser,
+            values: s.values,
+          })),
+        }
+      }
 
       if (jokerRendement) {
         jokerRendement.best = bestJokersRaw
@@ -466,11 +503,13 @@ export default async function StatistiekenPage() {
       totalDeelnemers={totalDeelnemers ?? 0}
       accuracyStats={accuracyStats}
       bonusQuestionStats={bonusQuestionStats}
-      topStandings={topStandings}
       jokerStats={jokerStats}
       contrarianStats={contrarianStats}
       kuddeStats={kuddeStats}
       jokerRendement={jokerRendement}
+      verloop={verloopData}
+      heatmap={heatmapData}
+      dayPoints={dayPointsData}
     />
   )
 }
