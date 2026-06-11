@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
-import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry, type VerloopData, type HeatmapData, type DayPointsEntry } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry, type VerloopData, type DayPointsEntry } from './stats-client'
 
 // '2026-06-12' → '12/6'
 const dayLabel = (d: string) => `${parseInt(d.slice(8), 10)}/${parseInt(d.slice(5, 7), 10)}`
@@ -116,7 +116,6 @@ export default async function StatistiekenPage() {
   let verloopRaw: { userId: string; isCurrentUser: boolean; values: number[] }[] = []
   let verloopDays: string[] = []
   let verloopData: VerloopData | null = null
-  let heatmapData: HeatmapData | null = null
   let dayPointsData: DayPointsEntry[] = []
 
   if (startedMatches && startedMatches.length > 0) {
@@ -202,25 +201,6 @@ export default async function StatistiekenPage() {
       dayByMatch[m.id] = cest.toISOString().slice(0, 10)
     }
     verloopDays = [...new Set(Object.values(dayByMatch))].sort()
-
-    // Heatmap: voorspelde + werkelijke uitslagen (doelpunten boven 5 tellen als 5)
-    const cap = (n: number) => Math.min(n, 5)
-    const heatPredicted = Array.from({ length: 6 }, () => Array(6).fill(0) as number[])
-    const heatActual = Array.from({ length: 6 }, () => Array(6).fill(0) as number[])
-    let heatPredTotal = 0
-    for (const p of predictions ?? []) {
-      heatPredicted[cap(p.predicted_home)][cap(p.predicted_away)]++
-      heatPredTotal++
-    }
-    let heatActualTotal = 0
-    for (const m of startedMatches) {
-      if (m.home_score == null || m.away_score == null) continue
-      heatActual[cap(m.home_score)][cap(m.away_score)]++
-      heatActualTotal++
-    }
-    if (heatPredTotal > 0) {
-      heatmapData = { predicted: heatPredicted, actual: heatActual, totalPredicted: heatPredTotal, totalActual: heatActualTotal }
-    }
 
     // Punten per speeldag (poule-breed) + cumulatief verloop per deelnemer
     const ptsByDay: Record<string, number> = {}
@@ -508,7 +488,6 @@ export default async function StatistiekenPage() {
       kuddeStats={kuddeStats}
       jokerRendement={jokerRendement}
       verloop={verloopData}
-      heatmap={heatmapData}
       dayPoints={dayPointsData}
     />
   )
