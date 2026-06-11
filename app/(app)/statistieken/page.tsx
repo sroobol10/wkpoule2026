@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
-import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type TopStandingEntry, type JokerStat } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type TopStandingEntry, type JokerStat, type ContrarianEntry, type KuddeEntry, type JokerRendement, type JokerBestEntry } from './stats-client'
 
 export default async function StatistiekenPage() {
   const supabase = await createClient()
@@ -101,15 +101,21 @@ export default async function StatistiekenPage() {
   const groupedMatches: Record<string, MatchStat[]> = {}
   let accuracyStats: AccuracyStats | null = null
 
+  // Voor "Tegen de stroom in" en joker-rendement
+  type FlowEntry = { userId: string; contraWins: number; contra: number; withMaj: number; total: number }
+  let flowEntries: FlowEntry[] = []
+  const predPtsByUserMatch: Record<string, number | null> = {}
+  const matchInfoForJoker: Record<string, { label: string; group: string }> = {}
+
   if (startedMatches && startedMatches.length > 0) {
     const matchIds = startedMatches.map((m) => m.id)
 
     const { data: predictions } = await supabase
       .from('predictions')
-      .select('match_id, predicted_home, predicted_away')
+      .select('user_id, match_id, predicted_home, predicted_away, points_awarded')
       .in('match_id', matchIds)
 
-    type PredEntry = { match_id: string; predicted_home: number; predicted_away: number }
+    type PredEntry = { user_id: string; match_id: string; predicted_home: number; predicted_away: number; points_awarded: number | null }
     const predsByMatch: Record<string, PredEntry[]> = {}
     for (const p of predictions ?? []) {
       predsByMatch[p.match_id] ??= []
@@ -145,10 +151,44 @@ export default async function StatistiekenPage() {
       }
     }
 
+    // ── Tegen de stroom in: per wedstrijd het meerderheidresultaat (1/X/2) ──
+    const signCounts: Record<string, Record<string, number>> = {}
+    for (const p of predictions ?? []) {
+      if (!scoreByMatchId[p.match_id]) continue
+      const s = String(Math.sign(p.predicted_home - p.predicted_away))
+      signCounts[p.match_id] ??= {}
+      signCounts[p.match_id][s] = (signCounts[p.match_id][s] ?? 0) + 1
+    }
+    const majorityByMatch: Record<string, number | null> = {}
+    for (const [mid, counts] of Object.entries(signCounts)) {
+      const sorted = Object.entries(counts).sort(([, a], [, b]) => b - a)
+      // Geen duidelijke meerderheid (gelijkspel tussen kampen) → wedstrijd telt niet mee
+      majorityByMatch[mid] = sorted.length > 1 && sorted[0][1] === sorted[1][1] ? null : Number(sorted[0][0])
+    }
+
+    const flowByUser: Record<string, { contraWins: number; contra: number; withMaj: number; total: number }> = {}
+    for (const p of predictions ?? []) {
+      predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
+      const maj = majorityByMatch[p.match_id]
+      if (maj == null || !scoreByMatchId[p.match_id]) continue
+      const s = Math.sign(p.predicted_home - p.predicted_away)
+      const u = (flowByUser[p.user_id] ??= { contraWins: 0, contra: 0, withMaj: 0, total: 0 })
+      u.total++
+      if (s === maj) {
+        u.withMaj++
+      } else {
+        u.contra++
+        if ((p.points_awarded ?? 0) > 0) u.contraWins++
+      }
+    }
+    flowEntries = Object.entries(flowByUser).map(([userId, f]) => ({ userId, ...f }))
+
     for (const m of startedMatches) {
       const homeTeam = m.home_team as TeamRef | null
       const awayTeam = m.away_team as TeamRef | null
       if (!homeTeam || !awayTeam) continue
+
+      matchInfoForJoker[m.id] = { label: `${homeTeam.name} – ${awayTeam.name}`, group: homeTeam.group_name }
 
       const group = homeTeam.group_name
       const matchPreds = predsByMatch[m.id] ?? []
@@ -221,15 +261,37 @@ export default async function StatistiekenPage() {
     }
   }
 
-  // ── Joker hotspots ───────────────────────────────────────────────────────
+  // ── Joker hotspots + rendement ───────────────────────────────────────────
   let jokerStats: JokerStat[] = []
+  let jokerRendement: JokerRendement | null = null
+  let bestJokersRaw: { userId: string; matchId: string; pts: number }[] = []
 
   if (tournamentStarted) {
     const { data: allJokers } = await supabase
       .from('jokers')
-      .select('match_id')
+      .select('match_id, user_id')
 
     if (allJokers && allJokers.length > 0) {
+      // Rendement: alleen jokers op wedstrijden waarvan de punten al zijn toegekend
+      const decided = allJokers
+        .map((j) => ({ userId: j.user_id, matchId: j.match_id, pts: predPtsByUserMatch[`${j.user_id}:${j.match_id}`] }))
+        .filter((d): d is { userId: string; matchId: string; pts: number } => d.pts != null)
+
+      if (decided.length > 0) {
+        const cashed = decided.filter((d) => d.pts > 0)
+        // Joker verdubbelt de basispunten: de "winst" van de joker is de helft van het totaal
+        const extraTotal = decided.reduce((s, d) => s + d.pts / 2, 0)
+        bestJokersRaw = [...decided].sort((a, b) => b.pts - a.pts).filter((d) => d.pts > 0).slice(0, 5)
+
+        jokerRendement = {
+          total: decided.length,
+          cashed: cashed.length,
+          cashedPct: Math.round((cashed.length / decided.length) * 100),
+          avgExtra: Math.round((extraTotal / decided.length) * 10) / 10,
+          totalExtra: Math.round(extraTotal),
+          best: [], // wordt hieronder gevuld zodra profielen bekend zijn
+        }
+      }
       // Count per match
       const jokerCountByMatch: Record<string, number> = {}
       for (const j of allJokers) {
@@ -271,6 +333,70 @@ export default async function StatistiekenPage() {
           group: matchInfoById[id].group,
           count: jokerCountByMatch[id],
         }))
+    }
+  }
+
+  // ── Tegen de stroom in + joker-rendement: ranglijsten met profielen ──────
+  let contrarianStats: ContrarianEntry[] = []
+  let kuddeStats: KuddeEntry[] = []
+
+  if (tournamentStarted && (flowEntries.length > 0 || bestJokersRaw.length > 0)) {
+    const contrarianRaw = flowEntries
+      .filter((f) => f.contraWins > 0)
+      .sort((a, b) => b.contraWins - a.contraWins || a.contra - b.contra)
+      .slice(0, 10)
+
+    const kuddeRaw = flowEntries
+      .filter((f) => f.total >= 3)
+      .map((f) => ({ ...f, pct: Math.round((f.withMaj / f.total) * 100) }))
+      .sort((a, b) => b.pct - a.pct || b.total - a.total)
+      .slice(0, 5)
+
+    const userIds = [...new Set([
+      ...contrarianRaw.map((f) => f.userId),
+      ...kuddeRaw.map((f) => f.userId),
+      ...bestJokersRaw.map((b) => b.userId),
+    ])]
+
+    if (userIds.length > 0) {
+      const { data: profileRows } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .in('id', userIds)
+
+      const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
+      for (const p of profileRows ?? []) profileById[p.id] = p
+
+      contrarianStats = contrarianRaw.map((f) => ({
+        userId: f.userId,
+        username: profileById[f.userId]?.username ?? '?',
+        avatarUrl: profileById[f.userId]?.avatar_url ?? null,
+        contraWins: f.contraWins,
+        contra: f.contra,
+        total: f.total,
+      }))
+
+      kuddeStats = kuddeRaw.map((f) => ({
+        userId: f.userId,
+        username: profileById[f.userId]?.username ?? '?',
+        avatarUrl: profileById[f.userId]?.avatar_url ?? null,
+        pct: f.pct,
+        withMaj: f.withMaj,
+        total: f.total,
+      }))
+
+      if (jokerRendement) {
+        jokerRendement.best = bestJokersRaw
+          .filter((b) => matchInfoForJoker[b.matchId])
+          .map((b): JokerBestEntry => ({
+            userId: b.userId,
+            username: profileById[b.userId]?.username ?? '?',
+            avatarUrl: profileById[b.userId]?.avatar_url ?? null,
+            match: matchInfoForJoker[b.matchId].label,
+            group: matchInfoForJoker[b.matchId].group,
+            pts: b.pts,
+          }))
+      }
     }
   }
 
@@ -342,6 +468,9 @@ export default async function StatistiekenPage() {
       bonusQuestionStats={bonusQuestionStats}
       topStandings={topStandings}
       jokerStats={jokerStats}
+      contrarianStats={contrarianStats}
+      kuddeStats={kuddeStats}
+      jokerRendement={jokerRendement}
     />
   )
 }

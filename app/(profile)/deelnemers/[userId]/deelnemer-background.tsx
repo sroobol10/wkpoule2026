@@ -25,7 +25,7 @@ export default function DeelnemerBackground({ avatarUrl }: { avatarUrl: string |
           height: '100%',
           objectFit: 'cover',
           transform: 'scale(1.05)',
-          filter: 'blur(2px) saturate(1.2) brightness(0.6)',
+          filter: 'blur(8px) saturate(1.2) brightness(0.6)',
           opacity: 0.8,
         }}
       />

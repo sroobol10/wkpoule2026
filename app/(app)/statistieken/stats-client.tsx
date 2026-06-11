@@ -65,6 +65,42 @@ export type JokerStat = {
   count: number
 }
 
+export type ContrarianEntry = {
+  userId: string
+  username: string
+  avatarUrl: string | null
+  contraWins: number
+  contra: number
+  total: number
+}
+
+export type KuddeEntry = {
+  userId: string
+  username: string
+  avatarUrl: string | null
+  pct: number
+  withMaj: number
+  total: number
+}
+
+export type JokerBestEntry = {
+  userId: string
+  username: string
+  avatarUrl: string | null
+  match: string
+  group: string
+  pts: number
+}
+
+export type JokerRendement = {
+  total: number
+  cashed: number
+  cashedPct: number
+  avgExtra: number
+  totalExtra: number
+  best: JokerBestEntry[]
+}
+
 type Props = {
   tournamentStarted: boolean
   kampioenStats: KampioenverdeligEntry[]
@@ -74,6 +110,9 @@ type Props = {
   bonusQuestionStats: BonusQuestionStat[]
   topStandings: TopStandingEntry[]
   jokerStats: JokerStat[]
+  contrarianStats: ContrarianEntry[]
+  kuddeStats: KuddeEntry[]
+  jokerRendement: JokerRendement | null
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
@@ -130,6 +169,9 @@ export default function StatsClient({
   bonusQuestionStats,
   topStandings,
   jokerStats,
+  contrarianStats,
+  kuddeStats,
+  jokerRendement,
 }: Props) {
   const [activeGroup, setActiveGroup] = useState('A')
   const [openMatch, setOpenMatch] = useState<string | null>(null)
@@ -220,6 +262,70 @@ export default function StatsClient({
         </section>
       )}
 
+      {/* Tegen de stroom in */}
+      {contrarianStats.length > 0 && tournamentStarted && (
+        <section className="animate-fade-up" style={{ animationDelay: '125ms' }}>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Tegen de stroom in 🐟 — eigenwijze winnaars
+          </p>
+          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            {contrarianStats.map((entry, i) => {
+              const maxWins = contrarianStats[0]?.contraWins ?? 1
+              const pct = Math.round((entry.contraWins / maxWins) * 100)
+              const isTop = i === 0
+              return (
+                <div key={entry.userId} className="px-5 py-3">
+                  <div className="flex items-center gap-3 mb-1.5">
+                    <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
+                      {i + 1}
+                    </span>
+                    <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
+                    <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
+                      {entry.username}
+                    </span>
+                    <span className="font-mono text-[10px] text-wk-muted shrink-0">
+                      {entry.contra}× tegendraads
+                    </span>
+                    <span className={`font-mono text-xs font-bold shrink-0 ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                      {entry.contraWins}× raak
+                    </span>
+                  </div>
+                  <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                    <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
+            Punten gepakt met een voorspelling die inging tegen het meerderheidresultaat (1/X/2)
+          </p>
+
+          {kuddeStats.length > 0 && (
+            <div className="mt-4">
+              <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+                Kuddedieren 🐑 — zwemmen met de school mee
+              </p>
+              <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+                {kuddeStats.map((entry, i) => (
+                  <div key={entry.userId} className="flex items-center gap-3 px-5 py-2.5">
+                    <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">{i + 1}</span>
+                    <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
+                    <span className="flex-1 text-sm font-semibold text-wk-text truncate">{entry.username}</span>
+                    <span className="font-mono text-[10px] text-wk-muted shrink-0">
+                      {entry.withMaj}/{entry.total} met de meerderheid
+                    </span>
+                    <span className="font-mono text-xs font-bold text-wk-soft shrink-0 w-10 text-right">
+                      {entry.pct}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* WK-kampioen verdeling */}
       {tournamentStarted ? (
         <section className="animate-fade-up" style={{ animationDelay: '150ms' }}>
@@ -232,33 +338,62 @@ export default function StatsClient({
               <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">Nog geen antwoorden ingediend.</p>
             </div>
           ) : (
-            <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
-              {kampioenStats.map(({ answer, count, flag_url }, i) => {
-                const pct = totalDeelnemers > 0 ? Math.round((count / totalDeelnemers) * 100) : 0
-                const isTop = i === 0
-                return (
-                  <div key={answer} className="px-5 py-3 border-b border-white/5 last:border-0">
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">{i + 1}</span>
-                      {flag_url && (
-                        <Image src={flag_url} alt={answer} width={28} height={20}
-                          className="rounded-sm object-cover shrink-0 w-7 h-5" />
+            <>
+              {/* Vlaggenmuur — tegelgrootte schaalt met aantal stemmen */}
+              <div className="grid grid-cols-4 sm:grid-cols-6 auto-rows-[68px] sm:auto-rows-[76px] gap-1.5">
+                {kampioenStats.map(({ answer, count, flag_url }, i) => {
+                  const pct = totalDeelnemers > 0 ? Math.round((count / totalDeelnemers) * 100) : 0
+                  const isTop = i === 0
+                  const span = isTop
+                    ? 'col-span-2 row-span-2'
+                    : i <= 2
+                      ? 'col-span-2'
+                      : 'col-span-1'
+                  return (
+                    <div
+                      key={answer}
+                      style={{ animationDelay: `${Math.min(i * 60, 700)}ms` }}
+                      className={`${span} animate-scale-in group relative rounded-xl overflow-hidden border transition-colors duration-200 ${
+                        isTop
+                          ? 'border-wk-gold/50 shadow-[0_0_24px_-6px_rgba(var(--color-wk-gold-raw),0.5)]'
+                          : 'border-white/10 hover:border-white/25'
+                      }`}
+                    >
+                      {flag_url ? (
+                        <Image
+                          src={flag_url}
+                          alt={answer}
+                          fill
+                          sizes="(max-width: 640px) 50vw, 33vw"
+                          className="object-cover opacity-80 group-hover:scale-110 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 bg-wk-bg2" />
                       )}
-                      <span className={`flex-1 text-sm font-semibold ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
-                        {answer}
-                      </span>
-                      <span className="font-mono text-xs text-wk-muted shrink-0">{count}×</span>
-                      <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
-                        {pct}%
-                      </span>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+                      {isTop && <span className="absolute top-1.5 right-2 text-base drop-shadow">👑</span>}
+                      <div className="absolute inset-x-0 bottom-0 px-2 pb-1.5 sm:px-2.5 sm:pb-2">
+                        <p className={`font-display uppercase leading-none truncate drop-shadow ${
+                          isTop
+                            ? 'text-wk-gold text-base sm:text-xl'
+                            : i <= 2
+                              ? 'text-wk-text text-xs sm:text-sm'
+                              : 'text-wk-text text-[10px]'
+                        }`}>
+                          {answer}
+                        </p>
+                        <p className={`font-mono text-wk-soft mt-0.5 ${isTop ? 'text-[10px] sm:text-xs' : 'text-[9px]'}`}>
+                          {count}× · {pct}%
+                        </p>
+                      </div>
                     </div>
-                    <div className="mt-2 ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                      <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+              <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
+                Favoriet van de poule — hoe groter de tegel, hoe vaker getipt als wereldkampioen
+              </p>
+            </>
           )}
         </section>
       ) : (
@@ -362,6 +497,65 @@ export default function StatsClient({
         </section>
       )}
 
+      {/* Joker-rendement */}
+      {jokerRendement && tournamentStarted && (
+        <section className="animate-fade-up" style={{ animationDelay: '275ms' }}>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+            Joker-rendement ★ — wat leverden ze op?
+          </p>
+
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <JokerStatCard
+              value={`${jokerRendement.cashedPct}%`}
+              label="Verzilverd"
+              sub={`${jokerRendement.cashed}/${jokerRendement.total} jokers`}
+            />
+            <JokerStatCard
+              value={`+${jokerRendement.avgExtra}`}
+              label="Gem. winst"
+              sub="extra pt per joker"
+            />
+            <JokerStatCard
+              value={`+${jokerRendement.totalExtra}`}
+              label="Totale winst"
+              sub="extra pt in de poule"
+            />
+          </div>
+
+          {jokerRendement.best.length > 0 && (
+            <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
+              <div className="px-5 py-2.5 border-b border-white/5">
+                <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">Beste joker-inzetten</p>
+              </div>
+              <div className="divide-y divide-white/5">
+                {jokerRendement.best.map((b, i) => (
+                  <div key={`${b.userId}-${b.match}`} className="flex items-center gap-3 px-5 py-2.5">
+                    <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
+                      {i < 3 ? MEDAL[i] : i + 1}
+                    </span>
+                    <AvatarCircle username={b.username} avatarUrl={b.avatarUrl} size={24} />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold truncate ${i === 0 ? 'text-wk-gold' : 'text-wk-text'}`}>
+                        {b.username}
+                      </p>
+                      <p className="font-mono text-[10px] text-wk-muted truncate">
+                        {b.group} · {b.match}
+                      </p>
+                    </div>
+                    <span className={`font-mono text-xs font-bold shrink-0 ${i === 0 ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                      {b.pts}pt <span className="text-wk-muted font-normal">(+{b.pts / 2})</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
+            Een joker verdubbelt de punten; de winst is het verschil met spelen zonder joker
+          </p>
+        </section>
+      )}
+
       {/* Bonus-vraag statistieken */}
       {bonusQuestionStats.length > 0 && (
         <section className="animate-fade-up" style={{ animationDelay: '300ms' }}>
@@ -420,6 +614,18 @@ function StandingRow({ entry, maxPts }: { entry: TopStandingEntry; maxPts: numbe
       <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
         <AnimatedBar pct={pct} color={entry.rank === 1 ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
       </div>
+    </div>
+  )
+}
+
+// ─── Joker stat card ──────────────────────────────────────────────────────────
+
+function JokerStatCard({ value, label, sub }: { value: string; label: string; sub: string }) {
+  return (
+    <div className="bg-wk-surface border border-white/10 rounded-xl px-3 py-3 text-center">
+      <p className="font-display text-xl text-wk-gold leading-none">{value}</p>
+      <p className="font-mono text-[9px] text-wk-soft tracking-widest uppercase mt-1">{label}</p>
+      <p className="font-mono text-[9px] text-wk-muted tracking-widest mt-0.5">{sub}</p>
     </div>
   )
 }

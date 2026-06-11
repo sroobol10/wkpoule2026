@@ -1,13 +1,13 @@
-import Link from 'next/link'
-import Image from 'next/image'
-import { AvatarCircle } from '@/components/avatar-circle'
+import Link from "next/link";
+import Image from "next/image";
+import { AvatarCircle } from "@/components/avatar-circle";
 
 export type BergEntry = {
-  id: string
-  username: string
-  avatarUrl: string | null
-  totalPts: number
-}
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  totalPts: number;
+};
 
 // Het bergpad van start (linksonder) naar de top (rechtsboven), in %-coördinaten.
 // X loopt strikt op zodat positie langs het pad = voortgang richting de beker.
@@ -19,32 +19,35 @@ const WAYPOINTS: Array<[number, number]> = [
   [62, 48],
   [75, 32],
   [86, 13],
-]
+];
 
-const SUMMIT = WAYPOINTS[WAYPOINTS.length - 1]
+const SUMMIT = WAYPOINTS[WAYPOINTS.length - 1];
 
 // Interpoleert een punt op `frac` (0–1) van de totale padlengte.
 function pointAt(frac: number): { x: number; y: number } {
-  const f = Math.max(0, Math.min(1, frac))
-  const lengths: number[] = []
-  let total = 0
+  const f = Math.max(0, Math.min(1, frac));
+  const lengths: number[] = [];
+  let total = 0;
   for (let i = 1; i < WAYPOINTS.length; i++) {
-    const d = Math.hypot(WAYPOINTS[i][0] - WAYPOINTS[i - 1][0], WAYPOINTS[i][1] - WAYPOINTS[i - 1][1])
-    lengths.push(d)
-    total += d
+    const d = Math.hypot(
+      WAYPOINTS[i][0] - WAYPOINTS[i - 1][0],
+      WAYPOINTS[i][1] - WAYPOINTS[i - 1][1],
+    );
+    lengths.push(d);
+    total += d;
   }
-  let dist = f * total
+  let dist = f * total;
   for (let i = 0; i < lengths.length; i++) {
     if (dist <= lengths[i]) {
-      const t = lengths[i] === 0 ? 0 : dist / lengths[i]
+      const t = lengths[i] === 0 ? 0 : dist / lengths[i];
       return {
         x: WAYPOINTS[i][0] + (WAYPOINTS[i + 1][0] - WAYPOINTS[i][0]) * t,
         y: WAYPOINTS[i][1] + (WAYPOINTS[i + 1][1] - WAYPOINTS[i][1]) * t,
-      }
+      };
     }
-    dist -= lengths[i]
+    dist -= lengths[i];
   }
-  return { x: SUMMIT[0], y: SUMMIT[1] }
+  return { x: SUMMIT[0], y: SUMMIT[1] };
 }
 
 export function Bergetappe({
@@ -52,24 +55,24 @@ export function Bergetappe({
   currentUserId,
   progress,
 }: {
-  entries: BergEntry[] // gesorteerd op punten, hoogste eerst
-  currentUserId: string
-  progress: number // gespeeld deel van het toernooi, 0–1
+  entries: BergEntry[]; // gesorteerd op punten, hoogste eerst
+  currentUserId: string;
+  progress: number; // gespeeld deel van het toernooi, 0–1
 }) {
-  const maxPts = entries[0]?.totalPts ?? 0
+  const maxPts = entries[0]?.totalPts ?? 0;
 
   // De koploper staat op `progress` van het pad; de rest naar rato van punten.
   // Spelers met (vrijwel) gelijke stand worden iets uit elkaar geschoven.
-  const stacked: Record<string, number> = {}
+  const stacked: Record<string, number> = {};
   const markers = entries.map((entry, index) => {
-    const raw = maxPts > 0 ? (entry.totalPts / maxPts) * progress : 0
-    const key = raw.toFixed(2)
-    const n = (stacked[key] = (stacked[key] ?? 0) + 1)
-    const { x, y } = pointAt(raw - (n - 1) * 0.018)
-    return { ...entry, x, y, rank: index }
-  })
+    const raw = maxPts > 0 ? (entry.totalPts / maxPts) * progress : 0;
+    const key = raw.toFixed(2);
+    const n = (stacked[key] = (stacked[key] ?? 0) + 1);
+    const { x, y } = pointAt(raw - (n - 1) * 0.018);
+    return { ...entry, x, y, rank: index };
+  });
 
-  const pathPoints = WAYPOINTS.map(([x, y]) => `${x},${y}`).join(' ')
+  const pathPoints = WAYPOINTS.map(([x, y]) => `${x},${y}`).join(" ");
 
   return (
     <div className="space-y-2">
@@ -81,7 +84,12 @@ export function Bergetappe({
         ) : (
           <>
             {/* Berg + pad */}
-            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+            <svg
+              className="absolute inset-0 w-full h-full"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              aria-hidden
+            >
               {/* Verre bergrug voor diepte */}
               <polygon
                 points="0,100 8,88 24,78 42,84 58,66 72,72 100,40 100,100"
@@ -107,23 +115,26 @@ export function Bergetappe({
             </span>
             <span
               className="absolute font-mono text-[8px] text-wk-muted/60 tracking-[0.16em] uppercase"
-              style={{ left: '4%', top: '94%' }}
+              style={{ left: "4%", top: "94%" }}
             >
               Start
             </span>
 
             {/* De WK-beker op de top */}
-            <div className="absolute" style={{ left: `${SUMMIT[0]}%`, top: `${SUMMIT[1]}%` }}>
+            <div
+              className="absolute"
+              style={{ left: `${SUMMIT[0]}%`, top: `${SUMMIT[1]}%` }}
+            >
               <div className="relative -translate-x-1/2 -translate-y-full flex flex-col items-center pb-1">
                 <div
                   className="absolute -inset-4 rounded-full blur-md animate-pulse"
                   style={{
                     background:
-                      'radial-gradient(closest-side, color-mix(in srgb, var(--color-wk-gold) 35%, transparent), transparent)',
+                      "radial-gradient(closest-side, color-mix(in srgb, var(--color-wk-gold) 35%, transparent), transparent)",
                   }}
                 />
                 <Image
-                  src="/cup.png"
+                  src="/pim-cup.png"
                   alt="WK-beker"
                   width={313}
                   height={781}
@@ -133,58 +144,75 @@ export function Bergetappe({
             </div>
 
             {/* Spelers op het pad — achterhoede verschijnt eerst, koploper als laatste */}
-            {markers.map(({ id, username, avatarUrl, totalPts, x, y, rank }) => {
-              const isCurrentUser = id === currentUserId
-              const isLeader = rank === 0
-              const labelAbove = rank % 2 === 0
-              return (
-                <div
-                  key={id}
-                  className="absolute"
-                  style={{ left: `${x}%`, top: `${y}%`, zIndex: entries.length - rank + 1 }}
-                >
+            {markers.map(
+              ({ id, username, avatarUrl, totalPts, x, y, rank }) => {
+                const isCurrentUser = id === currentUserId;
+                const isLeader = rank === 0;
+                const labelAbove = rank % 2 === 0;
+                return (
                   <div
-                    className="animate-podium-pop relative -translate-x-1/2 -translate-y-full flex flex-col items-center"
-                    style={{ animationDelay: `${Math.min(0.15 + (entries.length - 1 - rank) * 0.07, 2)}s` }}
+                    key={id}
+                    className="absolute"
+                    style={{
+                      left: `${x}%`,
+                      top: `${y}%`,
+                      zIndex: entries.length - rank + 1,
+                    }}
                   >
-                    <Link
-                      href={`/deelnemers/${id}`}
-                      className={`block rounded-full shadow-lg ${
-                        isCurrentUser
-                          ? 'ring-2 ring-wk-gold ring-offset-2 ring-offset-wk-bg'
-                          : isLeader
-                            ? 'ring-2 ring-wk-gold/50'
-                            : 'ring-1 ring-white/20'
-                      }`}
-                      title={`${username} · ${totalPts}pt`}
-                    >
-                      <AvatarCircle username={username} avatarUrl={avatarUrl} size={isLeader ? 36 : 26} />
-                    </Link>
                     <div
-                      className={`absolute ${labelAbove ? 'bottom-full mb-1' : 'top-full mt-1'} flex flex-col items-center w-24 pointer-events-none`}
+                      className="animate-podium-pop relative -translate-x-1/2 -translate-y-full flex flex-col items-center"
+                      style={{
+                        animationDelay: `${Math.min(0.15 + (entries.length - 1 - rank) * 0.07, 2)}s`,
+                      }}
                     >
-                      <span
-                        className={`font-mono text-[8px] truncate max-w-full ${
-                          isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-soft'
+                      <Link
+                        href={`/deelnemers/${id}`}
+                        className={`block rounded-full shadow-lg ${
+                          isCurrentUser
+                            ? "ring-2 ring-wk-gold ring-offset-2 ring-offset-wk-bg"
+                            : isLeader
+                              ? "ring-2 ring-wk-gold/50"
+                              : "ring-1 ring-white/20"
                         }`}
+                        title={`${username} · ${totalPts}pt`}
                       >
-                        {username}
-                      </span>
-                      <span className="font-display text-[10px] text-wk-gold leading-tight">
-                        {totalPts}
-                        <span className="font-mono text-[7px] text-wk-muted ml-0.5">pt</span>
-                      </span>
+                        <AvatarCircle
+                          username={username}
+                          avatarUrl={avatarUrl}
+                          size={isLeader ? 36 : 26}
+                        />
+                      </Link>
+                      <div
+                        className={`absolute ${labelAbove ? "bottom-full mb-1" : "top-full mt-1"} flex flex-col items-center w-24 pointer-events-none`}
+                      >
+                        <span
+                          className={`font-mono text-[8px] truncate max-w-full ${
+                            isCurrentUser
+                              ? "font-bold text-wk-gold"
+                              : "text-wk-soft"
+                          }`}
+                        >
+                          {username}
+                        </span>
+                        <span className="font-display text-[10px] text-wk-gold leading-tight">
+                          {totalPts}
+                          <span className="font-mono text-[7px] text-wk-muted ml-0.5">
+                            pt
+                          </span>
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                );
+              },
+            )}
           </>
         )}
       </div>
       <p className="font-mono text-[9px] text-wk-muted tracking-[0.12em] text-center">
-        Afstand = voortgang door het toernooi · Hoogte = punten · De beker wacht op de top
+        Afstand = voortgang door het toernooi · Hoogte = punten · De beker wacht
+        op de top
       </p>
     </div>
-  )
+  );
 }

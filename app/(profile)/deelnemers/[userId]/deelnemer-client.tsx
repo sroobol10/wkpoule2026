@@ -98,44 +98,48 @@ export default function DeelnemerClient({
       {/* Statistieken — altijd tonen, ook bij 0 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <StatCard
+          index={0}
           label="Correct resultaat"
           value={correctPredPct !== null ? `${correctPredPct}%` : '—'}
           sub={playedPreds.length > 0 ? `${correctPreds.length}/${playedPreds.length} wed.` : 'geen data'}
         />
         <StatCard
+          index={1}
           label="Exacte score"
           value={exactPredPct !== null ? `${exactPredPct}%` : '—'}
           sub={playedPreds.length > 0 ? `${exactPreds.length}/${playedPreds.length} wed.` : 'geen data'}
         />
         <StatCard
+          index={2}
           label="Correcte KO-keuze"
           value={koPct !== null ? `${koPct}%` : '—'}
           sub={decidedKO.length > 0 ? `${correctKO.length}/${decidedKO.length} picks` : 'geen data'}
         />
         <StatCard
+          index={3}
           label="Bonus correct"
           value={decidedBonus.length > 0 ? `${correctBonus.length}/${decidedBonus.length}` : '—'}
           sub={decidedBonus.length > 0 ? 'vragen' : 'geen data'}
         />
       </div>
 
-      {/* Tabs */}
-      <div className="flex overflow-x-auto scrollbar-none border-b border-white/10">
+      {/* Tabs — segmented pill control */}
+      <div className="animate-fade-up flex gap-1 overflow-x-auto scrollbar-none bg-wk-surface/80 border border-white/10 rounded-full p-1 backdrop-blur-sm" style={{ animationDelay: '240ms' }}>
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`shrink-0 flex items-center gap-1.5 px-3 sm:px-4 py-2.5 font-mono text-[10px] tracking-[0.14em] uppercase border-b-2 -mb-px transition-colors whitespace-nowrap ${
+            className={`shrink-0 flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full font-mono text-[10px] tracking-[0.14em] uppercase whitespace-nowrap border transition-all duration-200 ${
               tab === t.id
-                ? 'border-wk-gold text-wk-gold'
-                : 'border-transparent text-wk-muted hover:text-wk-soft'
+                ? 'bg-wk-gold/15 border-wk-gold/30 text-wk-gold shadow-[0_0_16px_-4px_rgba(var(--color-wk-gold-raw),0.5)]'
+                : 'border-transparent text-wk-muted hover:text-wk-soft hover:bg-white/5'
             }`}
           >
             {t.label}
             {t.locked
               ? <span className="text-[10px] opacity-50">🔒</span>
               : t.pts != null && (
-                <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${
+                <span className={`text-[9px] px-1.5 py-0.5 rounded-full border transition-colors duration-200 ${
                   tab === t.id
                     ? 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
                     : 'bg-white/5 border-white/10 text-wk-muted'
@@ -147,6 +151,9 @@ export default function DeelnemerClient({
           </button>
         ))}
       </div>
+
+      {/* Tabinhoud — key zorgt voor fade-up bij elke tabwissel */}
+      <div key={tab} className="animate-fade-up space-y-5">
 
       {/* Vergrendeld */}
       {tabs.find((t) => t.id === tab)?.locked && (
@@ -200,14 +207,14 @@ export default function DeelnemerClient({
       {/* Groepsfase */}
       {tab === 'groepsfase' && !tabs.find((t) => t.id === tab)?.locked && (
         <div className="space-y-5">
-          {GROUPS.map((group) => {
+          {GROUPS.map((group, gi) => {
             const gm = matches.filter((m) => m.home_team?.group_name === group)
             if (gm.length === 0) return null
             const pts = gm.reduce((s, m) => s + (predMap[m.id]?.points_awarded ?? 0), 0)
             const filled = gm.filter((m) => predMap[m.id]).length
 
             return (
-              <div key={group}>
+              <div key={group} className="animate-fade-up" style={{ animationDelay: `${Math.min(gi * 50, 400)}ms` }}>
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase">Groep {group}</p>
                   <div className="flex items-center gap-3">
@@ -222,7 +229,7 @@ export default function DeelnemerClient({
                     const pts = pred?.points_awarded
 
                     return (
-                      <div key={m.id} className="px-4 py-3">
+                      <div key={m.id} className="px-4 py-3 transition-colors duration-150 hover:bg-white/[0.03]">
                         <p className="font-mono text-[9px] text-wk-muted tracking-widest mb-1.5">
                           {formatInAmsterdam(m.kickoff_at, 'EEE d MMM · HH:mm')}
                         </p>
@@ -290,7 +297,7 @@ export default function DeelnemerClient({
                       const t2 = pos2 ? allTeams.find((t) => t.id === pos2.team_id) : null
                       if (!t1 && !t2) return null
                       return (
-                        <div key={group} className="flex items-center gap-3 px-4 py-2.5">
+                        <div key={group} className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-white/[0.03]">
                           <span className="font-mono text-[10px] text-wk-muted w-5 shrink-0">{group}</span>
                           <div className="flex-1 flex items-center gap-2 min-w-0">
                             {t1?.flag_url && <Image src={t1.flag_url} alt={t1.name} width={18} height={13} className="rounded-sm shrink-0" />}
@@ -321,7 +328,7 @@ export default function DeelnemerClient({
                       </div>
                       <div className="divide-y divide-white/5">
                         {thirds.map((team) => (
-                          <div key={team.id} className="flex items-center gap-3 px-4 py-2.5">
+                          <div key={team.id} className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-white/[0.03]">
                             <span className="font-mono text-[10px] text-wk-muted w-5 shrink-0">{team.group_name}</span>
                             {team.flag_url && <Image src={team.flag_url} alt={team.name} width={18} height={13} className="rounded-sm shrink-0" />}
                             <span className="flex-1 text-sm text-wk-text">{team.name}</span>
@@ -343,12 +350,12 @@ export default function DeelnemerClient({
           {bracketRows.length === 0 ? (
             <EmptyState>Nog geen bracket picks</EmptyState>
           ) : (
-            KO_STAGE_ORDER.map((stage) => {
+            KO_STAGE_ORDER.map((stage, si) => {
               const stagePicks = bracketRows.filter((p) => slotStageMap[p.slot] === stage)
               if (stagePicks.length === 0) return null
 
               return (
-                <div key={stage}>
+                <div key={stage} className="animate-fade-up" style={{ animationDelay: `${si * 60}ms` }}>
                   <p className="font-mono text-[9px] text-wk-muted tracking-[0.14em] uppercase mb-1.5">
                     {stage === 'final' ? 'Winnaar' : stage === 'third_place' ? 'Winnaar Troostfinale' : `Winnaars van ${KO_STAGE_LABELS[stage]}`}
                   </p>
@@ -357,7 +364,7 @@ export default function DeelnemerClient({
                       const team = teamMap[pick.predicted_team_id]
                       const pts = pick.points_awarded
                       return (
-                        <div key={pick.slot} className="flex items-center gap-3 px-4 py-2.5">
+                        <div key={pick.slot} className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-white/[0.03]">
                           <span className="font-mono text-[10px] text-wk-muted w-7 shrink-0">#{pick.slot}</span>
                           {team?.flag_url && (
                             <Image src={team.flag_url} alt={team.name} width={20} height={14} className="rounded-sm shrink-0" />
@@ -375,13 +382,18 @@ export default function DeelnemerClient({
         </div>
       )}
 
+      </div>
     </div>
   )
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+function StatCard({ label, value, sub, index = 0 }: { label: string; value: string; sub: string; index?: number }) {
   return (
-    <div className="bg-wk-surface border border-white/10 rounded-xl px-4 py-3 text-center">
+    <div
+      style={{ animationDelay: `${index * 70}ms` }}
+      className="animate-fade-up relative overflow-hidden bg-wk-surface border border-white/10 rounded-xl px-4 py-3 text-center transition-all duration-200 hover:-translate-y-0.5 hover:border-wk-gold/30 hover:shadow-lg hover:shadow-black/40"
+    >
+      <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-wk-gold/40 to-transparent" />
       <p className="font-display text-2xl text-wk-gold leading-none">{value}</p>
       <p className="font-mono text-[9px] text-wk-soft tracking-widest uppercase mt-1">{label}</p>
       <p className="font-mono text-[9px] text-wk-muted tracking-widest mt-0.5">{sub}</p>
@@ -397,7 +409,7 @@ function BonusRow({
   ans: { answer: string; points_awarded: number | null } | undefined
 }) {
   return (
-    <div className="px-5 py-3.5 flex items-start justify-between gap-4">
+    <div className="px-5 py-3.5 flex items-start justify-between gap-4 transition-colors duration-150 hover:bg-white/[0.03]">
       <div className="min-w-0">
         <p className="text-sm font-semibold text-wk-text leading-snug">{q.question}</p>
         {q.unlock_date && (

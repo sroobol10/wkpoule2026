@@ -2,6 +2,7 @@ import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { AvatarCircle } from '@/components/avatar-circle'
+import { CountUp } from '@/components/count-up'
 import DeelnemerClient from './deelnemer-client'
 import DeelnemerBackground from './deelnemer-background'
 
@@ -148,46 +149,54 @@ function ProfileHeader({
   } | null
 }) {
   return (
-    <div className="relative rounded-2xl overflow-hidden bg-wk-surface border border-white/10">
+    <div className="relative rounded-3xl overflow-hidden bg-wk-surface border border-white/10 shadow-[0_12px_48px_-16px_rgba(0,0,0,0.7)]">
       {/* Blurry background */}
       {profile.avatar_url ? (
         <div className="absolute inset-0 overflow-hidden">
-          <img src={profile.avatar_url} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover scale-150 blur-3xl opacity-30 saturate-150" />
+          <img src={profile.avatar_url} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover scale-150 blur-3xl opacity-30 saturate-150 animate-ken-burns" />
           <div className="absolute inset-0 bg-gradient-to-b from-wk-bg/40 via-wk-bg/60 to-wk-bg/90" />
         </div>
       ) : (
         <div className="absolute inset-0 bg-gradient-to-br from-wk-gold/5 via-transparent to-wk-blue/5" />
       )}
+      {/* Gouden accentlijn bovenaan */}
+      <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-wk-gold/60 to-transparent" />
 
       {/* Content */}
-      <div className="relative flex flex-col items-center text-center gap-4 px-6 pt-8 pb-6 animate-fade-up">
-        {/* Ring glow around avatar */}
-        <div className="relative">
-          <div className="absolute inset-0 rounded-full bg-wk-gold/20 blur-xl scale-125" />
-          <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={96} />
+      <div className="relative flex flex-col items-center text-center gap-4 px-6 pt-8 pb-6">
+        {/* Avatar met gouden gradient-ring en gloed */}
+        <div className="relative animate-scale-in">
+          <div className="absolute inset-0 rounded-full bg-wk-gold/25 blur-xl scale-125 animate-pulse" />
+          <div className="relative rounded-full p-[3px] bg-gradient-to-br from-wk-gold via-wk-gold/25 to-transparent">
+            <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={96} />
+          </div>
         </div>
 
-        <div style={{ animationDelay: '60ms' }} className="animate-fade-up">
-          <h1 className="font-display text-2xl text-wk-text uppercase leading-none drop-shadow">
+        <div style={{ animationDelay: '80ms' }} className="animate-fade-up">
+          <h1 className="font-display text-2xl sm:text-3xl text-wk-text uppercase leading-none drop-shadow">
             {profile.username}
           </h1>
           {totalPts > 0 && (
-            <p className="font-display text-4xl text-wk-gold mt-1 drop-shadow-lg">
-              {totalPts}
-              <span className="font-mono text-sm text-wk-muted ml-1">pt</span>
+            <p className="font-display text-4xl sm:text-5xl text-wk-gold mt-1.5 drop-shadow-lg tabular-nums">
+              <CountUp value={totalPts} />
+              <span className="font-mono text-sm text-wk-muted ml-1.5">pt</span>
             </p>
           )}
         </div>
 
         {/* Stat pills */}
-        <div className="flex flex-wrap justify-center gap-2" style={{ animationDelay: '120ms' }}>
+        <div className="flex flex-wrap justify-center gap-2">
           {[
             { label: 'Wedstrijden', value: `${predCount}/72` },
             { label: 'Jokers',      value: `${jokerCount}/12` },
             { label: 'Bracket',     value: `${bracketCount}/32` },
             { label: 'Bonus',       value: String(bonusCount) },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-wk-bg/60 border border-white/10 rounded-full px-3 py-1.5 flex items-center gap-1.5">
+          ].map(({ label, value }, i) => (
+            <div
+              key={label}
+              style={{ animationDelay: `${160 + i * 60}ms` }}
+              className="animate-fade-up bg-wk-bg/60 border border-white/10 rounded-full px-3 py-1.5 flex items-center gap-1.5 backdrop-blur-sm transition-colors duration-200 hover:border-wk-gold/40"
+            >
               <span className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">{label}</span>
               <span className="font-mono text-xs font-bold text-wk-gold [text-shadow:0_0_10px_rgba(var(--color-wk-gold-raw),0.6)]">{value}</span>
             </div>
@@ -196,7 +205,7 @@ function ProfileHeader({
 
         {/* Score breakdown */}
         {score && totalPts > 0 && (
-          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1" style={{ animationDelay: '180ms' }}>
+          <div className="animate-fade-up flex flex-wrap justify-center gap-x-4 gap-y-1" style={{ animationDelay: '420ms' }}>
             {[
               { label: 'Wedstr.',  val: score.group_match_pts },
               { label: 'Stand',    val: score.group_standings_pts },
