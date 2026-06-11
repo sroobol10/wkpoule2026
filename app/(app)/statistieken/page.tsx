@@ -19,9 +19,7 @@ export default async function StatistiekenPage() {
     .select('id', { count: 'exact', head: true })
     .eq('stage', 'group')
     .eq('result_entered', true)
-  // DEMO: restrictie tijdelijk uit — terugzetten naar de regel hieronder
-  // const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
-  const tournamentStarted = true
+  const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
 
   // ── Totaal deelnemers ────────────────────────────────────────────────────
   const { count: totalDeelnemers } = await supabase
