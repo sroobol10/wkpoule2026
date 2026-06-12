@@ -1,6 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
+import { preBonusIndex } from '@/lib/bonus-order'
 import { AvatarCircle } from '@/components/avatar-circle'
 import { CountUp } from '@/components/count-up'
 import DeelnemerClient from './deelnemer-client'
@@ -86,8 +87,10 @@ export default async function DeelnemerProfilePage({
       return answeredIds.has(q.id)
     })
     visibleBonusQuestions.sort((a, b) => {
-      if (a.type === b.type) return (a.unlock_date ?? '').localeCompare(b.unlock_date ?? '')
-      return a.type === 'pre_tournament' ? -1 : 1
+      if (a.type !== b.type) return a.type === 'pre_tournament' ? -1 : 1
+      // Algemene vragen in dezelfde volgorde als de bonusvragenpagina
+      if (a.type === 'pre_tournament') return preBonusIndex(a.question) - preBonusIndex(b.question)
+      return (a.unlock_date ?? '').localeCompare(b.unlock_date ?? '')
     })
   }
 
@@ -184,24 +187,6 @@ function ProfileHeader({
           )}
         </div>
 
-        {/* Stat pills */}
-        <div className="flex flex-wrap justify-center gap-2">
-          {[
-            { label: 'Wedstrijden', value: `${predCount}/72` },
-            { label: 'Jokers',      value: `${jokerCount}/12` },
-            { label: 'Bracket',     value: `${bracketCount}/32` },
-            { label: 'Bonus',       value: String(bonusCount) },
-          ].map(({ label, value }, i) => (
-            <div
-              key={label}
-              style={{ animationDelay: `${160 + i * 60}ms` }}
-              className="animate-fade-up bg-wk-bg/60 border border-white/10 rounded-full px-3 py-1.5 flex items-center gap-1.5 backdrop-blur-sm transition-colors duration-200 hover:border-wk-gold/40"
-            >
-              <span className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">{label}</span>
-              <span className="font-mono text-xs font-bold text-wk-gold [text-shadow:0_0_10px_rgba(var(--color-wk-gold-raw),0.6)]">{value}</span>
-            </div>
-          ))}
-        </div>
 
         {/* Score breakdown */}
         {score && totalPts > 0 && (

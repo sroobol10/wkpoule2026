@@ -22,8 +22,16 @@ export default async function BonusvragenPage() {
   // Alle wedstrijden (groepsfase + KO) voor deadline-berekening + wedstrijden-per-dag
   const { data: allGroupMatches } = await supabase
     .from('matches')
-    .select(`kickoff_at, home_team:teams!matches_home_team_id_fkey(name), away_team:teams!matches_away_team_id_fkey(name)`)
+    .select(`id, kickoff_at, home_team:teams!matches_home_team_id_fkey(name, flag_url), away_team:teams!matches_away_team_id_fkey(name, flag_url)`)
     .order('kickoff_at')
+
+  // Eigen voorspellingen, voor het 🔮-symbool bij de dagwedstrijden
+  const { data: myPreds } = await supabase
+    .from('predictions')
+    .select('match_id, predicted_home, predicted_away')
+    .eq('user_id', user.id)
+  const myPredByMatch: Record<string, string> = {}
+  for (const p of myPreds ?? []) myPredByMatch[p.match_id] = `${p.predicted_home}–${p.predicted_away}`
 
   // Deadline = aftrap van de vroegste wedstrijd op die CEST-kalenderdag (geen tijdfilter)
   const firstKickoffByDay: Record<string, string> = {}  // CEST-datum → vroegste kickoff
@@ -40,16 +48,29 @@ export default async function BonusvragenPage() {
   }
 
   // Wedstrijden per CEST-dag (voor de "welke wedstrijden"-dropdown per vraag)
-  type MatchForDay = { kickoff_at: string; home: string; away: string }
+  type TeamRef = { name: string; flag_url: string | null }
+  type MatchForDay = {
+    kickoff_at: string
+    home: string
+    away: string
+    homeFlag: string | null
+    awayFlag: string | null
+    myPred: string | null
+  }
   const matchesByDay: Record<string, MatchForDay[]> = {}
   for (const m of allGroupMatches ?? []) {
     const cest = new Date(new Date(m.kickoff_at).getTime() + 2 * 60 * 60 * 1000)
     const day = cest.toISOString().slice(0, 10)
     if (!matchesByDay[day]) matchesByDay[day] = []
+    const home = m.home_team as TeamRef | null
+    const away = m.away_team as TeamRef | null
     matchesByDay[day].push({
       kickoff_at: m.kickoff_at,
-      home: (m.home_team as { name: string } | null)?.name ?? '?',
-      away: (m.away_team as { name: string } | null)?.name ?? '?',
+      home: home?.name ?? '?',
+      away: away?.name ?? '?',
+      homeFlag: home?.flag_url ?? null,
+      awayFlag: away?.flag_url ?? null,
+      myPred: myPredByMatch[m.id] ?? null,
     })
   }
 

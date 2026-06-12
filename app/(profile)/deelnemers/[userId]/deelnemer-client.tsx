@@ -231,7 +231,7 @@ export default function DeelnemerClient({
                     return (
                       <div key={m.id} className="px-4 py-3 transition-colors duration-150 hover:bg-white/[0.03]">
                         <p className="font-mono text-[9px] text-wk-muted tracking-widest mb-1.5">
-                          {formatInAmsterdam(m.kickoff_at, 'EEE d MMM · HH:mm')}
+                          {formatInAmsterdam(m.kickoff_at, 'd MMM · HH:mm')}
                         </p>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0">

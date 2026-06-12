@@ -39,6 +39,7 @@ export type JokerWinstEntry = {
   avatarUrl: string | null
   extra: number  // extra punten dankzij jokers (verdubbeling)
   played: number // aantal jokers op al gescoorde wedstrijden
+  rank: number   // positie in de volledige ranking
 }
 
 export type VerloopData = {
@@ -55,6 +56,7 @@ export type DayPointsEntry = { day: string; pts: number }
 
 type Props = {
   tournamentStarted: boolean
+  currentUserId: string
   leagues: { id: string; name: string }[]
   selectedLeague: string | null
   kampioenStats: KampioenverdeligEntry[]
@@ -70,6 +72,44 @@ const MEDAL = ['🥇', '🥈', '🥉']
 
 // flagcdn-URLs in de database zijn w80 (80px breed) — voor grote tegels te wazig
 const hiResFlag = (url: string) => url.replace('/w80/', '/w640/')
+
+// GOAT-vraag: binaire keuze tussen Ronaldo en Messi (zelfde herkenning als op de bonusvragenpagina)
+const isGoatQuestion = (q: string) =>
+  q.toLowerCase().includes('goat') || q.toLowerCase().includes('ronaldo') || q.toLowerCase().includes('messi')
+
+// Teaser-kaart die in het bonusvragen-rijtje de GOAT-vraag vervangt
+function GoatTeaser() {
+  return (
+    <Link
+      href="/goat"
+      className="block bg-wk-surface border border-white/10 rounded-xl hover:border-wk-gold/40 transition-colors group overflow-hidden"
+    >
+      <div className="flex items-stretch gap-3 sm:gap-5 px-4 sm:px-5">
+        <Image
+          src="/messi.png"
+          alt="Lionel Messi"
+          width={96}
+          height={128}
+          className="h-20 sm:h-28 w-auto object-contain object-bottom self-end shrink-0 drop-shadow-lg group-hover:scale-105 transition-transform"
+        />
+        <div className="min-w-0 flex-1 py-4 self-center text-center">
+          <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Bonusvraag · Het duel</p>
+          <p className="font-display text-lg text-wk-text uppercase leading-none">🐐 Messi vs Ronaldo</p>
+          <p className="font-mono text-[10px] text-wk-muted mt-1.5 tracking-[0.12em]">
+            Bekijk de tussenstand van het GOAT-duel en wie er voor wie koos
+          </p>
+        </div>
+        <Image
+          src="/ronaldo.png"
+          alt="Cristiano Ronaldo"
+          width={96}
+          height={128}
+          className="h-20 sm:h-28 w-auto object-contain object-bottom self-end shrink-0 drop-shadow-lg group-hover:scale-105 transition-transform"
+        />
+      </div>
+    </Link>
+  )
+}
 
 // ─── Animated bar ─────────────────────────────────────────────────────────────
 
@@ -91,6 +131,7 @@ function AnimatedBar({ pct, color }: { pct: number; color: string }) {
 
 export default function StatsClient({
   tournamentStarted,
+  currentUserId,
   leagues,
   selectedLeague,
   kampioenStats,
@@ -143,37 +184,6 @@ export default function StatsClient({
           </Link>
         </div>
       )}
-
-      {/* GOAT-duel teaser */}
-      <Link
-        href="/goat"
-        className="block animate-fade-up bg-wk-surface border border-white/10 rounded-xl hover:border-wk-gold/40 transition-colors group overflow-hidden"
-        style={{ animationDelay: '25ms' }}
-      >
-        <div className="flex items-stretch gap-3 sm:gap-5 px-4 sm:px-5">
-          <Image
-            src="/messi.png"
-            alt="Lionel Messi"
-            width={96}
-            height={128}
-            className="h-20 sm:h-28 w-auto object-contain object-bottom self-end shrink-0 drop-shadow-lg group-hover:scale-105 transition-transform"
-          />
-          <div className="min-w-0 flex-1 py-4 self-center text-center">
-            <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Bonusvraag · Het duel</p>
-            <p className="font-display text-lg text-wk-text uppercase leading-none">🐐 Messi vs Ronaldo</p>
-            <p className="font-mono text-[10px] text-wk-muted mt-1.5 tracking-[0.12em]">
-              Bekijk de tussenstand van het GOAT-duel en wie er voor wie koos
-            </p>
-          </div>
-          <Image
-            src="/ronaldo.png"
-            alt="Cristiano Ronaldo"
-            width={96}
-            height={128}
-            className="h-20 sm:h-28 w-auto object-contain object-bottom self-end shrink-0 drop-shadow-lg group-hover:scale-105 transition-transform"
-          />
-        </div>
-      </Link>
 
       {/* Head-to-head teaser */}
       <Link
@@ -345,29 +355,29 @@ export default function StatsClient({
             Joker-winst ★ — extra punten dankzij jokers
           </p>
           <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {jokerWinst.map((entry, i) => {
+            {jokerWinst.map((entry) => {
               const maxExtra = Math.max(jokerWinst[0]?.extra ?? 0, 1)
               const pct = Math.round((entry.extra / maxExtra) * 100)
-              const isTop = i === 0 && entry.extra > 0
+              const isMe = entry.userId === currentUserId
               return (
-                <div key={entry.userId} className="px-5 py-3">
+                <div key={entry.userId} className={`px-5 py-3 ${isMe ? 'bg-wk-gold/5' : ''}`}>
                   <div className="flex items-center gap-3 mb-1.5">
                     <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
-                      {i < 3 && entry.extra > 0 ? MEDAL[i] : i + 1}
+                      {entry.rank <= 3 && entry.extra > 0 ? MEDAL[entry.rank - 1] : entry.rank}
                     </span>
                     <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
-                    <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
+                    <span className={`flex-1 text-sm truncate ${isMe ? 'font-bold text-wk-gold' : 'font-semibold text-wk-text'}`}>
                       {entry.username}
                     </span>
                     <span className="font-mono text-[10px] text-wk-muted shrink-0">
                       {entry.played} {entry.played === 1 ? 'joker' : 'jokers'} gespeeld
                     </span>
-                    <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                    <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isMe ? 'text-wk-gold' : 'text-wk-soft'}`}>
                       +{entry.extra}
                     </span>
                   </div>
                   <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                    <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+                    <AnimatedBar pct={pct} color={isMe ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
                   </div>
                 </div>
               )
@@ -391,9 +401,11 @@ export default function StatsClient({
                 <p className="font-mono text-[9px] text-wk-red/70 tracking-[0.18em] uppercase">
                   Vóór het toernooi
                 </p>
-                {preBonusStats.map((q) => (
-                  <BonusQuestionCard key={q.id} stat={q} />
-                ))}
+                {preBonusStats.map((q) =>
+                  isGoatQuestion(q.question)
+                    ? <GoatTeaser key={q.id} />
+                    : <BonusQuestionCard key={q.id} stat={q} />
+                )}
               </div>
             )}
             {dailyBonusStats.length > 0 && (

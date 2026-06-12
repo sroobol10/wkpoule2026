@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { saveBonusAnswer } from '@/app/actions/bonus'
 import { formatInAmsterdam } from '@/lib/format'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
+import { playerCountry } from '@/lib/player-countries'
 
 type Question = {
   id: string
@@ -19,7 +20,14 @@ type Question = {
 type AnswerEntry = { question_id: string; answer: string; points_awarded: number | null }
 type Team = { id: string; name: string; flag_url: string }
 
-type MatchForDay = { kickoff_at: string; home: string; away: string }
+type MatchForDay = {
+  kickoff_at: string
+  home: string
+  away: string
+  homeFlag: string | null
+  awayFlag: string | null
+  myPred: string | null
+}
 
 type Props = {
   questions: Question[]
@@ -56,53 +64,18 @@ function preSort(a: Question, b: Question) {
 }
 
 export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {}, matchesByDay = {} }: Props) {
-  const [showScoring, setShowScoring] = useState(false)
-
   const preTournament = questions
     .filter((q) => q.type === 'pre_tournament')
     .sort(preSort)
   const daily = questions
     .filter((q) => q.type === 'daily')
     .sort((a, b) => (b.unlock_date ?? '').localeCompare(a.unlock_date ?? '')) // nieuwste bovenaan
-  const answeredCount = questions.filter((q) => answerMap[q.id]?.answer).length
 
   return (
     <div className="space-y-8">
       <div>
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Extra punten</p>
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Bonusvragen</h1>
-      </div>
-
-      {/* Puntentelling openklapmenu */}
-      <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
-        <button
-          onClick={() => setShowScoring(v => !v)}
-          className="w-full flex items-center justify-between px-5 py-3 text-left"
-        >
-          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Puntentelling</span>
-          <svg className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {showScoring && (
-          <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
-            {[
-              { label: 'Topscorer',                    pts: '25 punten' },
-              { label: 'Beste speler',                 pts: '15 punten' },
-              { label: 'GOAT-duel',                    pts: '5 punten' },
-              { label: 'Gedoseerde groepsfase',        pts: 'Max. 10 punten' },
-              { label: 'Dagelijkse vragen',            pts: '1 punt' },
-            ].map(({ label, pts }) => (
-              <div key={label} className="flex items-center justify-between gap-4">
-                <span className="font-mono text-[10px] text-wk-soft tracking-widest">{label}</span>
-                <span className="font-mono text-xs font-bold text-wk-gold shrink-0 text-right">{pts}</span>
-              </div>
-            ))}
-            <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-              Gedoseerde groepsfase: maximaal 10 punten, -1 voor elk gelijkspel dat je ernaast zit.
-            </p>
-          </div>
-        )}
       </div>
 
       <div className={daily.length > 0 ? "lg:grid lg:grid-cols-2 lg:gap-8 space-y-8 lg:space-y-0" : "space-y-8"}>
@@ -124,6 +97,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                   question={q}
                   existingAnswer={answerMap[q.id] ?? null}
                   teams={[]}
+                  allTeams={teams}
                   effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
                   dayMatches={q.unlock_date ? (matchesByDay[q.unlock_date] ?? []) : []}
                 />
@@ -150,6 +124,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                   question={q}
                   existingAnswer={answerMap[q.id] ?? null}
                   teams={isTeamQuestion(q.question) ? teams : []}
+                  allTeams={teams}
                   tournamentStarted={anyMatchPlayed}
                 />
               ))}
@@ -167,10 +142,22 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
   )
 }
 
+// Te behalen punten per vraag (rechtsboven in de kaart)
+function ptsToWin(question: Question): string {
+  if (question.type === 'daily') return '1 pt'
+  const q = question.question.toLowerCase()
+  if (q.includes('topscorer')) return '25 pt'
+  if (q.includes('beste speler')) return '15 pt'
+  if (q.includes('gedoseerd')) return 'max 10 pt'
+  if (isGoatQuestion(question.question)) return '5 pt'
+  return 'var. pt' // landenvragen: punten o.b.v. prestaties van het gekozen land
+}
+
 function QuestionCard({
   question,
   existingAnswer,
   teams,
+  allTeams = [],
   tournamentStarted = false,
   effectiveDeadline = null,
   dayMatches = [],
@@ -178,6 +165,7 @@ function QuestionCard({
   question: Question
   existingAnswer: AnswerEntry | null
   teams: Team[]
+  allTeams?: Team[]
   tournamentStarted?: boolean
   effectiveDeadline?: string | null
   dayMatches?: MatchForDay[]
@@ -251,7 +239,21 @@ function QuestionCard({
     handleSave(team.name)
   }
 
-  const accentBg = (saved || !!existingAnswer?.answer) ? 'bg-wk-blue' : 'bg-wk-gold'
+  // Vlag-lookup voor spelers (land via PLAYER_COUNTRIES) en landenantwoorden
+  const flagFor = (country: string | null) =>
+    country ? (allTeams.find((t) => t.name === country)?.flag_url ?? null) : null
+
+  // Kleurcodering accent: dagvragen rood (fout) / groen (goed) / geel (onbeantwoord)
+  // / blauw (beantwoord, antwoord nog onbekend). Pre-vragen: blauw/geel.
+  const answered = saved || !!existingAnswer?.answer
+  let accentBg: string
+  if (question.type === 'daily') {
+    if (pts !== null && pts !== undefined) accentBg = pts > 0 ? 'bg-wk-green' : 'bg-wk-red'
+    else if (answered) accentBg = 'bg-wk-blue'
+    else accentBg = 'bg-wk-gold'
+  } else {
+    accentBg = answered ? 'bg-wk-blue' : 'bg-wk-gold'
+  }
 
   return (
     <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
@@ -264,22 +266,25 @@ function QuestionCard({
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-wk-text leading-snug">{question.question}</p>
               {question.description && (
-                <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 leading-relaxed">{question.description}</p>
+                <p className="font-mono text-[10px] text-wk-muted tracking-widest mt-0.5 leading-relaxed">
+                  {question.description.startsWith('Indien jouw gewenste selectie')
+                    ? 'Conform FIFA-reglementen.'
+                    : question.description}
+                </p>
               )}
             </div>
             <div className="shrink-0 flex items-center gap-2">
-              {pts !== null && pts !== undefined && (
+              {pts !== null && pts !== undefined ? (
                 <span className={`font-mono text-[10px] font-bold px-2 py-1 rounded-full border tracking-[0.12em] uppercase ${
                   pts > 0
                     ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
-                    : 'bg-white/5 border-white/10 text-wk-muted'
+                    : 'bg-wk-red/10 border-wk-red/30 text-wk-red'
                 }`}>
                   {pts} pt
                 </span>
-              )}
-              {closed && pts === null && (
-                <span className="font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
-                  🔒 Gesloten
+              ) : (
+                <span className="font-mono text-[10px] font-bold text-wk-gold bg-wk-gold/10 border border-wk-gold/30 rounded-full px-2 py-1 tracking-[0.12em] uppercase">
+                  {ptsToWin(question)}
                 </span>
               )}
             </div>
@@ -307,13 +312,24 @@ function QuestionCard({
                   {showMatches && (
                     <div className="mt-1.5 rounded-lg bg-wk-bg2 border border-white/10 overflow-hidden">
                       {dayMatches.map((m) => (
-                        <div key={m.kickoff_at} className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 last:border-0">
+                        <div key={m.kickoff_at + m.home} className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 last:border-0">
                           <span className="font-mono text-[9px] text-wk-muted shrink-0 w-10">
                             {formatInAmsterdam(m.kickoff_at, 'HH:mm')}
                           </span>
-                          <span className="font-mono text-[10px] text-wk-soft">
+                          {m.homeFlag && (
+                            <Image src={m.homeFlag} alt={m.home} width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                          )}
+                          <span className="font-mono text-[10px] text-wk-soft truncate">
                             {m.home} – {m.away}
                           </span>
+                          {m.awayFlag && (
+                            <Image src={m.awayFlag} alt={m.away} width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                          )}
+                          {m.myPred && (
+                            <span className="ml-auto font-mono text-[10px] font-bold text-wk-gold shrink-0" title="Jouw voorspelling">
+                              🔮 {m.myPred}
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -337,7 +353,13 @@ function QuestionCard({
                   >
                     <span className={`flex-1 text-sm font-semibold ${answer ? 'text-wk-gold' : 'text-wk-muted'}`}>
                       {answer || 'Kies een speler…'}
+                      {answer && playerCountry(answer) && (
+                        <span className="ml-2 font-mono text-[10px] font-normal text-wk-muted">{playerCountry(answer)}</span>
+                      )}
                     </span>
+                    {answer && flagFor(playerCountry(answer)) && (
+                      <Image src={flagFor(playerCountry(answer))!} alt={playerCountry(answer) ?? ''} width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                    )}
                     {answer && <span className="font-mono text-[10px] text-wk-gold">✓</span>}
                     <svg className={`w-4 h-4 text-wk-muted shrink-0 transition-transform ${showPicker ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -363,11 +385,17 @@ function QuestionCard({
                               key={opt}
                               onClick={() => { setAnswer(opt); setSaved(false); setShowPicker(false); setSearch(''); handleSave(opt) }}
                               disabled={isPending}
-                              className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                              className={`w-full flex items-center gap-2 text-left px-4 py-2.5 text-sm transition-colors ${
                                 answer === opt ? 'text-wk-gold bg-wk-gold/5' : 'text-wk-soft hover:bg-white/5'
                               }`}
                             >
-                              {opt}
+                              <span className="flex-1 truncate">{opt}</span>
+                              {playerCountry(opt) && (
+                                <span className="font-mono text-[9px] text-wk-muted shrink-0">{playerCountry(opt)}</span>
+                              )}
+                              {flagFor(playerCountry(opt)) && (
+                                <Image src={flagFor(playerCountry(opt))!} alt={playerCountry(opt) ?? ''} width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                              )}
                             </button>
                           ))}
                       </div>
@@ -440,8 +468,14 @@ function QuestionCard({
                         : 'border-white/10 bg-wk-bg2 text-wk-soft hover:border-white/20'
                     }`}
                   >
-                    {name}
-                    {answer === name && <span className="ml-1.5 font-mono text-[10px]">✓</span>}
+                    <span className="inline-flex items-center gap-2">
+                      {flagFor(playerCountry(name)) && (
+                        <Image src={flagFor(playerCountry(name))!} alt={playerCountry(name) ?? ''} width={20} height={14} className="rounded-sm object-cover w-5 h-3.5" />
+                      )}
+                      {name}
+                      <span className="font-mono text-[9px] font-normal text-wk-muted">{playerCountry(name)}</span>
+                      {answer === name && <span className="font-mono text-[10px]">✓</span>}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -552,13 +586,18 @@ function QuestionCard({
                     const t = teams.find((t) => t.name === existingAnswer.answer)
                     return t ? <Image src={t.flag_url} alt={t.name} width={28} height={20} className="rounded-sm object-cover shrink-0 w-7 h-5" /> : null
                   })()}
-                  <p className="text-sm text-wk-soft">{existingAnswer.answer}</p>
+                  {inputMode !== 'team' && flagFor(playerCountry(existingAnswer.answer)) && (
+                    <Image src={flagFor(playerCountry(existingAnswer.answer))!} alt={playerCountry(existingAnswer.answer) ?? ''} width={28} height={20} className="rounded-sm object-cover shrink-0 w-7 h-5" />
+                  )}
+                  <p className="text-sm text-wk-soft">
+                    {existingAnswer.answer}
+                    {inputMode !== 'team' && playerCountry(existingAnswer.answer) && (
+                      <span className="ml-2 font-mono text-[10px] text-wk-muted">{playerCountry(existingAnswer.answer)}</span>
+                    )}
+                  </p>
                 </div>
               ) : (
                 <p className="font-mono text-xs text-wk-muted tracking-[0.12em] italic">Geen antwoord ingediend</p>
-              )}
-              {question.correct_answer_set && (
-                <p className="font-mono text-[10px] text-wk-green tracking-[0.12em] uppercase mt-1">Correct antwoord bekendgemaakt</p>
               )}
             </div>
           )}

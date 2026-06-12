@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getActivePlayerIds } from '@/lib/active-players'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
+import { preBonusIndex } from '@/lib/bonus-order'
 import VergelijkClient, {
   type Deelnemer,
   type SpelerData,
@@ -100,15 +101,20 @@ export default async function VergelijkPage({
         .order('total_pts', { ascending: false })
     : { data: [] }
   const ranked = ((scoreRows ?? []) as ScoreRow[]).filter((s) => activeIds.has(s.user_id))
-  const rankById: Record<string, number> = {}
-  ranked.forEach((s, i) => { rankById[s.user_id] = i + 1 })
   const scoreById: Record<string, ScoreRow> = {}
   for (const s of ranked) scoreById[s.user_id] = s
 
-  // Selectie: ?a en ?b, met zinnige defaults (jij vs de koploper)
+  // Rang binnen de getoonde (league-gefilterde) deelnemers
+  const leagueRanked = ranked.filter((s) => byId[s.user_id])
+  const leagueRankById: Record<string, number> = {}
+  leagueRanked.forEach((s, i) => { leagueRankById[s.user_id] = i + 1 })
+
+  // Selectie: ?a en ?b, met zinnige defaults (jij vs de koploper) — altijd
+  // binnen de gefilterde deelnemerslijst, anders crasht de opbouw
   const valid = (id?: string) => (id && byId[id] ? id : null)
   const idA = valid(a) ?? (byId[user.id] ? user.id : deelnemers[0]?.id ?? null)
-  const defaultB = ranked.map((s) => s.user_id).find((uid) => uid !== idA) ?? deelnemers.find((d) => d.id !== idA)?.id
+  const defaultB = leagueRanked.map((s) => s.user_id).find((uid) => uid !== idA)
+    ?? deelnemers.find((d) => d.id !== idA)?.id
   const idB = valid(b) && valid(b) !== idA ? valid(b) : defaultB ?? null
 
   const emptyScore: Omit<ScoreRow, 'user_id'> = {
@@ -120,7 +126,7 @@ export default async function VergelijkPage({
     const s = scoreById[id] ?? { user_id: id, ...emptyScore }
     return {
       ...byId[id],
-      rank: rankById[id] ?? null,
+      rank: leagueRankById[id] ?? null,
       totalPts: s.total_pts,
       groupMatchPts: s.group_match_pts,
       groupStandingsPts: s.group_standings_pts,
@@ -202,11 +208,14 @@ export default async function VergelijkPage({
 
     const answerFor = (uid: string, qid: string) =>
       (bonusAnswers ?? []).find((ba) => ba.user_id === uid && ba.question_id === qid)?.answer ?? null
-    bonus = (preQuestions ?? []).map((q) => ({
-      question: q.question,
-      a: answerFor(idA, q.id),
-      b: answerFor(idB, q.id),
-    }))
+    // Zelfde volgorde als de bonusvragenpagina: topscorer eerst, kaartenkoning laatst
+    bonus = [...(preQuestions ?? [])]
+      .sort((x, y) => preBonusIndex(x.question) - preBonusIndex(y.question))
+      .map((q) => ({
+        question: q.question,
+        a: answerFor(idA, q.id),
+        b: answerFor(idB, q.id),
+      }))
   }
 
   return (

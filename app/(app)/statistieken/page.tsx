@@ -219,7 +219,7 @@ export default async function StatistiekenPage({
       // Top 8 match IDs
       const topMatchIds = Object.entries(jokerCountByMatch)
         .sort(([, a], [, b]) => b - a)
-        .slice(0, 8)
+        .slice(0, 10)
         .map(([id]) => id)
 
       // Fetch match details (could be started or upcoming)
@@ -289,13 +289,18 @@ export default async function StatistiekenPage({
         }
       }
 
-      jokerWinst = jokerWinstRaw.map((b) => ({
+      // Top-10, plus je eigen rij (met echte positie) als je daarbuiten valt
+      const winstEntry = (b: typeof jokerWinstRaw[number], i: number): JokerWinstEntry => ({
         userId: b.userId,
         username: profileById[b.userId]?.username ?? '?',
         avatarUrl: profileById[b.userId]?.avatar_url ?? null,
         extra: b.extra,
         played: b.played,
-      }))
+        rank: i + 1,
+      })
+      jokerWinst = jokerWinstRaw.slice(0, 10).map(winstEntry)
+      const ownIdx = jokerWinstRaw.findIndex((b) => b.userId === user.id)
+      if (ownIdx >= 10) jokerWinst.push(winstEntry(jokerWinstRaw[ownIdx], ownIdx))
     }
   }
 
@@ -334,9 +339,14 @@ export default async function StatistiekenPage({
 
     const total = answers.length
     const correctLower = q.correct_answer?.toLowerCase() ?? null
+    // Alle antwoorden, oplopend gesorteerd (numeriek waar mogelijk)
     const topAnswers = Object.entries(countMap)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 6)
+      .sort(([a], [b]) => {
+        const na = parseFloat(a)
+        const nb = parseFloat(b)
+        if (!isNaN(na) && !isNaN(nb)) return na - nb
+        return a.localeCompare(b, 'nl', { sensitivity: 'base' })
+      })
       .map(([answer, count]) => ({
         answer,
         count,
@@ -361,6 +371,7 @@ export default async function StatistiekenPage({
   return (
     <StatsClient
       tournamentStarted={tournamentStarted}
+      currentUserId={user.id}
       leagues={privePoules.length > 1 ? privePoules.map(({ id, name }) => ({ id, name })) : []}
       selectedLeague={selectedLeague}
       kampioenStats={kampioenStats}

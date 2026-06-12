@@ -402,9 +402,6 @@ export default function PredictionsClient({
             <h1 className="font-display text-2xl text-wk-text uppercase leading-none">
               Groepsfase
             </h1>
-            <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
-              {filledCount} / {matches.length} wedstrijden ingevuld
-            </p>
           </div>
           <a
             href="/groepen"
@@ -780,6 +777,7 @@ function MatchRow({
   onJokerToggle,
 }: MatchRowProps) {
   const [showAi, setShowAi] = useState(false);
+  const [showDist, setShowDist] = useState(false);
   const [aiState, setAiState] = useState<
     AiPrediction | "loading" | "error" | null
   >(null);
@@ -998,51 +996,70 @@ function MatchRow({
         </div>
       )}
 
-      {/* Uitslagverdeling: wat tipt de poule? */}
+      {/* Uitslagverdeling: wat tipt de poule? (uitklapbaar) */}
       {dist && dist.total > 0 && (
-        <div className="px-5 pb-4 space-y-1.5 border-t border-white/5 pt-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">
-              Wat tipt de poule · {dist.total}×
-            </p>
-            {matchStarted && (
-              <a
-                href={`/wedstrijd/${match.id}`}
-                className="font-mono text-[9px] text-wk-gold tracking-widest uppercase hover:underline underline-offset-2"
-              >
-                Wie koos wat →
-              </a>
-            )}
-          </div>
-          {dist.scores.slice(0, 5).map(({ h, a, count }, i) => {
-            const pct = Math.round((count / dist.total) * 100);
-            const isActual =
-              match.result_entered && h === match.home_score && a === match.away_score;
-            return (
-              <div key={`${h}-${a}`} className="flex items-center gap-3">
-                <span
-                  className={`font-mono text-xs font-bold w-8 text-right shrink-0 ${
-                    isActual ? "text-wk-green" : i === 0 ? "text-wk-gold" : "text-wk-soft"
-                  }`}
-                >
-                  {h}–{a}
-                </span>
-                <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                  <DistBar
-                    pct={pct}
-                    color={isActual ? "bg-wk-green" : i === 0 ? "bg-wk-gold" : "bg-wk-muted/40"}
-                  />
-                </div>
-                <span className="font-mono text-[10px] text-wk-muted w-14 text-right shrink-0">
-                  {count}× ({pct}%)
-                </span>
+        <div className="px-5 pb-4 border-t border-white/5 pt-2">
+          <button
+            onClick={() => setShowDist((v) => !v)}
+            className={`flex items-center justify-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors w-full ${
+              showDist ? "text-wk-gold" : "text-wk-muted hover:text-wk-soft"
+            }`}
+          >
+            <span className="text-[11px]">📊</span>
+            Wat tipt de poule
+            <svg
+              className={`w-3 h-3 transition-transform ${showDist ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showDist && (
+            <div className="mt-3 space-y-1.5">
+              {dist.scores.slice(0, 5).map(({ h, a, count }, i) => {
+                const pct = Math.round((count / dist.total) * 100);
+                const isActual =
+                  match.result_entered && h === match.home_score && a === match.away_score;
+                return (
+                  <div key={`${h}-${a}`} className="flex items-center gap-2.5">
+                    <span
+                      className={`font-mono text-xs font-bold w-7 text-right shrink-0 ${
+                        isActual ? "text-wk-green" : i === 0 ? "text-wk-gold" : "text-wk-soft"
+                      }`}
+                    >
+                      {h}–{a}
+                    </span>
+                    <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                      <DistBar
+                        pct={pct}
+                        color={isActual ? "bg-wk-green" : i === 0 ? "bg-wk-gold" : "bg-wk-muted/40"}
+                      />
+                    </div>
+                    <span className="font-mono text-[9px] text-wk-muted w-16 text-right shrink-0 whitespace-nowrap">
+                      {count}× ({pct}%)
+                    </span>
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                {dist.scores.length > 5 ? (
+                  <p className="font-mono text-[9px] text-wk-muted/60 tracking-widest">
+                    +{dist.scores.length - 5} andere uitslagen
+                  </p>
+                ) : <span />}
+                {matchStarted && (
+                  <a
+                    href={`/wedstrijd/${match.id}`}
+                    className="font-mono text-[9px] text-wk-gold tracking-widest uppercase hover:underline underline-offset-2"
+                  >
+                    Wie koos wat →
+                  </a>
+                )}
               </div>
-            );
-          })}
-          {dist.scores.length > 5 && (
-            <p className="font-mono text-[9px] text-wk-muted/60 tracking-widest pt-0.5">
-              +{dist.scores.length - 5} andere uitslagen
-            </p>
+            </div>
           )}
         </div>
       )}

@@ -130,7 +130,7 @@ function SpelerKop({ speler, color, isLeading, delay }: { speler: SpelerData; co
       </Link>
       {speler.rank !== null && (
         <span className="font-mono text-[9px] text-wk-muted tracking-[0.16em] uppercase mt-1">
-          #{speler.rank} algemeen
+          #{speler.rank} in klassement
         </span>
       )}
     </div>
@@ -223,33 +223,31 @@ export default function VergelijkClient({
           <h1 className="font-display text-3xl sm:text-5xl uppercase leading-none">Head-to-head</h1>
         </div>
 
-        {/* Poule-filter */}
+        {/* Poule-filter — als Links zodat a/b vers door de server worden bepaald */}
         {poules.length > 0 && (
           <div className="animate-fade-up flex flex-wrap justify-center gap-1.5" style={{ animationDelay: '0.05s' }}>
-            <button
-              type="button"
-              onClick={() => navigate(idA, idB, null)}
-              className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors cursor-pointer ${
+            <Link
+              href="/vergelijk"
+              className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
                 pouleId === null
                   ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
                   : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
               }`}
             >
               Iedereen
-            </button>
+            </Link>
             {poules.map((p) => (
-              <button
+              <Link
                 key={p.id}
-                type="button"
-                onClick={() => navigate(idA, idB, p.id)}
-                className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors cursor-pointer ${
+                href={`/vergelijk?poule=${p.id}`}
+                className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
                   pouleId === p.id
                     ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
                     : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
                 }`}
               >
                 {p.name}
-              </button>
+              </Link>
             ))}
           </div>
         )}
