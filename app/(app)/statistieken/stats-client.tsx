@@ -186,6 +186,24 @@ export default function StatsClient({
         </div>
       </Link>
 
+      {/* Head-to-head teaser */}
+      <Link
+        href="/vergelijk"
+        className="block animate-fade-up bg-wk-surface border border-white/10 rounded-xl px-5 py-4 hover:border-wk-gold/40 transition-colors group"
+        style={{ animationDelay: '35ms' }}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Vergelijk · Deelnemers</p>
+            <p className="font-display text-lg text-wk-text uppercase leading-none">⚔️ Head-to-head</p>
+            <p className="font-mono text-[10px] text-wk-muted mt-1.5 tracking-[0.12em]">
+              Zet twee deelnemers tegenover elkaar — punten, voorspellingen en bonuskeuzes
+            </p>
+          </div>
+          <span className="font-display text-xl text-wk-gold group-hover:translate-x-1 transition-transform shrink-0">→</span>
+        </div>
+      </Link>
+
       {/* Nauwkeurigheid */}
       {accuracyStats && (
         <section className="animate-fade-up" style={{ animationDelay: '50ms' }}>
