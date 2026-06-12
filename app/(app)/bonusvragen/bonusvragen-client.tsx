@@ -63,7 +63,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
     .sort(preSort)
   const daily = questions
     .filter((q) => q.type === 'daily')
-    .sort((a, b) => (a.unlock_date ?? '').localeCompare(b.unlock_date ?? ''))
+    .sort((a, b) => (b.unlock_date ?? '').localeCompare(a.unlock_date ?? '')) // nieuwste bovenaan
   const answeredCount = questions.filter((q) => answerMap[q.id]?.answer).length
 
   return (

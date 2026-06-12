@@ -33,17 +33,13 @@ export default async function StatistiekenPage() {
     .eq('stage', 'group')
     .order('kickoff_at')
 
-  const firstKickoffByDay: Record<string, string> = {}
+  // Zelfde regel als de bonusvragenpagina en saveBonusAnswer:
+  // deadline = aftrap van de vroegste wedstrijd op die CEST-kalenderdag
+  const deadlineByDate: Record<string, string> = {}
   for (const m of allGroupMatches ?? []) {
     const cest = new Date(new Date(m.kickoff_at).getTime() + 2 * 60 * 60 * 1000)
     const day = cest.toISOString().slice(0, 10)
-    const hourCEST = cest.getUTCHours()
-    if (hourCEST < 13) continue
-    if (!firstKickoffByDay[day]) firstKickoffByDay[day] = m.kickoff_at
-  }
-  const deadlineByDate: Record<string, string> = {}
-  for (const [day, kickoff] of Object.entries(firstKickoffByDay)) {
-    deadlineByDate[day] = new Date(new Date(kickoff).getTime() - 60 * 60 * 1000).toISOString()
+    if (!deadlineByDate[day]) deadlineByDate[day] = m.kickoff_at
   }
 
   // ── WK-kampioen verdeling ────────────────────────────────────────────────
@@ -422,8 +418,8 @@ export default async function StatistiekenPage() {
       bonusQuestionStats={bonusQuestionStats}
       jokerStats={jokerStats}
       jokerRendement={jokerRendement}
-      verloop={verloopData}
-      dayPoints={dayPointsData}
+      verloop={(playedCount ?? 0) >= 20 ? verloopData : null}
+      dayPoints={(playedCount ?? 0) >= 20 ? dayPointsData : []}
     />
   )
 }

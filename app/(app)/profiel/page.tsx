@@ -45,7 +45,8 @@ export default async function ProfielPage() {
       ? supabase.from('poule_scores').select('user_id', { count: 'exact', head: true })
           .eq('poule_id', generalPoule.id)
       : Promise.resolve({ count: null }),
-    supabase.from('predictions').select('points_awarded')
+    supabase.from('predictions')
+      .select('predicted_home, predicted_away, match:matches!predictions_match_id_fkey(home_score, away_score, result_entered)')
       .eq('user_id', user.id).not('points_awarded', 'is', null),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any).from('bracket_predictions').select('points_awarded')
@@ -59,11 +60,24 @@ export default async function ProfielPage() {
   const rank = generalPoule && score ? (above ?? 0) + 1 : null
   const pouleDeelnemers = pouleTotal ?? 0
 
-  // Wedstrijd-nauwkeurigheid
-  const playedPredCount = scoredPreds?.length ?? 0
-  const exactCount = scoredPreds?.filter((p) => p.points_awarded === 5).length ?? 0
-  // Correct richting = exact (5) + correctPlusOneGoal (3) + correctResult (2)
-  const correctDirectionCount = scoredPreds?.filter((p) => (p.points_awarded ?? 0) >= 2).length ?? 0
+  // Wedstrijd-nauwkeurigheid — vergelijk voorspelling met de echte uitslag.
+  // Niet op points_awarded classificeren: een joker verdubbelt de punten,
+  // waardoor puntwaarden niet meer 1-op-1 aan exact/richting te koppelen zijn.
+  type ScoredPred = {
+    predicted_home: number
+    predicted_away: number
+    match: { home_score: number | null; away_score: number | null; result_entered: boolean } | null
+  }
+  const played = ((scoredPreds ?? []) as unknown as ScoredPred[]).filter(
+    (p) => p.match?.result_entered && p.match.home_score != null && p.match.away_score != null
+  )
+  const playedPredCount = played.length
+  const exactCount = played.filter(
+    (p) => p.predicted_home === p.match!.home_score && p.predicted_away === p.match!.away_score
+  ).length
+  const correctDirectionCount = played.filter(
+    (p) => Math.sign(p.predicted_home - p.predicted_away) === Math.sign((p.match!.home_score ?? 0) - (p.match!.away_score ?? 0))
+  ).length
 
   // Bracket-nauwkeurigheid
   const bracketRows = (scoredBracket ?? []) as { points_awarded: number | null }[]

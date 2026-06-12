@@ -155,7 +155,8 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
   // Herbereken punten per gebruiker (inclusief breakdown)
   for (const userId of userIds) {
     const [predsRes, koRes, advRes, bonusRes, jokersRes, bracketRes] = await Promise.all([
-      supabase.from('predictions').select('points_awarded')
+      supabase.from('predictions')
+        .select('points_awarded, predicted_home, predicted_away, match:matches!predictions_match_id_fkey(home_score, away_score, result_entered)')
         .eq('user_id', userId).not('points_awarded', 'is', null),
       supabase.from('knockout_predictions').select('points_awarded')
         .eq('user_id', userId).not('points_awarded', 'is', null),
@@ -198,8 +199,23 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     ).length
 
     const totalPts       = groupMatchPts + groupStandingsPts + knockoutPts + bonusPrePts + bonusDailyPts
-    const exactHits      = preds.filter((r) => (r.points_awarded ?? 0) >= 5).length
-    const correctResults = preds.filter((r) => r.points_awarded != null && r.points_awarded >= 2 && r.points_awarded < 5).length
+
+    // Exact/correct op basis van de echte uitslag — niet op puntwaarden,
+    // want jokers verdubbelen de punten (richting+1 mét joker = 6 ≠ exact)
+    type ScoredPred = {
+      predicted_home: number
+      predicted_away: number
+      match: { home_score: number | null; away_score: number | null; result_entered: boolean } | null
+    }
+    const scored = (preds as unknown as ScoredPred[]).filter(
+      (r) => r.match?.result_entered && r.match.home_score != null && r.match.away_score != null
+    )
+    const isExact = (r: ScoredPred) =>
+      r.predicted_home === r.match!.home_score && r.predicted_away === r.match!.away_score
+    const exactHits      = scored.filter(isExact).length
+    const correctResults = scored.filter(
+      (r) => !isExact(r) && Math.sign(r.predicted_home - r.predicted_away) === Math.sign((r.match!.home_score ?? 0) - (r.match!.away_score ?? 0))
+    ).length
 
     const userPoules = memberships.filter((m) => m.user_id === userId).map((m) => m.poule_id)
     for (const pouleId of userPoules) {
