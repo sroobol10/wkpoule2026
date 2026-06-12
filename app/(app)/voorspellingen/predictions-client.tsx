@@ -53,6 +53,12 @@ type PouleGroupStanding = {
   byGroup: Record<string, GroupEntry[]>;
 };
 
+// Uitslagverdeling: wat tipt de poule voor deze wedstrijd?
+export type MatchDist = {
+  total: number;
+  scores: { h: number; a: number; count: number }[];
+};
+
 type Props = Readonly<{
   matches: Match[];
   predMap: Record<string, Prediction>;
@@ -61,6 +67,7 @@ type Props = Readonly<{
   jokerMatchIds: string[];
   pouleStandings: PouleStanding[];
   pouleGroupStandings: PouleGroupStanding[];
+  distByMatch: Record<string, MatchDist>;
   currentUserId: string;
 }>;
 
@@ -81,6 +88,7 @@ export default function PredictionsClient({
   jokerMatchIds,
   pouleStandings,
   pouleGroupStandings,
+  distByMatch,
   currentUserId,
 }: Props) {
   const router = useRouter();
@@ -391,9 +399,6 @@ export default function PredictionsClient({
         {/* Header */}
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">
-              Fase 01 · Vooraf invullen
-            </p>
             <h1 className="font-display text-2xl text-wk-text uppercase leading-none">
               Groepsfase
             </h1>
@@ -407,76 +412,6 @@ export default function PredictionsClient({
           >
             Groepsinfo →
           </a>
-        </div>
-
-        {/* Progress bar */}
-        <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-wk-green rounded-full transition-all"
-            style={{ width: `${(filledCount / matches.length) * 100}%` }}
-          />
-        </div>
-
-        {/* Scoring info */}
-        <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
-          <button
-            onClick={() => setShowScoring((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-3 text-left"
-          >
-            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-              Puntentelling
-            </span>
-            <svg
-              className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? "rotate-180" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 9l-7 7-7-7"
-              />
-            </svg>
-          </button>
-          {showScoring && (
-            <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
-              {[
-                { label: "Exacte uitslag", pts: "10 punten" },
-                { label: "Correct resultaat (W/G/V)", pts: "5 punten" },
-                {
-                  label: "Correct resultaat + één doelpunttotaal",
-                  pts: "7 punten",
-                },
-                {
-                  label: "Fout resultaat + één doelpunttotaal",
-                  pts: "2 punten",
-                },
-                { label: "Correcte eindpositie in de groep", pts: "5 punten" },
-              ].map(({ label, pts }) => (
-                <div
-                  key={label}
-                  className="flex items-center justify-between gap-4"
-                >
-                  <span className="font-mono text-[10px] text-wk-soft tracking-widest">
-                    {label}
-                  </span>
-                  <span className="font-mono text-xs font-bold text-wk-gold shrink-0">
-                    {pts}
-                  </span>
-                </div>
-              ))}
-              <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
-                Je hebt de mogelijkheid om in elke groep op één van de zes
-                wedstrijden een joker in te zetten.
-              </p>
-              <p className="font-mono text-[9px] text-wk-muted tracking-widest">
-                Een joker zorgt voor een verdubbeling van het aantal punten dat
-                je behaalt in deze wedstrijd.
-              </p>
-            </div>
-          )}
         </div>
 
         {/* Group tabs */}
@@ -572,6 +507,7 @@ export default function PredictionsClient({
                   pts={pts}
                   locked={locked}
                   matchStarted={matchStarted}
+                  dist={distByMatch[match.id]}
                   hasJoker={jokerSet.has(match.id)}
                   jokerLocked={anyGroupMatchPlayed}
                   exactScore={exactScore}
@@ -611,6 +547,68 @@ export default function PredictionsClient({
               currentUserId={currentUserId}
               activeGroup={activeGroup}
             />
+          )}
+        </div>
+
+        {/* Puntentelling — onderaan, men kent de regels inmiddels */}
+        <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+          <button
+            onClick={() => setShowScoring((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 text-left"
+          >
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+              Puntentelling
+            </span>
+            <svg
+              className={`w-3.5 h-3.5 text-wk-muted transition-transform ${showScoring ? "rotate-180" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+          {showScoring && (
+            <div className="border-t border-white/5 px-5 py-4 space-y-2.5">
+              {[
+                { label: "Exacte uitslag", pts: "10 punten" },
+                { label: "Correct resultaat (W/G/V)", pts: "5 punten" },
+                {
+                  label: "Correct resultaat + één doelpunttotaal",
+                  pts: "7 punten",
+                },
+                {
+                  label: "Fout resultaat + één doelpunttotaal",
+                  pts: "2 punten",
+                },
+                { label: "Correcte eindpositie in de groep", pts: "5 punten" },
+              ].map(({ label, pts }) => (
+                <div
+                  key={label}
+                  className="flex items-center justify-between gap-4"
+                >
+                  <span className="font-mono text-[10px] text-wk-soft tracking-widest">
+                    {label}
+                  </span>
+                  <span className="font-mono text-xs font-bold text-wk-gold shrink-0">
+                    {pts}
+                  </span>
+                </div>
+              ))}
+              <p className="font-mono text-[9px] text-wk-muted tracking-widest pt-2 border-t border-white/5">
+                Je hebt de mogelijkheid om in elke groep op één van de zes
+                wedstrijden een joker in te zetten.
+              </p>
+              <p className="font-mono text-[9px] text-wk-muted tracking-widest">
+                Een joker zorgt voor een verdubbeling van het aantal punten dat
+                je behaalt in deze wedstrijd.
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -659,7 +657,7 @@ function PouleMiniLeaderboard({
   const globalIdx = poules.findIndex((p) => p.pouleId === poule.pouleId);
   const pouleGroupData = groupStandings[globalIdx];
   const groupEntries = pouleGroupData?.byGroup[activeGroup] ?? [];
-  const TOP = 10;
+  const TOP = 5;
 
   return (
     <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
@@ -760,6 +758,7 @@ type MatchRowProps = {
   pts: number | null | undefined;
   locked: boolean;
   matchStarted: boolean;
+  dist?: MatchDist;
   hasJoker: boolean;
   jokerLocked: boolean;
   exactScore: boolean;
@@ -773,6 +772,7 @@ function MatchRow({
   pts,
   locked,
   matchStarted,
+  dist,
   hasJoker,
   jokerLocked,
   exactScore,
@@ -818,9 +818,6 @@ function MatchRow({
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
               {formatInAmsterdam(match.kickoff_at, "EEEE d MMMM · HH:mm")}
             </p>
-            {locked && !match.result_entered && (
-              <span className="text-wk-muted text-xs">🔒</span>
-            )}
           </div>
           {/* Punten rechtsboven */}
           <div className="flex justify-end">
@@ -1000,7 +997,71 @@ function MatchRow({
           )}
         </div>
       )}
+
+      {/* Uitslagverdeling: wat tipt de poule? */}
+      {dist && dist.total > 0 && (
+        <div className="px-5 pb-4 space-y-1.5 border-t border-white/5 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">
+              Wat tipt de poule · {dist.total}×
+            </p>
+            {matchStarted && (
+              <a
+                href={`/wedstrijd/${match.id}`}
+                className="font-mono text-[9px] text-wk-gold tracking-widest uppercase hover:underline underline-offset-2"
+              >
+                Wie koos wat →
+              </a>
+            )}
+          </div>
+          {dist.scores.slice(0, 5).map(({ h, a, count }, i) => {
+            const pct = Math.round((count / dist.total) * 100);
+            const isActual =
+              match.result_entered && h === match.home_score && a === match.away_score;
+            return (
+              <div key={`${h}-${a}`} className="flex items-center gap-3">
+                <span
+                  className={`font-mono text-xs font-bold w-8 text-right shrink-0 ${
+                    isActual ? "text-wk-green" : i === 0 ? "text-wk-gold" : "text-wk-soft"
+                  }`}
+                >
+                  {h}–{a}
+                </span>
+                <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <DistBar
+                    pct={pct}
+                    color={isActual ? "bg-wk-green" : i === 0 ? "bg-wk-gold" : "bg-wk-muted/40"}
+                  />
+                </div>
+                <span className="font-mono text-[10px] text-wk-muted w-14 text-right shrink-0">
+                  {count}× ({pct}%)
+                </span>
+              </div>
+            );
+          })}
+          {dist.scores.length > 5 && (
+            <p className="font-mono text-[9px] text-wk-muted/60 tracking-widest pt-0.5">
+              +{dist.scores.length - 5} andere uitslagen
+            </p>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+// Animerende verdeelbalk (zelfde gedrag als op de oude statistieken-sectie)
+function DistBar({ pct, color }: { pct: number; color: string }) {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setWidth(pct), 150);
+    return () => clearTimeout(t);
+  }, [pct]);
+  return (
+    <div
+      className={`h-full rounded-full ${color}`}
+      style={{ width: `${width}%`, transition: "width 1.2s cubic-bezier(0.4,0,0.2,1)" }}
+    />
   );
 }
 

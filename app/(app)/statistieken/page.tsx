@@ -2,12 +2,15 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
-import StatsClient, { type KampioenverdeligEntry, type MatchStat, type ScoreDist, type AccuracyStats, type BonusQuestionStat, type JokerStat, type JokerRendement, type JokerBestEntry, type VerloopData, type DayPointsEntry } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat, type JokerStat, type JokerWinstEntry, type VerloopData, type DayPointsEntry } from './stats-client'
 
 // '2026-06-12' → '12/6'
 const dayLabel = (d: string) => `${parseInt(d.slice(8), 10)}/${parseInt(d.slice(5, 7), 10)}`
 
-export default async function StatistiekenPage() {
+export default async function StatistiekenPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ league?: string }> }>) {
+  const { league } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -22,9 +25,39 @@ export default async function StatistiekenPage() {
     .eq('result_entered', true)
   const tournamentStarted = (playedCount ?? 0) > 0 || new Date() >= GROUP_STAGE_DEADLINE
 
-  // ── Totaal deelnemers ────────────────────────────────────────────────────
+  // ── League-bepaling ──────────────────────────────────────────────────────
+  // Statistieken gaan alleen over je eigen league. Wie in meerdere leagues
+  // zit (Pim & Stefan) krijgt een filter: per league of beiden (default).
+  type PouleRef = { id: string; name: string; is_general: boolean }
+  const { data: leagueMemberships } = await supabase
+    .from('poule_members')
+    .select('poules(id, name, is_general)')
+    .eq('user_id', user.id)
+  const privePoules = ((leagueMemberships ?? [])
+    .map((m) => m.poules as PouleRef | null)
+    .filter((p): p is PouleRef => !!p && !p.is_general))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const selectedLeague = privePoules.length > 1 && privePoules.some((p) => p.id === league)
+    ? (league as string)
+    : null // null = beiden (of de enige league)
+  const leagueIds = privePoules.length === 0
+    ? [] // geen privé-league → alle actieve deelnemers
+    : selectedLeague ? [selectedLeague] : privePoules.map((p) => p.id)
+
+  // ── Deelnemers binnen de league ──────────────────────────────────────────
   // Alleen wie alle groepswedstrijden heeft voorspeld doet mee
-  const totalDeelnemers = (await getActivePlayerIds(supabase)).size
+  const activeIds = await getActivePlayerIds(supabase)
+  let memberIds = activeIds
+  if (leagueIds.length > 0) {
+    const { data: leagueMembers } = await supabase
+      .from('poule_members')
+      .select('user_id')
+      .in('poule_id', leagueIds)
+    const leagueSet = new Set((leagueMembers ?? []).map((m) => m.user_id))
+    memberIds = new Set([...activeIds].filter((id) => leagueSet.has(id)))
+  }
+  const totalDeelnemers = memberIds.size
 
   // ── Effectieve deadline per dag (voor bonus stats) ───────────────────────
   const { data: allGroupMatches } = await supabase
@@ -47,10 +80,12 @@ export default async function StatistiekenPage() {
 
   if (tournamentStarted) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: finalePicks } = await (supabase as any)
+    const { data: allFinalePicks } = await (supabase as any)
       .from('bracket_predictions')
-      .select('predicted_team_id')
+      .select('user_id, predicted_team_id')
       .eq('slot', 104)
+    const finalePicks = ((allFinalePicks ?? []) as { user_id: string; predicted_team_id: string }[])
+      .filter((p) => memberIds.has(p.user_id))
 
     if (finalePicks && finalePicks.length > 0) {
       const teamIds = (finalePicks as { predicted_team_id: string }[]).map((p) => p.predicted_team_id)
@@ -82,29 +117,16 @@ export default async function StatistiekenPage() {
     }
   }
 
-  // ── Uitslagverdeling + nauwkeurigheid ────────────────────────────────────
-  // Vanaf de aftrap is de verdeling zichtbaar; statistieken die de uitslag
-  // nodig hebben (nauwkeurigheid, heatmap) filteren verderop op home_score.
+  // ── Gestarte wedstrijden (basis voor verloop, speeldagen en joker-winst) ──
   const { data: startedMatches } = await supabase
     .from('matches')
-    .select(`
-      id, match_number, kickoff_at, stage,
-      home_score, away_score,
-      home_team:teams!matches_home_team_id_fkey(name, flag_url, group_name),
-      away_team:teams!matches_away_team_id_fkey(name, flag_url, group_name)
-    `)
+    .select('id, kickoff_at')
     .eq('stage', 'group')
     .lte('kickoff_at', new Date().toISOString())
     .order('kickoff_at')
 
-  type TeamRef = { name: string; flag_url: string; group_name: string }
-
-  const groupedMatches: Record<string, MatchStat[]> = {}
-  let accuracyStats: AccuracyStats | null = null
-
-  // Voor joker-rendement
+  // Voor joker-winst
   const predPtsByUserMatch: Record<string, number | null> = {}
-  const matchInfoForJoker: Record<string, { label: string; group: string }> = {}
 
   // Voor de grafieken: klassementverloop, heatmap en punten per speeldag
   let verloopRaw: { userId: string; isCurrentUser: boolean; values: number[] }[] = []
@@ -115,48 +137,13 @@ export default async function StatistiekenPage() {
   if (startedMatches && startedMatches.length > 0) {
     const matchIds = startedMatches.map((m) => m.id)
 
-    const { data: predictions } = await supabase
+    const { data: allPredictions } = await supabase
       .from('predictions')
       .select('user_id, match_id, predicted_home, predicted_away, points_awarded')
       .in('match_id', matchIds)
+    const predictions = (allPredictions ?? []).filter((p) => memberIds.has(p.user_id))
 
-    type PredEntry = { user_id: string; match_id: string; predicted_home: number; predicted_away: number; points_awarded: number | null }
-    const predsByMatch: Record<string, PredEntry[]> = {}
-    for (const p of predictions ?? []) {
-      predsByMatch[p.match_id] ??= []
-      predsByMatch[p.match_id].push(p)
-    }
-
-    // Score lookup voor nauwkeurigheidsberekening
-    const scoreByMatchId: Record<string, { home: number; away: number }> = {}
-    for (const m of startedMatches) {
-      if (m.home_score != null && m.away_score != null) {
-        scoreByMatchId[m.id] = { home: m.home_score, away: m.away_score }
-      }
-    }
-
-    let exactCount = 0
-    let correctResultCount = 0
-    let totalScoredPredictions = 0
-
-    for (const p of predictions ?? []) {
-      const actual = scoreByMatchId[p.match_id]
-      if (!actual) continue
-      totalScoredPredictions++
-      if (p.predicted_home === actual.home && p.predicted_away === actual.away) exactCount++
-      if (Math.sign(p.predicted_home - p.predicted_away) === Math.sign(actual.home - actual.away)) correctResultCount++
-    }
-
-    if (totalScoredPredictions > 0) {
-      accuracyStats = {
-        playedMatches: Object.keys(scoreByMatchId).length,
-        totalPredictions: totalScoredPredictions,
-        exactCount,
-        correctResultCount,
-      }
-    }
-
-    // Punten per voorspelling (voor joker-rendement)
+    // Punten per voorspelling (voor joker-winst)
     for (const p of predictions ?? []) {
       predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
     }
@@ -193,76 +180,36 @@ export default async function StatistiekenPage() {
         values: verloopDays.map((d) => (cum += ptsByUserDay[uid][d] ?? 0)),
       }
     })
-
-    for (const m of startedMatches) {
-      const homeTeam = m.home_team as TeamRef | null
-      const awayTeam = m.away_team as TeamRef | null
-      if (!homeTeam || !awayTeam) continue
-
-      matchInfoForJoker[m.id] = { label: `${homeTeam.name} – ${awayTeam.name}`, group: homeTeam.group_name }
-
-      const group = homeTeam.group_name
-      const matchPreds = predsByMatch[m.id] ?? []
-
-      const distMap: Record<string, number> = {}
-      for (const p of matchPreds) {
-        const key = `${p.predicted_home}-${p.predicted_away}`
-        distMap[key] = (distMap[key] ?? 0) + 1
-      }
-
-      const distribution: ScoreDist[] = Object.entries(distMap)
-        .map(([key, count]) => {
-          const [h, a] = key.split('-').map(Number)
-          return { predicted_home: h, predicted_away: a, count }
-        })
-        .sort((a, b) => b.count - a.count)
-
-      groupedMatches[group] ??= []
-      groupedMatches[group].push({
-        id: m.id,
-        match_number: m.match_number ?? 0,
-        kickoff_at: m.kickoff_at,
-        home_team: homeTeam.name,
-        away_team: awayTeam.name,
-        home_flag: homeTeam.flag_url,
-        away_flag: awayTeam.flag_url,
-        total_predictions: matchPreds.length,
-        distribution,
-      })
-    }
   }
 
   // ── Joker hotspots + rendement ───────────────────────────────────────────
   let jokerStats: JokerStat[] = []
-  let jokerRendement: JokerRendement | null = null
-  let bestJokersRaw: { userId: string; matchId: string; pts: number }[] = []
+  let jokerWinstRaw: { userId: string; extra: number; played: number }[] = []
 
   if (tournamentStarted) {
-    const { data: allJokers } = await supabase
+    const { data: allJokersRaw } = await supabase
       .from('jokers')
       .select('match_id, user_id')
+    const allJokers = (allJokersRaw ?? []).filter((j) => memberIds.has(j.user_id))
 
     if (allJokers && allJokers.length > 0) {
-      // Rendement: alleen jokers op wedstrijden waarvan de punten al zijn toegekend
+      // Joker-winst per deelnemer: alleen jokers op wedstrijden waarvan de
+      // punten al zijn toegekend. Een joker verdubbelt de basispunten, dus de
+      // winst is de helft van het behaalde totaal op die wedstrijd.
       const decided = allJokers
         .map((j) => ({ userId: j.user_id, matchId: j.match_id, pts: predPtsByUserMatch[`${j.user_id}:${j.match_id}`] }))
         .filter((d): d is { userId: string; matchId: string; pts: number } => d.pts != null)
 
-      if (decided.length > 0) {
-        const cashed = decided.filter((d) => d.pts > 0)
-        // Joker verdubbelt de basispunten: de "winst" van de joker is de helft van het totaal
-        const extraTotal = decided.reduce((s, d) => s + d.pts / 2, 0)
-        bestJokersRaw = [...decided].sort((a, b) => b.pts - a.pts).filter((d) => d.pts > 0).slice(0, 5)
-
-        jokerRendement = {
-          total: decided.length,
-          cashed: cashed.length,
-          cashedPct: Math.round((cashed.length / decided.length) * 100),
-          avgExtra: Math.round((extraTotal / decided.length) * 10) / 10,
-          totalExtra: Math.round(extraTotal),
-          best: [], // wordt hieronder gevuld zodra profielen bekend zijn
-        }
+      const winstByUser: Record<string, { extra: number; played: number }> = {}
+      for (const d of decided) {
+        const u = (winstByUser[d.userId] ??= { extra: 0, played: 0 })
+        u.extra += d.pts / 2
+        u.played++
       }
+      jokerWinstRaw = Object.entries(winstByUser)
+        .map(([userId, v]) => ({ userId, extra: Math.round(v.extra), played: v.played }))
+        .sort((a, b) => b.extra - a.extra || b.played - a.played)
+
       // Count per match
       const jokerCountByMatch: Record<string, number> = {}
       for (const j of allJokers) {
@@ -279,19 +226,24 @@ export default async function StatistiekenPage() {
       const { data: jokerMatches } = await supabase
         .from('matches')
         .select(`
-          id,
+          id, kickoff_at, result_entered,
           home_team:teams!matches_home_team_id_fkey(name, group_name),
           away_team:teams!matches_away_team_id_fkey(name, group_name)
         `)
         .in('id', topMatchIds)
 
       type JokerTeamRef = { name: string; group_name: string }
-      const matchInfoById: Record<string, { homeTeam: string; awayTeam: string; group: string }> = {}
+      const matchInfoById: Record<string, { homeTeam: string; awayTeam: string; group: string; played: boolean }> = {}
       for (const m of jokerMatches ?? []) {
         const home = m.home_team as JokerTeamRef | null
         const away = m.away_team as JokerTeamRef | null
         if (home && away) {
-          matchInfoById[m.id] = { homeTeam: home.name, awayTeam: away.name, group: home.group_name }
+          matchInfoById[m.id] = {
+            homeTeam: home.name,
+            awayTeam: away.name,
+            group: home.group_name,
+            played: m.result_entered || new Date(m.kickoff_at) <= new Date(),
+          }
         }
       }
 
@@ -302,15 +254,17 @@ export default async function StatistiekenPage() {
           homeTeam: matchInfoById[id].homeTeam,
           awayTeam: matchInfoById[id].awayTeam,
           group: matchInfoById[id].group,
+          played: matchInfoById[id].played,
           count: jokerCountByMatch[id],
         }))
     }
   }
 
-  // ── Joker-rendement + verloop: ranglijsten met profielen ─────────────────
-  if (tournamentStarted && (bestJokersRaw.length > 0 || verloopRaw.length > 0)) {
+  // ── Joker-winst + verloop: ranglijsten met profielen ─────────────────────
+  let jokerWinst: JokerWinstEntry[] = []
+  if (tournamentStarted && (jokerWinstRaw.length > 0 || verloopRaw.length > 0)) {
     const userIds = [...new Set([
-      ...bestJokersRaw.map((b) => b.userId),
+      ...jokerWinstRaw.map((b) => b.userId),
       ...verloopRaw.map((s) => s.userId),
     ])]
 
@@ -335,18 +289,13 @@ export default async function StatistiekenPage() {
         }
       }
 
-      if (jokerRendement) {
-        jokerRendement.best = bestJokersRaw
-          .filter((b) => matchInfoForJoker[b.matchId])
-          .map((b): JokerBestEntry => ({
-            userId: b.userId,
-            username: profileById[b.userId]?.username ?? '?',
-            avatarUrl: profileById[b.userId]?.avatar_url ?? null,
-            match: matchInfoForJoker[b.matchId].label,
-            group: matchInfoForJoker[b.matchId].group,
-            pts: b.pts,
-          }))
-      }
+      jokerWinst = jokerWinstRaw.map((b) => ({
+        userId: b.userId,
+        username: profileById[b.userId]?.username ?? '?',
+        avatarUrl: profileById[b.userId]?.avatar_url ?? null,
+        extra: b.extra,
+        played: b.played,
+      }))
     }
   }
 
@@ -357,9 +306,10 @@ export default async function StatistiekenPage() {
     .order('type')
     .order('unlock_date')
 
-  const { data: bonusAnswers } = await supabase
+  const { data: allBonusAnswers } = await supabase
     .from('bonus_answers')
-    .select('question_id, answer')
+    .select('user_id, question_id, answer')
+  const bonusAnswers = (allBonusAnswers ?? []).filter((a) => memberIds.has(a.user_id))
 
   const answersByQuestion: Record<string, string[]> = {}
   for (const a of bonusAnswers ?? []) {
@@ -411,13 +361,13 @@ export default async function StatistiekenPage() {
   return (
     <StatsClient
       tournamentStarted={tournamentStarted}
+      leagues={privePoules.length > 1 ? privePoules.map(({ id, name }) => ({ id, name })) : []}
+      selectedLeague={selectedLeague}
       kampioenStats={kampioenStats}
-      groupedMatches={groupedMatches}
       totalDeelnemers={totalDeelnemers ?? 0}
-      accuracyStats={accuracyStats}
       bonusQuestionStats={bonusQuestionStats}
       jokerStats={jokerStats}
-      jokerRendement={jokerRendement}
+      jokerWinst={jokerWinst}
       verloop={(playedCount ?? 0) >= 20 ? verloopData : null}
       dayPoints={(playedCount ?? 0) >= 20 ? dayPointsData : []}
     />

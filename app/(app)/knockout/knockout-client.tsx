@@ -73,14 +73,6 @@ export default function KnockoutClient({
 
   return (
     <div className="space-y-6">
-      {bracketLocked && (
-        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-3 py-1 tracking-widest uppercase">
-          🔒 Gesloten
-        </span>
-      )}
-
-      <KoScoringInfo />
-
       <BracketClient
         teams={allTeams}
         advancement={advancement}
@@ -89,6 +81,9 @@ export default function KnockoutClient({
         actualWinners={actualWinners}
         advancedFromStage={advancedFromStage}
       />
+
+      {/* Puntentelling — onderaan, men kent de regels inmiddels */}
+      <KoScoringInfo />
     </div>
   )
 }

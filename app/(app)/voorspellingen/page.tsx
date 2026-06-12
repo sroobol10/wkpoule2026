@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getActivePlayerIds } from '@/lib/active-players'
-import PredictionsClient from './predictions-client'
+import PredictionsClient, { type MatchDist } from './predictions-client'
 
 export default async function VoorspellingenPage() {
   const supabase = await createClient()
@@ -111,26 +111,60 @@ export default async function VoorspellingenPage() {
     if (g) matchToGroup[m.id] = g
   }
 
-  // Haal alle voorspellingen op voor alle deelnemers in de poules
-  const allUserIds = [...new Set(pouleStandings.flatMap((p) => p.entries.map((e) => e.userId)))]
-  const groupMatchIds = Object.keys(matchToGroup)
+  // Haal álle groepsvoorspellingen op (gepagineerd: 62 deelnemers × 72
+  // wedstrijden overschrijdt de standaard 1000-rijenlimiet van PostgREST)
+  const allUserIds = new Set(pouleStandings.flatMap((p) => p.entries.map((e) => e.userId)))
+  type PredRow = { user_id: string; match_id: string; predicted_home: number; predicted_away: number; points_awarded: number | null }
+  const allPreds: PredRow[] = []
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await supabase
+      .from('predictions')
+      .select('user_id, match_id, predicted_home, predicted_away, points_awarded')
+      .range(from, from + PAGE - 1)
+    allPreds.push(...((page ?? []) as PredRow[]))
+    if (!page || page.length < PAGE) break
+  }
 
-  const { data: allPreds } = allUserIds.length > 0 && groupMatchIds.length > 0
-    ? await supabase
-        .from('predictions')
-        .select('user_id, match_id, points_awarded')
-        .in('user_id', allUserIds)
-        .in('match_id', groupMatchIds)
-        .not('points_awarded', 'is', null)
-    : { data: [] }
-
-  // Aggregeer: userId → group → pts
+  // Aggregeer: userId → group → pts (voor de mini-competitie)
   const userGroupPts: Record<string, Record<string, number>> = {}
-  for (const p of allPreds ?? []) {
+  for (const p of allPreds) {
+    if (p.points_awarded == null || !allUserIds.has(p.user_id)) continue
     const group = matchToGroup[p.match_id]
     if (!group) continue
     if (!userGroupPts[p.user_id]) userGroupPts[p.user_id] = {}
     userGroupPts[p.user_id][group] = (userGroupPts[p.user_id][group] ?? 0) + (p.points_awarded ?? 0)
+  }
+
+  // ── Uitslagverdeling per wedstrijd ────────────────────────────────────────
+  // Geteld over de actieve leden van je eigen league(s); activeIds is eerder
+  // in deze functie al opgehaald voor de mini-klassementen
+  const privePouleIds = userPoules.filter((p) => !p.is_general).map((p) => p.id)
+  let distMemberIds = activeIds
+  if (privePouleIds.length > 0) {
+    const { data: leagueMembers } = await supabase
+      .from('poule_members')
+      .select('user_id')
+      .in('poule_id', privePouleIds)
+    const leagueSet = new Set((leagueMembers ?? []).map((m) => m.user_id))
+    distMemberIds = new Set([...activeIds].filter((uid) => leagueSet.has(uid)))
+  }
+
+  const distCounts: Record<string, Record<string, number>> = {}
+  for (const p of allPreds) {
+    if (!distMemberIds.has(p.user_id) || !matchToGroup[p.match_id]) continue
+    const key = `${p.predicted_home}-${p.predicted_away}`
+    ;(distCounts[p.match_id] ??= {})[key] = (distCounts[p.match_id][key] ?? 0) + 1
+  }
+  const distByMatch: Record<string, MatchDist> = {}
+  for (const [matchId, counts] of Object.entries(distCounts)) {
+    const scores = Object.entries(counts)
+      .map(([key, count]) => {
+        const [h, a] = key.split('-').map(Number)
+        return { h, a, count }
+      })
+      .sort((x, y) => y.count - x.count)
+    distByMatch[matchId] = { total: scores.reduce((s, d) => s + d.count, 0), scores }
   }
 
   // Bouw per-poule, per-groep ranglijst
@@ -156,6 +190,7 @@ export default async function VoorspellingenPage() {
       jokerMatchIds={jokerMatchIds}
       pouleStandings={pouleStandings}
       pouleGroupStandings={pouleGroupStandings}
+      distByMatch={distByMatch}
       currentUserId={user.id}
     />
   )

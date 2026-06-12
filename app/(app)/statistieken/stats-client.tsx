@@ -13,31 +13,6 @@ export type KampioenverdeligEntry = {
   flag_url: string | null
 }
 
-export type ScoreDist = {
-  predicted_home: number
-  predicted_away: number
-  count: number
-}
-
-export type MatchStat = {
-  id: string
-  match_number: number
-  kickoff_at: string
-  home_team: string
-  away_team: string
-  home_flag: string | null
-  away_flag: string | null
-  total_predictions: number
-  distribution: ScoreDist[]
-}
-
-export type AccuracyStats = {
-  playedMatches: number
-  totalPredictions: number
-  exactCount: number
-  correctResultCount: number
-}
-
 export type BonusQuestionStat = {
   id: string
   question: string
@@ -54,25 +29,16 @@ export type JokerStat = {
   homeTeam: string
   awayTeam: string
   group: string
+  played: boolean
   count: number
 }
 
-export type JokerBestEntry = {
+export type JokerWinstEntry = {
   userId: string
   username: string
   avatarUrl: string | null
-  match: string
-  group: string
-  pts: number
-}
-
-export type JokerRendement = {
-  total: number
-  cashed: number
-  cashedPct: number
-  avgExtra: number
-  totalExtra: number
-  best: JokerBestEntry[]
+  extra: number  // extra punten dankzij jokers (verdubbeling)
+  played: number // aantal jokers op al gescoorde wedstrijden
 }
 
 export type VerloopData = {
@@ -89,18 +55,17 @@ export type DayPointsEntry = { day: string; pts: number }
 
 type Props = {
   tournamentStarted: boolean
+  leagues: { id: string; name: string }[]
+  selectedLeague: string | null
   kampioenStats: KampioenverdeligEntry[]
-  groupedMatches: Record<string, MatchStat[]>
   totalDeelnemers: number
-  accuracyStats: AccuracyStats | null
   bonusQuestionStats: BonusQuestionStat[]
   jokerStats: JokerStat[]
-  jokerRendement: JokerRendement | null
+  jokerWinst: JokerWinstEntry[]
   verloop: VerloopData | null
   dayPoints: DayPointsEntry[]
 }
 
-const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
 const MEDAL = ['🥇', '🥈', '🥉']
 
 // flagcdn-URLs in de database zijn w80 (80px breed) — voor grote tegels te wazig
@@ -126,21 +91,16 @@ function AnimatedBar({ pct, color }: { pct: number; color: string }) {
 
 export default function StatsClient({
   tournamentStarted,
+  leagues,
+  selectedLeague,
   kampioenStats,
-  groupedMatches,
   totalDeelnemers,
-  accuracyStats,
   bonusQuestionStats,
   jokerStats,
-  jokerRendement,
+  jokerWinst,
   verloop,
   dayPoints,
 }: Props) {
-  const [activeGroup, setActiveGroup] = useState('A')
-  const [openMatch, setOpenMatch] = useState<string | null>(null)
-
-  const availableGroups = GROUPS.filter((g) => groupedMatches[g]?.length)
-
   const preBonusStats = bonusQuestionStats.filter((q) => q.type === 'pre_tournament')
   const dailyBonusStats = bonusQuestionStats.filter((q) => q.type === 'daily')
 
@@ -154,6 +114,35 @@ export default function StatsClient({
           {totalDeelnemers} {totalDeelnemers === 1 ? 'deelnemer' : 'deelnemers'}
         </p>
       </div>
+
+      {/* League-filter — alleen voor leden van meerdere leagues */}
+      {leagues.length > 1 && (
+        <div className="animate-fade-up flex flex-wrap gap-1.5" style={{ animationDelay: '15ms' }}>
+          {leagues.map((l) => (
+            <Link
+              key={l.id}
+              href={`/statistieken?league=${l.id}`}
+              className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
+                selectedLeague === l.id
+                  ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
+                  : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+              }`}
+            >
+              {l.name}
+            </Link>
+          ))}
+          <Link
+            href="/statistieken"
+            className={`rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
+              selectedLeague === null
+                ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
+                : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
+            }`}
+          >
+            Beiden
+          </Link>
+        </div>
+      )}
 
       {/* GOAT-duel teaser */}
       <Link
@@ -203,31 +192,6 @@ export default function StatsClient({
           <span className="font-display text-xl text-wk-gold group-hover:translate-x-1 transition-transform shrink-0">→</span>
         </div>
       </Link>
-
-      {/* Nauwkeurigheid */}
-      {accuracyStats && (
-        <section className="animate-fade-up" style={{ animationDelay: '50ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Nauwkeurigheid · {accuracyStats.playedMatches} wedstrijden gespeeld
-          </p>
-          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            <AccuracyRow
-              label="Exacte uitslag"
-              count={accuracyStats.exactCount}
-              total={accuracyStats.totalPredictions}
-              accent
-            />
-            <AccuracyRow
-              label="Correct resultaat"
-              count={accuracyStats.correctResultCount}
-              total={accuracyStats.totalPredictions}
-            />
-          </div>
-          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
-            {accuracyStats.totalPredictions.toLocaleString('nl')} voorspellingen in totaal
-          </p>
-        </section>
-      )}
 
       {/* Klassementverloop */}
       {verloop && tournamentStarted && (
@@ -335,60 +299,6 @@ export default function StatsClient({
         </section>
       )}
 
-      {/* Uitslagverdeling per wedstrijd */}
-      {availableGroups.length > 0 && (
-        <section className="animate-fade-up" style={{ animationDelay: '200ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Uitslagverdeling — gespeelde wedstrijden
-          </p>
-
-          <div className="flex flex-wrap gap-1.5 mb-4">
-            {availableGroups.map((g) => (
-              <button
-                key={g}
-                onClick={() => { setActiveGroup(g); setOpenMatch(null) }}
-                className={`rounded px-3 py-1.5 text-xs font-mono font-bold tracking-[0.14em] uppercase transition-colors ${
-                  activeGroup === g
-                    ? 'bg-wk-surface border border-wk-gold/50 text-wk-gold'
-                    : 'bg-wk-bg2 border border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
-                }`}
-              >
-                {g}
-              </button>
-            ))}
-          </div>
-
-          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {(groupedMatches[activeGroup] ?? []).map((match) => (
-              <MatchDistRow
-                key={match.id}
-                match={match}
-                isOpen={openMatch === match.id}
-                onToggle={() => setOpenMatch(openMatch === match.id ? null : match.id)}
-              />
-            ))}
-            {(groupedMatches[activeGroup] ?? []).length === 0 && (
-              <div className="px-5 py-6 text-center">
-                <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">Nog geen gespeelde wedstrijden in groep {activeGroup}.</p>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {availableGroups.length === 0 && (
-        <section className="animate-fade-up" style={{ animationDelay: '200ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Uitslagverdeling
-          </p>
-          <div className="bg-wk-surface border border-white/10 rounded-xl px-5 py-6 text-center space-y-2">
-            <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">
-              Beschikbaar zodra de eerste wedstrijd is begonnen.
-            </p>
-          </div>
-        </section>
-      )}
-
       {/* Joker hotspots */}
       {jokerStats.length > 0 && tournamentStarted && (
         <section className="animate-fade-up" style={{ animationDelay: '250ms' }}>
@@ -408,6 +318,11 @@ export default function StatsClient({
                     </span>
                     <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
                       {stat.homeTeam} – {stat.awayTeam}
+                      {stat.played && (
+                        <span className="ml-1.5 font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-1.5 py-0.5 tracking-widest align-middle" title="Wedstrijd is gespeeld">
+                          🏁
+                        </span>
+                      )}
                     </span>
                     <span className={`font-mono text-xs font-bold shrink-0 ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
                       {stat.count}×
@@ -423,59 +338,41 @@ export default function StatsClient({
         </section>
       )}
 
-      {/* Joker-rendement */}
-      {jokerRendement && tournamentStarted && (
+      {/* Joker-winst per deelnemer */}
+      {jokerWinst.length > 0 && tournamentStarted && (
         <section className="animate-fade-up" style={{ animationDelay: '275ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Joker-rendement ★ — wat leverden ze op?
+            Joker-winst ★ — extra punten dankzij jokers
           </p>
-
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <JokerStatCard
-              value={`${jokerRendement.cashedPct}%`}
-              label="Verzilverd"
-              sub={`${jokerRendement.cashed}/${jokerRendement.total} jokers`}
-            />
-            <JokerStatCard
-              value={`+${jokerRendement.avgExtra}`}
-              label="Gem. winst"
-              sub="extra pt per joker"
-            />
-            <JokerStatCard
-              value={`+${jokerRendement.totalExtra}`}
-              label="Totale winst"
-              sub="extra pt in de poule"
-            />
-          </div>
-
-          {jokerRendement.best.length > 0 && (
-            <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
-              <div className="px-5 py-2.5 border-b border-white/5">
-                <p className="font-mono text-[9px] text-wk-muted tracking-widest uppercase">Beste joker-inzetten</p>
-              </div>
-              <div className="divide-y divide-white/5">
-                {jokerRendement.best.map((b, i) => (
-                  <div key={`${b.userId}-${b.match}`} className="flex items-center gap-3 px-5 py-2.5">
+          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
+            {jokerWinst.map((entry, i) => {
+              const maxExtra = Math.max(jokerWinst[0]?.extra ?? 0, 1)
+              const pct = Math.round((entry.extra / maxExtra) * 100)
+              const isTop = i === 0 && entry.extra > 0
+              return (
+                <div key={entry.userId} className="px-5 py-3">
+                  <div className="flex items-center gap-3 mb-1.5">
                     <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
-                      {i < 3 ? MEDAL[i] : i + 1}
+                      {i < 3 && entry.extra > 0 ? MEDAL[i] : i + 1}
                     </span>
-                    <AvatarCircle username={b.username} avatarUrl={b.avatarUrl} size={24} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold truncate ${i === 0 ? 'text-wk-gold' : 'text-wk-text'}`}>
-                        {b.username}
-                      </p>
-                      <p className="font-mono text-[10px] text-wk-muted truncate">
-                        {b.group} · {b.match}
-                      </p>
-                    </div>
-                    <span className={`font-mono text-xs font-bold shrink-0 ${i === 0 ? 'text-wk-gold' : 'text-wk-soft'}`}>
-                      {b.pts}pt <span className="text-wk-muted font-normal">(+{b.pts / 2})</span>
+                    <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
+                    <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
+                      {entry.username}
+                    </span>
+                    <span className="font-mono text-[10px] text-wk-muted shrink-0">
+                      {entry.played} {entry.played === 1 ? 'joker' : 'jokers'} gespeeld
+                    </span>
+                    <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                      +{entry.extra}
                     </span>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                  <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                    <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
           <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
             Een joker verdubbelt de punten; de winst is het verschil met spelen zonder joker
           </p>
@@ -638,43 +535,6 @@ function DayPointsChart({ data }: { data: DayPointsEntry[] }) {
   )
 }
 
-// ─── Joker stat card ──────────────────────────────────────────────────────────
-
-function JokerStatCard({ value, label, sub }: { value: string; label: string; sub: string }) {
-  return (
-    <div className="bg-wk-surface border border-white/10 rounded-xl px-3 py-3 text-center">
-      <p className="font-display text-xl text-wk-gold leading-none">{value}</p>
-      <p className="font-mono text-[9px] text-wk-soft tracking-widest uppercase mt-1">{label}</p>
-      <p className="font-mono text-[9px] text-wk-muted tracking-widest mt-0.5">{sub}</p>
-    </div>
-  )
-}
-
-// ─── Accuracy row ─────────────────────────────────────────────────────────────
-
-function AccuracyRow({ label, count, total, accent = false }: {
-  label: string
-  count: number
-  total: number
-  accent?: boolean
-}) {
-  const pct = total > 0 ? Math.round((count / total) * 100) : 0
-  return (
-    <div className="px-5 py-3.5">
-      <div className="flex items-center gap-3 mb-2">
-        <span className="flex-1 text-sm font-semibold text-wk-text">{label}</span>
-        <span className="font-mono text-xs text-wk-muted shrink-0">{count.toLocaleString('nl')}×</span>
-        <span className={`font-mono text-sm font-bold shrink-0 w-12 text-right ${accent ? 'text-wk-gold' : 'text-wk-soft'}`}>
-          {pct}%
-        </span>
-      </div>
-      <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-        <AnimatedBar pct={pct} color={accent ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
-      </div>
-    </div>
-  )
-}
-
 // ─── Bonus question card ──────────────────────────────────────────────────────
 
 function BonusQuestionCard({ stat }: { stat: BonusQuestionStat }) {
@@ -726,126 +586,3 @@ function BonusQuestionCard({ stat }: { stat: BonusQuestionStat }) {
   )
 }
 
-// ─── Match distribution row ───────────────────────────────────────────────────
-
-function MatchDistRow({
-  match,
-  isOpen,
-  onToggle,
-}: {
-  match: MatchStat
-  isOpen: boolean
-  onToggle: () => void
-}) {
-  const top3 = match.distribution.slice(0, 3)
-
-  // 1/X/2-verdeling afgeleid uit de scoreverdeling
-  let homeWin = 0, draw = 0, awayWin = 0
-  for (const d of match.distribution) {
-    if (d.predicted_home > d.predicted_away) homeWin += d.count
-    else if (d.predicted_home < d.predicted_away) awayWin += d.count
-    else draw += d.count
-  }
-  const tugTotal = homeWin + draw + awayWin
-  const tugPct = (n: number) => (tugTotal > 0 ? Math.round((n / tugTotal) * 100) : 0)
-
-  return (
-    <div>
-      <button
-        onClick={onToggle}
-        className="w-full px-5 py-3.5 text-left hover:bg-white/5 transition-colors"
-      >
-      <div className="flex items-center gap-3">
-        <span className="font-mono text-[10px] text-wk-muted w-5 shrink-0">#{match.match_number}</span>
-
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {match.home_flag && (
-            <Image src={match.home_flag} alt={match.home_team} width={20} height={14}
-              className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
-          )}
-          <span className="text-xs font-semibold text-wk-text truncate">{match.home_team}</span>
-          <span className="font-mono text-[10px] text-wk-muted shrink-0">–</span>
-          <span className="text-xs font-semibold text-wk-text truncate">{match.away_team}</span>
-          {match.away_flag && (
-            <Image src={match.away_flag} alt={match.away_team} width={20} height={14}
-              className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
-          )}
-        </div>
-
-        {top3[0] && !isOpen && (
-          <span className="font-mono text-[10px] text-wk-gold shrink-0">
-            {top3[0].predicted_home}–{top3[0].predicted_away}
-          </span>
-        )}
-
-        <span className="font-mono text-[10px] text-wk-muted shrink-0">{match.total_predictions}×</span>
-
-        <svg
-          className={`w-3.5 h-3.5 text-wk-muted transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </div>
-
-      {/* Tug-of-war: waar leunt de poule? (1 / X / 2) */}
-      {tugTotal > 0 && (
-        <div className="mt-2.5 ml-8">
-          <div className="flex h-1.5 rounded-full overflow-hidden bg-white/10 gap-px">
-            <AnimatedBar pct={tugPct(homeWin)} color="bg-wk-blue/80" />
-            <AnimatedBar pct={tugPct(draw)} color="bg-wk-soft/40" />
-            <AnimatedBar pct={tugPct(awayWin)} color="bg-wk-red/80" />
-          </div>
-          <div className="flex justify-between mt-1 font-mono text-[8px] text-wk-muted tracking-widest">
-            <span className="text-wk-blue">1 · {tugPct(homeWin)}%</span>
-            <span>X · {tugPct(draw)}%</span>
-            <span className="text-wk-red">2 · {tugPct(awayWin)}%</span>
-          </div>
-        </div>
-      )}
-      </button>
-
-      {isOpen && (
-        <div className="px-5 pb-4 space-y-1.5 border-t border-white/5 pt-3">
-          {match.distribution.slice(0, 8).map(({ predicted_home, predicted_away, count }, i) => {
-            const pct = match.total_predictions > 0
-              ? Math.round((count / match.total_predictions) * 100)
-              : 0
-            return (
-              <div key={`${predicted_home}-${predicted_away}`} className="flex items-center gap-3">
-                <span className="font-mono text-xs font-bold text-wk-gold w-8 text-right shrink-0">
-                  {predicted_home}–{predicted_away}
-                </span>
-                <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                  <AnimatedBar pct={pct} color={i === 0 ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
-                </div>
-                <span className="font-mono text-[10px] text-wk-muted w-12 text-right shrink-0">
-                  {count}× ({pct}%)
-                </span>
-              </div>
-            )
-          })}
-          {match.distribution.length > 8 && (
-            <p className="font-mono text-[9px] text-wk-muted/60 tracking-widest pt-1">
-              +{match.distribution.length - 8} andere uitslagen
-            </p>
-          )}
-          {match.total_predictions === 0 && (
-            <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">Geen voorspellingen.</p>
-          )}
-          <div className="pt-2">
-            <Link
-              href={`/wedstrijd/${match.id}`}
-              className="inline-flex items-center gap-1 font-mono text-[10px] text-wk-gold tracking-[0.14em] uppercase hover:underline underline-offset-2"
-            >
-              Bekijk het duel — wie koos wat
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}

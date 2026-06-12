@@ -511,6 +511,7 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           email: string
+          full_name: string | null
           id: string
           is_active: boolean
           is_admin: boolean
@@ -521,6 +522,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           email: string
+          full_name?: string | null
           id: string
           is_active?: boolean
           is_admin?: boolean
@@ -531,6 +533,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           email?: string
+          full_name?: string | null
           id?: string
           is_active?: boolean
           is_admin?: boolean

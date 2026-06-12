@@ -29,15 +29,6 @@ const STAGE_LABELS: Record<string, string> = {
   third_place: 'Derde plaats',
   final:       'Finale',
 }
-const STAGE_SHORT: Record<string, string> = {
-  r32:         'R32',
-  r16:         'R16',
-  qf:          'KF',
-  sf:          'HF',
-  third_place: '3e',
-  final:       'FIN',
-}
-const STAGE_ORDER = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
 
 // ─── Bracket computation ──────────────────────────────────────────────────────
 
@@ -155,11 +146,8 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
       .map((p) => [p.slot, p.points_awarded!])
   )
   const [isPending, startTransition] = useTransition()
-  const [activeStage, setActiveStage] = useState('r32')
 
   const bracket = computeBracket(advMap, thirdAssignment, picks)
-
-  const totalPicks = Object.keys(picks).length
 
   function pickWinner(slot: number, teamId: string) {
     if (locked || isPending) return
@@ -211,85 +199,33 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
     )
   }
 
+  // Alle wedstrijden onder elkaar in chronologische volgorde
+  const ordered = [...BRACKET].sort((a, b) =>
+    (KO_KICKOFFS[a.slot] ?? '').localeCompare(KO_KICKOFFS[b.slot] ?? '') || a.slot - b.slot
+  )
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">
-            Fase 02 · Vóór het toernooi · Knock-out
-          </p>
-          <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
-            {totalPicks} / 32 wedstrijden voorspeld
-          </p>
-        </div>
-        {locked && (
-          <span className="font-mono text-[10px] text-wk-gold border border-wk-gold/30 rounded-full px-3 py-1 tracking-widest uppercase">
-            🔒 Gesloten
-          </span>
-        )}
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-wk-green rounded-full transition-all"
-          style={{ width: `${(totalPicks / 32) * 100}%` }}
-        />
-      </div>
-
-      {/* Stage tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-        {STAGE_ORDER.map((stage) => {
-          const stageMatches = BRACKET.filter((m) => m.stage === stage)
-          const done = stageMatches.filter((m) => picks[m.slot]).length
-          return (
-            <button
-              key={stage}
-              onClick={() => setActiveStage(stage)}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-[10px] tracking-[0.14em] uppercase border transition-colors ${
-                activeStage === stage
-                  ? 'bg-wk-gold/10 border-wk-gold/50 text-wk-gold'
-                  : 'bg-wk-surface border-white/10 text-wk-muted hover:text-wk-soft'
-              }`}
-            >
-              {STAGE_SHORT[stage]}
-              {done === stageMatches.length && (
-                <span className="text-wk-green text-[9px]">✓</span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Stage label */}
-      <p className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-        {STAGE_LABELS[activeStage]}
-      </p>
-
-      {/* Matches */}
-      <div className="space-y-3">
-        {BRACKET.filter((m) => m.stage === activeStage).map((matchDef) => {
-          const m = bracket[matchDef.slot]
-          // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
-          const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
-          return (
-            <BracketMatchCard
-              key={matchDef.slot}
-              match={m}
-              teamMap={teamMap}
-              locked={locked}
-              isPending={isPending}
-              onPick={(teamId) => pickWinner(m.slot, teamId)}
-              actualWinnerId={actualWinners[matchDef.slot] ?? null}
-              kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
-              advancedTeams={advancedSet}
-              stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
-              pts={ptsPerSlot[matchDef.slot] ?? null}
-            />
-          )
-        })}
-      </div>
+    <div className="space-y-3">
+      {ordered.map((matchDef) => {
+        const m = bracket[matchDef.slot]
+        // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
+        const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
+        return (
+          <BracketMatchCard
+            key={matchDef.slot}
+            match={m}
+            teamMap={teamMap}
+            locked={locked}
+            isPending={isPending}
+            onPick={(teamId) => pickWinner(m.slot, teamId)}
+            actualWinnerId={actualWinners[matchDef.slot] ?? null}
+            kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
+            advancedTeams={advancedSet}
+            stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
+            pts={ptsPerSlot[matchDef.slot] ?? null}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -334,12 +270,15 @@ function BracketMatchCard({
     }`}>
       {/* Header */}
       <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase shrink-0">
             Wedstrijd {match.slot}
           </span>
+          <span className="font-mono text-[9px] text-wk-gold/70 tracking-widest uppercase shrink-0">
+            {STAGE_LABELS[match.stage] ?? match.stage}
+          </span>
           {kickoffAt && (
-            <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest">
+            <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest truncate">
               · {formatInAmsterdam(kickoffAt, 'd MMM HH:mm')}
             </span>
           )}

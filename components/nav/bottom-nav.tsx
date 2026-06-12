@@ -15,7 +15,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/voorspellingen', label: 'Groep',    icon: IconClipboard },
   { href: '/knockout',       label: 'KO',        icon: IconTrophy },
   { href: '/bonusvragen',    label: 'Bonus',    icon: IconQuestion },
-  { href: '/poules',         label: 'Poules',   icon: IconUsers },
+  { href: '/poules',         label: 'Score',    icon: IconUsers },
   { href: '/statistieken',   label: 'Stats',    icon: IconChart },
   { href: '/profiel',        label: 'Profiel',  icon: IconUser },
   { href: '/admin',          label: 'Admin',    icon: IconShield, adminOnly: true },

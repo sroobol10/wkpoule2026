@@ -25,7 +25,7 @@ export function AvatarCircle({ username, avatarUrl, size, className = '' }: Prop
       className={`rounded-full bg-wk-bg2 border border-white/10 flex items-center justify-center shrink-0 font-mono font-bold text-wk-gold ${className}`}
       style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }}
     >
-      {username.charAt(0).toUpperCase()}
+      {username?.charAt(0).toUpperCase()}
     </div>
   )
 }
