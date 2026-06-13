@@ -55,6 +55,12 @@ function isGoatQuestion(question: string) {
   return question.toLowerCase().includes('goat') || question.toLowerCase().includes('ronaldo') || question.toLowerCase().includes('messi')
 }
 
+// Landenvragen die het hele toernooi doorlopen: 0 pt = loopt nog (geel), niet fout (rood)
+function isRunningCountryQuestion(question: string) {
+  const q = question.toLowerCase()
+  return q.includes('goalgettergigant') || q.includes('desastreuze') || q.includes('kaartenkoning')
+}
+
 // Vaste volgorde voor de vóór-toernooi vragen
 const PRE_ORDER = ['Topscorer','Beste speler','GOAT','Gedoseerde groepsfase','Goalgettergigant','Desastreuze defensie','Kaartenkoning']
 function preSort(a: Question, b: Question) {
@@ -86,9 +92,6 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
               <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
                 Dagelijkse vragen
               </span>
-              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-                {daily.filter((q) => answerMap[q.id]?.answer).length}/{daily.length} beantwoord
-              </span>
             </div>
             <div className="space-y-3">
               {daily.map((q) => (
@@ -110,11 +113,8 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         {preTournament.length > 0 && (
           <section>
             <div className="flex items-center gap-3 mb-3">
-              <span className="font-mono text-[10px] text-wk-red border border-wk-red/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-                Vóór het toernooi
-              </span>
-              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-                {preTournament.filter((q) => answerMap[q.id]?.answer).length}/{preTournament.length} beantwoord
+              <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+                Algemene vragen
               </span>
             </div>
             <div className="space-y-3">
@@ -243,14 +243,14 @@ function QuestionCard({
   const flagFor = (country: string | null) =>
     country ? (allTeams.find((t) => t.name === country)?.flag_url ?? null) : null
 
-  // Kleurcodering accent: dagvragen rood (fout) / groen (goed) / geel (onbeantwoord)
-  // / blauw (beantwoord, antwoord nog onbekend). Pre-vragen: blauw/geel.
+  // Kleurcodering accent: groen (punten) · rood (0 pt, fout) · geel (onbeantwoord,
+  // of een nog lopende landenvraag met 0 pt) · blauw (beantwoord, uitslag onbekend).
   const answered = saved || !!existingAnswer?.answer
+  const runningCountry = isRunningCountryQuestion(question.question)
+  const scored = pts !== null && pts !== undefined
   let accentBg: string
-  if (question.type === 'daily') {
-    if (pts !== null && pts !== undefined) accentBg = pts > 0 ? 'bg-wk-green' : 'bg-wk-red'
-    else if (answered) accentBg = 'bg-wk-blue'
-    else accentBg = 'bg-wk-gold'
+  if (scored) {
+    accentBg = pts! > 0 ? 'bg-wk-green' : runningCountry ? 'bg-wk-gold' : 'bg-wk-red'
   } else {
     accentBg = answered ? 'bg-wk-blue' : 'bg-wk-gold'
   }
@@ -274,17 +274,21 @@ function QuestionCard({
               )}
             </div>
             <div className="shrink-0 flex items-center gap-2">
-              {pts !== null && pts !== undefined ? (
+              {scored ? (
                 <span className={`font-mono text-[10px] font-bold px-2 py-1 rounded-full border tracking-[0.12em] uppercase ${
-                  pts > 0
+                  pts! > 0
                     ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
-                    : 'bg-wk-red/10 border-wk-red/30 text-wk-red'
+                    : runningCountry
+                      ? 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
+                      : 'bg-wk-red/10 border-wk-red/30 text-wk-red'
                 }`}>
                   {pts} pt
                 </span>
               ) : (
-                <span className="font-mono text-[10px] font-bold text-wk-gold bg-wk-gold/10 border border-wk-gold/30 rounded-full px-2 py-1 tracking-[0.12em] uppercase">
-                  {ptsToWin(question)}
+                /* Nog niet gescoord: te behalen punten zonder achtergrondkleur.
+                   Openstaande dagvraag toont 0 PT. */
+                <span className="font-mono text-[10px] font-bold text-wk-gold tracking-[0.12em] uppercase">
+                  {question.type === 'daily' ? '0 pt' : ptsToWin(question)}
                 </span>
               )}
             </div>

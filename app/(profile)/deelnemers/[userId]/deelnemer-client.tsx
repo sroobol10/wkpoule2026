@@ -63,13 +63,21 @@ export default function DeelnemerClient({
   const koPts = bracketRows.reduce((s, p) => s + (p.points_awarded ?? 0), 0)
 
   // ─── Statistieken ──────────────────────────────────────────────────────────
-  const playedPreds   = predRows.filter((p) => p.points_awarded !== null)
-  const correctPreds  = playedPreds.filter((p) => (p.points_awarded ?? 0) > 0)
-  const exactPreds    = playedPreds.filter((p) => {
-    // Exact = 10pt (geen joker) of 20pt (joker). Joker verdubbelt 10 → 20.
-    const pts = p.points_awarded ?? 0
-    const hasJoker = jokerSet.has(p.match_id)
-    return hasJoker ? pts === 20 : pts === 10
+  // Vergelijk met de échte uitslag i.p.v. punten: 'fout resultaat + 1 doelpunt-
+  // totaal' levert 2 pt op maar is géén correct resultaat, en een joker verdubbelt
+  // de punten — beide maken classificeren op puntwaarde onbetrouwbaar.
+  const matchMap = Object.fromEntries(matches.map((m) => [m.id, m]))
+  const playedPreds = predRows.filter((p) => {
+    const m = matchMap[p.match_id]
+    return m?.result_entered && m.home_score !== null && m.away_score !== null
+  })
+  const correctPreds = playedPreds.filter((p) => {
+    const m = matchMap[p.match_id]!
+    return Math.sign(p.predicted_home - p.predicted_away) === Math.sign((m.home_score ?? 0) - (m.away_score ?? 0))
+  })
+  const exactPreds = playedPreds.filter((p) => {
+    const m = matchMap[p.match_id]!
+    return p.predicted_home === m.home_score && p.predicted_away === m.away_score
   })
   const correctPredPct = playedPreds.length > 0
     ? Math.round((correctPreds.length / playedPreds.length) * 100) : null

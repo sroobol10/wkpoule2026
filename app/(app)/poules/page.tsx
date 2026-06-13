@@ -43,10 +43,10 @@ export default async function PoulesPage({
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Tussenstand</p>
+      {/* Header — eyebrow en titel op één regel */}
+      <div className="flex items-baseline gap-3 flex-wrap">
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Klassement</h1>
+        <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase">Tussenstand</p>
       </div>
 
       {/* League-filter — alleen voor leden van meerdere leagues */}

@@ -189,7 +189,7 @@ export async function PouleStand({
                       )}
                     </div>
                     <div className="text-right shrink-0">
-                      <span className="font-display text-base text-wk-gold">{score.total_pts}<span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span></span>
+                      <span className="font-display text-lg text-wk-gold [text-shadow:0_0_12px_rgba(244,185,46,0.45)]">{score.total_pts}<span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span></span>
                       {prijs && (
                         <p className="font-mono text-[9px] font-bold text-wk-green leading-tight">{prijs}</p>
                       )}
@@ -239,7 +239,7 @@ export async function PouleStand({
                   <th className="sticky left-0 z-10 bg-wk-surface px-3 py-2.5 w-8 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">#</th>
                   <th className="sticky left-8 z-10 bg-wk-surface px-0 py-2.5 w-6 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">±</th>
                   {isSchmitt && (
-                    <th className="sticky left-14 z-10 bg-wk-surface px-2 py-2.5 w-14 font-mono text-[9px] text-wk-green tracking-widest uppercase text-right">Prijs</th>
+                    <th className="sticky left-14 z-10 bg-wk-surface px-2 py-2.5 w-14 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">Prijs</th>
                   )}
                   <th className={`sticky ${naamLeft} z-10 bg-wk-surface pl-2 pr-4 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase`}>Deelnemer</th>
                   <th className="px-3 py-2.5 w-20 min-w-20 font-mono text-[9px] text-wk-gold tracking-widest uppercase text-right">Totaal</th>
@@ -278,7 +278,7 @@ export async function PouleStand({
 
                       {/* Prijzengeld (alleen Schmitt-league) */}
                       {isSchmitt && (
-                        <td className="sticky left-14 z-10 bg-inherit px-2 py-3 w-14 text-right">
+                        <td className="sticky left-14 z-10 bg-inherit px-2 py-3 w-14 text-center">
                           {prijs && (
                             <span className="font-mono text-[10px] font-bold text-wk-green whitespace-nowrap">{prijs}</span>
                           )}
@@ -302,7 +302,7 @@ export async function PouleStand({
 
                       {/* Totaal */}
                       <td className="px-3 py-3 w-20 text-right">
-                        <span className="font-display text-base text-wk-gold">{score.total_pts}</span>
+                        <span className="font-display text-lg text-wk-gold [text-shadow:0_0_12px_rgba(244,185,46,0.45)]">{score.total_pts}</span>
                         <span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span>
                       </td>
 

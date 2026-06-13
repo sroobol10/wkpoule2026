@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { AvatarCircle } from '@/components/avatar-circle'
+import { preBonusIndex } from '@/lib/bonus-order'
+import { playerCountry } from '@/lib/player-countries'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +68,7 @@ type Props = {
   jokerWinst: JokerWinstEntry[]
   verloop: VerloopData | null
   dayPoints: DayPointsEntry[]
+  teamFlags: Record<string, string> // landnaam → vlag-URL
 }
 
 const MEDAL = ['🥇', '🥈', '🥉']
@@ -141,8 +144,11 @@ export default function StatsClient({
   jokerWinst,
   verloop,
   dayPoints,
+  teamFlags,
 }: Props) {
-  const preBonusStats = bonusQuestionStats.filter((q) => q.type === 'pre_tournament')
+  const preBonusStats = bonusQuestionStats
+    .filter((q) => q.type === 'pre_tournament')
+    .sort((a, b) => preBonusIndex(a.question) - preBonusIndex(b.question))
   const dailyBonusStats = bonusQuestionStats.filter((q) => q.type === 'daily')
 
   return (
@@ -389,32 +395,29 @@ export default function StatsClient({
         </section>
       )}
 
-      {/* Bonus-vraag statistieken */}
+      {/* Algemene bonusvragen — antwoordverdeling */}
       {bonusQuestionStats.length > 0 && (
         <section className="animate-fade-up" style={{ animationDelay: '300ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Bonusvragen — antwoordverdeling
+            Algemene bonusvragen
           </p>
           <div className="space-y-4">
             {preBonusStats.length > 0 && (
               <div className="space-y-3">
-                <p className="font-mono text-[9px] text-wk-red/70 tracking-[0.18em] uppercase">
-                  Vóór het toernooi
-                </p>
                 {preBonusStats.map((q) =>
                   isGoatQuestion(q.question)
                     ? <GoatTeaser key={q.id} />
-                    : <BonusQuestionCard key={q.id} stat={q} />
+                    : <BonusQuestionCard key={q.id} stat={q} teamFlags={teamFlags} />
                 )}
               </div>
             )}
             {dailyBonusStats.length > 0 && (
               <div className="space-y-3">
-                <p className="font-mono text-[9px] text-wk-blue/70 tracking-[0.18em] uppercase">
+                <p className="font-mono text-[9px] text-wk-muted tracking-[0.18em] uppercase">
                   Dagelijkse vragen
                 </p>
                 {dailyBonusStats.map((q) => (
-                  <BonusQuestionCard key={q.id} stat={q} />
+                  <BonusQuestionCard key={q.id} stat={q} teamFlags={teamFlags} />
                 ))}
               </div>
             )}
@@ -549,7 +552,21 @@ function DayPointsChart({ data }: { data: DayPointsEntry[] }) {
 
 // ─── Bonus question card ──────────────────────────────────────────────────────
 
-function BonusQuestionCard({ stat }: { stat: BonusQuestionStat }) {
+// Vragen waarbij een vlag bij het antwoord hoort. Topscorer/beste speler →
+// land via de speler; goalgettergigant/desastreuze/kaartenkoning → antwoord is land.
+function answerFlag(question: string, answer: string, teamFlags: Record<string, string>): string | null {
+  const q = question.toLowerCase()
+  const playerBased = q.includes('topscorer') || q.includes('beste speler')
+  const countryBased = q.includes('goalgettergigant') || q.includes('desastreuze') || q.includes('kaartenkoning')
+  if (playerBased) {
+    const land = playerCountry(answer)
+    return land ? (teamFlags[land] ?? null) : null
+  }
+  if (countryBased) return teamFlags[answer] ?? null
+  return null
+}
+
+function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamFlags: Record<string, string> }) {
   return (
     <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
       <div className="px-5 py-3.5 border-b border-white/5">
@@ -572,22 +589,28 @@ function BonusQuestionCard({ stat }: { stat: BonusQuestionStat }) {
 
       {stat.top_answers.length > 0 ? (
         <div className="px-5 py-3 space-y-2">
-          {stat.top_answers.map(({ answer, count, pct, is_correct }) => (
-            <div key={answer} className="flex items-center gap-3">
-              <span className={`font-mono text-xs font-semibold shrink-0 w-28 truncate ${
-                is_correct ? 'text-wk-green' : 'text-wk-soft'
-              }`}>
-                {answer}
-                {is_correct && <span className="ml-1 text-wk-green">✓</span>}
-              </span>
-              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                <AnimatedBar pct={pct} color={is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'} />
+          {stat.top_answers.map(({ answer, count, pct, is_correct }) => {
+            const flag = answerFlag(stat.question, answer, teamFlags)
+            return (
+              <div key={answer} className="flex items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {flag && (
+                    <Image src={flag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                  )}
+                  <span className={`font-mono text-xs font-semibold whitespace-nowrap ${is_correct ? 'text-wk-green' : 'text-wk-soft'}`}>
+                    {answer}
+                    {is_correct && <span className="ml-1 text-wk-green">✓</span>}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-[28px] h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <AnimatedBar pct={pct} color={is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'} />
+                </div>
+                <span className="font-mono text-[9px] text-wk-muted shrink-0 w-11 text-right">
+                  {count}× ({pct}%)
+                </span>
               </div>
-              <span className="font-mono text-[10px] text-wk-muted shrink-0 w-16 text-right">
-                {count}× ({pct}%)
-              </span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       ) : (
         <div className="px-5 py-3">

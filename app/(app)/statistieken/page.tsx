@@ -368,6 +368,11 @@ export default async function StatistiekenPage({
     })
   }
 
+  // Vlaggen-map (landnaam → vlag) voor de antwoordverdeling
+  const { data: allTeamsForFlags } = await supabase.from('teams').select('name, flag_url')
+  const teamFlags: Record<string, string> = {}
+  for (const t of allTeamsForFlags ?? []) if (t.flag_url) teamFlags[t.name] = t.flag_url
+
   return (
     <StatsClient
       tournamentStarted={tournamentStarted}
@@ -381,6 +386,7 @@ export default async function StatistiekenPage({
       jokerWinst={jokerWinst}
       verloop={(playedCount ?? 0) >= 20 ? verloopData : null}
       dayPoints={(playedCount ?? 0) >= 20 ? dayPointsData : []}
+      teamFlags={teamFlags}
     />
   )
 }

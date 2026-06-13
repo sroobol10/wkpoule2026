@@ -505,6 +505,8 @@ export default function PredictionsClient({
                   locked={locked}
                   matchStarted={matchStarted}
                   dist={distByMatch[match.id]}
+                  myHome={pred?.predicted_home ?? null}
+                  myAway={pred?.predicted_away ?? null}
                   hasJoker={jokerSet.has(match.id)}
                   jokerLocked={anyGroupMatchPlayed}
                   exactScore={exactScore}
@@ -756,6 +758,8 @@ type MatchRowProps = {
   locked: boolean;
   matchStarted: boolean;
   dist?: MatchDist;
+  myHome: number | null;
+  myAway: number | null;
   hasJoker: boolean;
   jokerLocked: boolean;
   exactScore: boolean;
@@ -770,6 +774,8 @@ function MatchRow({
   locked,
   matchStarted,
   dist,
+  myHome,
+  myAway,
   hasJoker,
   jokerLocked,
   exactScore,
@@ -777,7 +783,7 @@ function MatchRow({
   onJokerToggle,
 }: MatchRowProps) {
   const [showAi, setShowAi] = useState(false);
-  const [showDist, setShowDist] = useState(false);
+  const [showDist, setShowDist] = useState(true);
   const [aiState, setAiState] = useState<
     AiPrediction | "loading" | "error" | null
   >(null);
@@ -799,7 +805,9 @@ function MatchRow({
   }
 
   return (
-    <div className={exactScore ? "bg-wk-green/[0.08]" : ""}>
+    <div>
+      {/* Bovenblok: kleurt groen bij exact correct, verder standaard grijs */}
+      <div className={exactScore ? "bg-wk-green/[0.08]" : ""}>
       {/* Date + joker row */}
       <div className="px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4">
         {/* Datum-rij: joker links · datum midden · punten rechts */}
@@ -996,14 +1004,25 @@ function MatchRow({
         </div>
       )}
 
-      {/* Uitslagverdeling: wat tipt de poule? (uitklapbaar) */}
-      {dist && dist.total > 0 && (
+      </div>
+      {/* einde bovenblok */}
+
+      {/* Uitslagverdeling: wat tipt de poule? (uitklapbaar, standaard open, altijd grijs) */}
+      {dist && dist.total > 0 && (() => {
+        // Top-5, plus de eigen voorspelling als 6e regel wanneer die buiten de top-5 valt
+        const top = dist.scores.slice(0, 5);
+        const ownInTop = myHome !== null && top.some((r) => r.h === myHome && r.a === myAway);
+        const ownExtra =
+          myHome !== null && myAway !== null && !ownInTop
+            ? dist.scores.find((r) => r.h === myHome && r.a === myAway) ?? { h: myHome, a: myAway, count: 0 }
+            : null;
+        const rows = ownExtra ? [...top, ownExtra] : top;
+        const otherCount = dist.scores.length - top.length - (ownExtra && ownExtra.count > 0 ? 1 : 0);
+        return (
         <div className="px-5 pb-4 border-t border-white/5 pt-2">
           <button
             onClick={() => setShowDist((v) => !v)}
-            className={`flex items-center justify-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase transition-colors w-full ${
-              showDist ? "text-wk-gold" : "text-wk-muted hover:text-wk-soft"
-            }`}
+            className="flex items-center justify-center gap-1.5 font-mono text-[10px] tracking-[0.12em] uppercase text-wk-muted hover:text-wk-soft transition-colors w-full"
           >
             <span className="text-[11px]">📊</span>
             Wat tipt de poule
@@ -1019,35 +1038,40 @@ function MatchRow({
 
           {showDist && (
             <div className="mt-3 space-y-1.5">
-              {dist.scores.slice(0, 5).map(({ h, a, count }, i) => {
-                const pct = Math.round((count / dist.total) * 100);
+              {rows.map(({ h, a, count }) => {
+                const pct = dist.total > 0 ? Math.round((count / dist.total) * 100) : 0;
                 const isActual =
                   match.result_entered && h === match.home_score && a === match.away_score;
+                const isMine = myHome !== null && h === myHome && a === myAway;
+                // Groen = werkelijke uitslag · rood = eigen (foute) voorspelling bij
+                // gespeelde wedstrijd · geel = eigen voorspelling bij nog te spelen
+                let textColor = "text-wk-soft";
+                let barColor = "bg-wk-muted/40";
+                if (isActual) {
+                  textColor = "text-wk-green"; barColor = "bg-wk-green";
+                } else if (isMine && match.result_entered) {
+                  textColor = "text-wk-red"; barColor = "bg-wk-red";
+                } else if (isMine) {
+                  textColor = "text-wk-gold"; barColor = "bg-wk-gold";
+                }
                 return (
                   <div key={`${h}-${a}`} className="flex items-center gap-2.5">
-                    <span
-                      className={`font-mono text-xs font-bold w-7 text-right shrink-0 ${
-                        isActual ? "text-wk-green" : i === 0 ? "text-wk-gold" : "text-wk-soft"
-                      }`}
-                    >
+                    <span className={`font-mono text-xs font-bold w-7 text-right shrink-0 ${textColor}`}>
                       {h}–{a}
                     </span>
                     <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
-                      <DistBar
-                        pct={pct}
-                        color={isActual ? "bg-wk-green" : i === 0 ? "bg-wk-gold" : "bg-wk-muted/40"}
-                      />
+                      <DistBar pct={pct} color={barColor} />
                     </div>
-                    <span className="font-mono text-[9px] text-wk-muted w-16 text-right shrink-0 whitespace-nowrap">
+                    <span className="font-mono text-[9px] text-wk-muted w-12 text-right shrink-0 whitespace-nowrap">
                       {count}× ({pct}%)
                     </span>
                   </div>
                 );
               })}
               <div className="flex items-center justify-between gap-2 pt-0.5">
-                {dist.scores.length > 5 ? (
+                {otherCount > 0 ? (
                   <p className="font-mono text-[9px] text-wk-muted/60 tracking-widest">
-                    +{dist.scores.length - 5} andere uitslagen
+                    +{otherCount} andere uitslagen
                   </p>
                 ) : <span />}
                 {matchStarted && (
@@ -1062,7 +1086,8 @@ function MatchRow({
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

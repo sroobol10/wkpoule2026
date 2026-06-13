@@ -3,7 +3,9 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE, STAGE_LABELS } from '@/lib/constants'
+import { getActivePlayerIds } from '@/lib/active-players'
 import { AvatarCircle } from '@/components/avatar-circle'
+import CloseButton from './close-button'
 
 export const metadata = { title: 'Wedstrijdduel · WK Poule 2026' }
 
@@ -53,6 +55,28 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
   const awayCamp: Supporter[] = []
   let hiddenCount = 0
 
+  // Beperk tot de actieve leden van je eigen league(s) — zelfde filtering als
+  // op de klassement- en statistiekenpagina (niet het hele algemene veld)
+  const activeIds = await getActivePlayerIds(supabase)
+  const { data: myMemberships } = await supabase
+    .from('poule_members')
+    .select('poules(id, is_general)')
+    .eq('user_id', user.id)
+  type PouleRef = { id: string; is_general: boolean }
+  const privePouleIds = (myMemberships ?? [])
+    .map((m) => m.poules as PouleRef | null)
+    .filter((p): p is PouleRef => !!p && !p.is_general)
+    .map((p) => p.id)
+  let memberIds = activeIds
+  if (privePouleIds.length > 0) {
+    const { data: leagueMembers } = await supabase
+      .from('poule_members')
+      .select('user_id')
+      .in('poule_id', privePouleIds)
+    const leagueSet = new Set((leagueMembers ?? []).map((m) => m.user_id))
+    memberIds = new Set([...activeIds].filter((uid) => leagueSet.has(uid)))
+  }
+
   if (revealed) {
     const { data: predictions } = await supabase
       .from('predictions')
@@ -62,7 +86,7 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
     type Profile = { id: string; username: string; avatar_url: string | null }
     for (const p of predictions ?? []) {
       const profile = p.profiles as Profile | null
-      if (!profile) continue
+      if (!profile || !memberIds.has(profile.id)) continue
       const supporter: Supporter = {
         id: profile.id,
         username: profile.username,
@@ -81,11 +105,11 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
     drawCamp.sort(byWinnerThenName)
     awayCamp.sort(byWinnerThenName)
   } else {
-    const { count } = await supabase
+    const { data: predRows } = await supabase
       .from('predictions')
-      .select('id', { count: 'exact', head: true })
+      .select('user_id')
       .eq('match_id', id)
-    hiddenCount = count ?? 0
+    hiddenCount = (predRows ?? []).filter((p) => memberIds.has(p.user_id)).length
   }
 
   const winners = [...homeCamp, ...drawCamp, ...awayCamp].filter((s) => s.exact)
@@ -122,16 +146,8 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
         style={{ background: `radial-gradient(closest-side, ${AWAY_COLOR}, transparent)`, animationDelay: '1s' }}
       />
 
-      {/* Sluiten */}
-      <Link
-        href="/statistieken"
-        aria-label="Sluiten"
-        className="fixed top-4 right-4 z-50 flex items-center justify-center w-10 h-10 rounded-full bg-wk-surface border border-white/10 text-wk-soft hover:text-wk-text hover:border-white/30 transition-colors"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </Link>
+      {/* Sluiten — terug naar de pagina waar je vandaan kwam */}
+      <CloseButton />
 
       <div className="relative max-w-4xl mx-auto px-4 py-10 sm:py-14 space-y-8 sm:space-y-10">
         {/* Kop */}
