@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { AvatarCircle } from '@/components/avatar-circle'
@@ -588,12 +588,13 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
       </div>
 
       {stat.top_answers.length > 0 ? (
-        <div className="px-5 py-3 space-y-2">
+        /* Grid met gedeelde naamkolom (auto) zodat alle balken op dezelfde x starten */
+        <div className="px-5 py-3 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 sm:gap-x-3 gap-y-2">
           {stat.top_answers.map(({ answer, count, pct, is_correct }) => {
             const flag = answerFlag(stat.question, answer, teamFlags)
             return (
-              <div key={answer} className="flex items-center gap-2 sm:gap-3">
-                <div className="flex items-center gap-1.5 shrink-0">
+              <Fragment key={answer}>
+                <div className="flex items-center gap-1.5 min-w-0">
                   {flag && (
                     <Image src={flag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
                   )}
@@ -602,13 +603,13 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
                     {is_correct && <span className="ml-1 text-wk-green">✓</span>}
                   </span>
                 </div>
-                <div className="flex-1 min-w-[28px] h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div className="min-w-[28px] h-1.5 bg-white/10 rounded-full overflow-hidden">
                   <AnimatedBar pct={pct} color={is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'} />
                 </div>
-                <span className="font-mono text-[9px] text-wk-muted shrink-0 w-11 text-right">
+                <span className="font-mono text-[9px] text-wk-muted w-11 text-right">
                   {count}× ({pct}%)
                 </span>
-              </div>
+              </Fragment>
             )
           })}
         </div>
