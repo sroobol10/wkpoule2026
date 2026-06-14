@@ -14,7 +14,7 @@ function getTitle(pathname: string, isRetro: boolean) {
   if (pathname.startsWith('/bonusvragen'))
     return { main: 'Bonus', accent: 'vragen', sub: 'Extra punten verdienen' }
   if (pathname.startsWith('/poules'))
-    return { main: 'Poules &', accent: 'klassement', sub: 'Hoe sta jij ervoor?' }
+    return { main: 'Dagoverzicht &', accent: 'klassement', sub: 'Hoe sta jij ervoor?' }
   if (pathname.startsWith('/statistieken'))
     return { main: 'Stats &', accent: 'cijfers', sub: 'Nauwkeurigheid & voorspellingen' }
   if (pathname.startsWith('/profiel'))

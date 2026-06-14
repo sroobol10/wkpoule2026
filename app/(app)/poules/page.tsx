@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { PouleStand } from './poule-stand'
+import { DagOverzicht } from './dag-overzicht'
 
 export default async function PoulesPage({
   searchParams,
@@ -43,8 +44,11 @@ export default async function PoulesPage({
 
   return (
     <div className="space-y-8">
+      {/* Dagoverzicht — compacte samenvatting van vandaag, per deelnemer */}
+      <DagOverzicht userId={user.id} />
+
       {/* Header — eyebrow en titel op één regel */}
-      <div className="flex items-baseline gap-3 flex-wrap">
+      <div className="flex items-baseline gap-3 flex-wrap pt-6 md:pt-8">
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Klassement</h1>
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase">Tussenstand</p>
       </div>
