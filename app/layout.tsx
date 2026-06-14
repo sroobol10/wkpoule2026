@@ -6,6 +6,11 @@ const BASE_URL = 'https://www.mijnwkpoule.nl'
 export const viewport: Viewport = {
   themeColor: '#0B0E14',
   colorScheme: 'dark',
+  // De pagina's zijn al netjes geschaald; in-/uitzoomen blokkeren.
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export const metadata: Metadata = {
@@ -19,6 +24,13 @@ export const metadata: Metadata = {
   keywords: ['WK 2026', 'WK poule', 'voetbal voorspellen', 'World Cup 2026', 'poule spel'],
   authors: [{ name: 'Ennovate' }],
   creator: 'Ennovate',
+  manifest: '/manifest.webmanifest',
+  // Apple: toevoegen aan beginscherm als standalone app met eigen titel/icoon
+  appleWebApp: {
+    capable: true,
+    title: 'WK Poule',
+    statusBarStyle: 'black-translucent',
+  },
   openGraph: {
     type: 'website',
     locale: 'nl_NL',

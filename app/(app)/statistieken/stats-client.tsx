@@ -30,9 +30,12 @@ export type JokerStat = {
   matchId: string
   homeTeam: string
   awayTeam: string
+  homeFlag: string | null
+  awayFlag: string | null
   group: string
   played: boolean
   count: number
+  mine: boolean   // deelnemer zette zelf een joker op deze wedstrijd
 }
 
 export type JokerWinstEntry = {
@@ -319,33 +322,38 @@ export default function StatsClient({
       {jokerStats.length > 0 && tournamentStarted && (
         <section className="animate-fade-up" style={{ animationDelay: '250ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Joker hotspots — meest gekozen wedstrijden
+            Joker hotspots — meest gekozen wedstrijden (TOP-10)
           </p>
           <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {jokerStats.map((stat, i) => {
+            {jokerStats.map((stat) => {
               const maxCount = jokerStats[0]?.count ?? 1
               const pct = Math.round((stat.count / maxCount) * 100)
-              const isTop = i === 0
+              // Eigen joker(s) krijgen de gele opmaak
+              const mine = stat.mine
               return (
-                <div key={stat.matchId} className="px-5 py-3">
+                <div key={stat.matchId} className={`px-5 py-3 ${mine ? 'bg-wk-gold/5' : ''}`}>
                   <div className="flex items-center gap-3 mb-1.5">
-                    <span className="font-mono text-[10px] text-wk-muted w-5 text-center shrink-0">
-                      {stat.group}
+                    {/* Gespeeld → voetbal, anders de groepsletter */}
+                    <span className="w-5 text-center shrink-0" title={stat.played ? 'Wedstrijd is gespeeld' : `Groep ${stat.group}`}>
+                      {stat.played
+                        ? <span className="text-xs">⚽</span>
+                        : <span className="font-mono text-[10px] text-wk-muted">{stat.group}</span>}
                     </span>
-                    <span className={`flex-1 text-sm font-semibold truncate ${isTop ? 'text-wk-gold' : 'text-wk-text'}`}>
+                    {stat.homeFlag && (
+                      <Image src={stat.homeFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                    )}
+                    <span className={`flex-1 text-sm font-semibold truncate ${mine ? 'text-wk-gold' : 'text-wk-text'}`}>
                       {stat.homeTeam} – {stat.awayTeam}
-                      {stat.played && (
-                        <span className="ml-1.5 font-mono text-[9px] text-wk-green border border-wk-green/30 rounded-full px-1.5 py-0.5 tracking-widest align-middle" title="Wedstrijd is gespeeld">
-                          🏁
-                        </span>
-                      )}
                     </span>
-                    <span className={`font-mono text-xs font-bold shrink-0 ${isTop ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                    {stat.awayFlag && (
+                      <Image src={stat.awayFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                    )}
+                    <span className={`font-mono text-xs font-bold shrink-0 ${mine ? 'text-wk-gold' : 'text-wk-soft'}`}>
                       {stat.count}×
                     </span>
                   </div>
                   <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                    <AnimatedBar pct={pct} color={isTop ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
+                    <AnimatedBar pct={pct} color={mine ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
                   </div>
                 </div>
               )
@@ -358,15 +366,23 @@ export default function StatsClient({
       {jokerWinst.length > 0 && tournamentStarted && (
         <section className="animate-fade-up" style={{ animationDelay: '275ms' }}>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Joker-winst ★ — extra punten dankzij jokers
+            Joker-winst ★ — extra punten dankzij jokers (TOP-5)
           </p>
           <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {jokerWinst.map((entry) => {
+            {jokerWinst.map((entry, i) => {
               const maxExtra = Math.max(jokerWinst[0]?.extra ?? 0, 1)
               const pct = Math.round((entry.extra / maxExtra) * 100)
               const isMe = entry.userId === currentUserId
+              // Ruimte vóór de eigen rij wanneer die niet aansluit op de top-5
+              const gap = i > 0 && entry.rank > jokerWinst[i - 1].rank + 1
               return (
-                <div key={entry.userId} className={`px-5 py-3 ${isMe ? 'bg-wk-gold/5' : ''}`}>
+                <Fragment key={entry.userId}>
+                  {gap && (
+                    <div className="px-5 py-1.5 text-center font-mono text-[10px] text-wk-muted/50 tracking-[0.3em] select-none">
+                      ···
+                    </div>
+                  )}
+                <div className={`px-5 py-3 ${isMe ? 'bg-wk-gold/5' : ''}`}>
                   <div className="flex items-center gap-3 mb-1.5">
                     <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
                       {entry.rank <= 3 && entry.extra > 0 ? MEDAL[entry.rank - 1] : entry.rank}
@@ -386,6 +402,7 @@ export default function StatsClient({
                     <AnimatedBar pct={pct} color={isMe ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
                   </div>
                 </div>
+                </Fragment>
               )
             })}
           </div>
@@ -566,22 +583,30 @@ function answerFlag(question: string, answer: string, teamFlags: Record<string, 
   return null
 }
 
+// Mobiel: voornaam van spelers weglaten (topscorer/beste speler) en lange
+// landnamen inkorten (kaartenkoning/desastreuze defensie) — scheelt ruimte.
+const COUNTRY_ABBR_MOBILE: Record<string, string> = {
+  'Bosnië-Herzegovina': 'Bosnië',
+  'Verenigde Staten': 'VS',
+}
+const dropFirstName = (name: string) => {
+  const parts = name.trim().split(/\s+/)
+  return parts.length > 1 ? parts.slice(1).join(' ') : name
+}
+
 function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamFlags: Record<string, string> }) {
+  const q = stat.question.toLowerCase()
+  const playerBased = q.includes('topscorer') || q.includes('beste speler')
+  const countryBased = q.includes('goalgettergigant') || q.includes('desastreuze') || q.includes('kaartenkoning')
+  const mobileLabel = (answer: string) => {
+    if (playerBased) return dropFirstName(answer)
+    if (countryBased) return COUNTRY_ABBR_MOBILE[answer] ?? answer
+    return answer
+  }
   return (
     <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
       <div className="px-5 py-3.5 border-b border-white/5">
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-semibold text-wk-text leading-snug flex-1">{stat.question}</p>
-          <span className={`font-mono text-[10px] border rounded-full px-2.5 py-0.5 tracking-[0.12em] shrink-0 ${
-            stat.participation_pct >= 80
-              ? 'text-wk-green border-wk-green/30'
-              : stat.participation_pct >= 50
-                ? 'text-wk-gold border-wk-gold/30'
-                : 'text-wk-muted border-white/15'
-          }`}>
-            {stat.participation_pct}% deelname
-          </span>
-        </div>
+        <p className="text-sm font-semibold text-wk-text leading-snug">{stat.question}</p>
         <p className="font-mono text-[10px] text-wk-muted tracking-[0.1em] mt-0.5">
           {stat.total_answers} {stat.total_answers === 1 ? 'antwoord' : 'antwoorden'}
         </p>
@@ -599,14 +624,15 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
                     <Image src={flag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
                   )}
                   <span className={`font-mono text-xs font-semibold whitespace-nowrap ${is_correct ? 'text-wk-green' : 'text-wk-soft'}`}>
-                    {answer}
+                    <span className="sm:hidden">{mobileLabel(answer)}</span>
+                    <span className="hidden sm:inline">{answer}</span>
                     {is_correct && <span className="ml-1 text-wk-green">✓</span>}
                   </span>
                 </div>
                 <div className="min-w-[28px] h-1.5 bg-white/10 rounded-full overflow-hidden">
                   <AnimatedBar pct={pct} color={is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'} />
                 </div>
-                <span className="font-mono text-[9px] text-wk-muted w-11 text-right">
+                <span className="font-mono text-[9px] text-wk-muted text-right whitespace-nowrap">
                   {count}× ({pct}%)
                 </span>
               </Fragment>

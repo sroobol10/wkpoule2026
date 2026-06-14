@@ -1,13 +1,9 @@
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { PouleStand } from './poule-stand'
 import { DagOverzicht } from './dag-overzicht'
 
-export default async function PoulesPage({
-  searchParams,
-}: Readonly<{ searchParams: Promise<{ league?: string }> }>) {
-  const { league } = await searchParams
+export default async function PoulesPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -22,50 +18,18 @@ export default async function PoulesPage({
     .map((m) => m.poules as PouleRef | null)
     .filter(Boolean) as PouleRef[])
 
-  // Vrijwel iedereen zit in precies één privé-league en ziet die direct.
-  // Wie in meerdere leagues zit (Pim & Stefan) krijgt een filter.
+  // Privé-league(s) eerst, anders de algemene poule. Wie in meerdere leagues
+  // zit (Pim & Stefan) ziet ze gewoon onder elkaar — geen filter meer.
   const privePoules = eigenPoules
     .filter((p) => !p.is_general)
     .sort((a, b) => a.name.localeCompare(b.name))
   const algemeen = eigenPoules.find((p) => p.is_general)
   const leagues = privePoules.length > 0 ? privePoules : algemeen ? [algemeen] : []
 
-  const selected = privePoules.length > 1 && privePoules.some((p) => p.id === league)
-    ? (league as string)
-    : null // null = beiden
-  const visible = selected ? leagues.filter((p) => p.id === selected) : leagues
-
-  const pillClass = (active: boolean) =>
-    `rounded-full px-3 py-1 font-mono text-[10px] tracking-[0.12em] uppercase border transition-colors ${
-      active
-        ? 'bg-wk-gold/10 border-wk-gold/40 text-wk-gold'
-        : 'border-white/10 text-wk-muted hover:border-white/20 hover:text-wk-soft'
-    }`
-
   return (
     <div className="space-y-8">
       {/* Dagoverzicht — compacte samenvatting van vandaag, per deelnemer */}
       <DagOverzicht userId={user.id} />
-
-      {/* Header — eyebrow en titel op één regel */}
-      <div className="flex items-baseline gap-3 flex-wrap pt-6 md:pt-8">
-        <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Klassement</h1>
-        <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase">Tussenstand</p>
-      </div>
-
-      {/* League-filter — alleen voor leden van meerdere leagues */}
-      {privePoules.length > 1 && (
-        <div className="flex flex-wrap gap-1.5">
-          {privePoules.map((p) => (
-            <Link key={p.id} href={`/poules?league=${p.id}`} className={pillClass(selected === p.id)}>
-              {p.name}
-            </Link>
-          ))}
-          <Link href="/poules" className={pillClass(selected === null)}>
-            Beiden
-          </Link>
-        </div>
-      )}
 
       {leagues.length === 0 ? (
         <div className="bg-wk-surface border border-white/10 rounded-xl px-5 py-8 text-center">
@@ -73,7 +37,7 @@ export default async function PoulesPage({
         </div>
       ) : (
         <div className="space-y-12">
-          {visible.map((p) => (
+          {leagues.map((p) => (
             <PouleStand key={p.id} pouleId={p.id} currentUserId={user.id} />
           ))}
         </div>

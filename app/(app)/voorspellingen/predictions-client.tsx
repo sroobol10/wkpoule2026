@@ -664,7 +664,7 @@ function PouleMiniLeaderboard({
       <div className="px-4 pt-3 pb-2 border-b border-white/10 space-y-2">
         <div className="flex items-center justify-between">
           <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-            Groep {activeGroup}
+            Klassement groep {activeGroup}
           </span>
           {/* Poulekeuze — alleen tonen als er meerdere privé-poules zijn */}
           {displayPoules.length > 1 && (
@@ -684,12 +684,6 @@ function PouleMiniLeaderboard({
                 </button>
               ))}
             </div>
-          )}
-          {/* Één privé-poule of algemeen: naam tonen */}
-          {displayPoules.length === 1 && (
-            <span className="font-mono text-[10px] text-wk-muted truncate max-w-32">
-              {poule.pouleName}
-            </span>
           )}
         </div>
       </div>
@@ -783,7 +777,11 @@ function MatchRow({
   onJokerToggle,
 }: MatchRowProps) {
   const [showAi, setShowAi] = useState(false);
-  const [showDist, setShowDist] = useState(true);
+  // Standaard open, maar weer dichtgeklapt zodra 120u (5 dagen) na de aftrap
+  // verstreken zijn — je blijft er immers niet wekenlang naar kijken.
+  const [showDist, setShowDist] = useState(
+    () => Date.now() - new Date(match.kickoff_at).getTime() < 120 * 60 * 60 * 1000,
+  );
   const [aiState, setAiState] = useState<
     AiPrediction | "loading" | "error" | null
   >(null);
@@ -1375,9 +1373,6 @@ function ActualGroupStandingsInline({
         <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
           Huidige stand groep {group}
         </span>
-        <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest">
-          {playedCount}/{groupMatches.length} gespeeld
-        </span>
       </div>
       <div className="divide-y divide-white/5">
         {sorted.map(([teamId, stat], i) => {
@@ -1385,7 +1380,7 @@ function ActualGroupStandingsInline({
           if (!team) return null;
           const pos = i + 1;
           return (
-            <div key={teamId} className="flex items-center gap-3 px-5 py-2">
+            <div key={teamId} className="flex items-center gap-3 px-5 py-2.5">
               <span
                 className={`font-mono text-xs w-4 shrink-0 text-center ${pos <= 2 ? "text-wk-green font-bold" : "text-wk-muted"}`}
               >
@@ -1395,22 +1390,18 @@ function ActualGroupStandingsInline({
                 <Image
                   src={team.flag_url}
                   alt={team.name}
-                  width={20}
-                  height={14}
+                  width={22}
+                  height={15}
                   className="rounded-sm object-cover shrink-0"
-                  style={{ width: 20, height: 14 }}
                 />
               )}
               <span className="flex-1 text-xs font-semibold text-wk-text truncate">
                 {team.name}
               </span>
-              <span className="font-mono text-[10px] text-wk-muted w-5 text-center">
-                {stat.played}
+              <span className="font-mono text-[10px] text-wk-muted w-8 text-center shrink-0">
+                {stat.points}pt
               </span>
-              <span className="font-mono text-[10px] font-bold text-wk-gold w-5 text-center">
-                {stat.points}
-              </span>
-              <span className="font-mono text-[10px] text-wk-muted w-8 text-right">
+              <span className="font-mono text-[10px] text-wk-muted w-8 text-right shrink-0">
                 {stat.gd > 0 ? `+${stat.gd}` : stat.gd}
               </span>
             </div>
@@ -1546,10 +1537,10 @@ function GroupStandingsInline({
               </span>
               {hasAnyScore && (
                 <>
-                  <span className="font-mono text-[10px] text-wk-muted w-5 text-center shrink-0">
+                  <span className="font-mono text-[10px] text-wk-muted w-8 text-center shrink-0">
                     {stat.points}pt
                   </span>
-                  <span className="font-mono text-[10px] text-wk-muted w-7 text-right shrink-0">
+                  <span className="font-mono text-[10px] text-wk-muted w-8 text-right shrink-0">
                     {stat.gd > 0 ? `+${stat.gd}` : stat.gd}
                   </span>
                   <span

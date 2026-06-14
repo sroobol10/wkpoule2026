@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
+import type { ReactNode } from 'react'
 import Image from 'next/image'
 import { saveBonusAnswer } from '@/app/actions/bonus'
 import { formatInAmsterdam } from '@/lib/format'
@@ -27,6 +28,7 @@ type MatchForDay = {
   homeFlag: string | null
   awayFlag: string | null
   myPred: string | null
+  result: string | null
 }
 
 type Props = {
@@ -36,7 +38,12 @@ type Props = {
   anyMatchPlayed?: boolean
   deadlineByDate?: Record<string, string>       // unlock_date → effectieve deadline ISO
   matchesByDay?: Record<string, MatchForDay[]>  // CEST-datum → wedstrijden
+  activeTeamNames?: string[]                    // landen nog actief in het toernooi
 }
+
+// "(incl. blessuretijd)" weglaten in de weergave van antwoordopties — scheelt
+// ruimte. De opgeslagen waarde blijft ongewijzigd, dus scoring blijft kloppen.
+const stripOptionLabel = (s: string) => s.replace(/\s*\(incl\. blessuretijd\)/i, '')
 
 // Vragen waarbij een landkeuze getoond wordt i.p.v. vrije tekst
 function isTeamQuestion(question: string) {
@@ -69,7 +76,8 @@ function preSort(a: Question, b: Question) {
   return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
 }
 
-export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {}, matchesByDay = {} }: Props) {
+export default function BonusvragenClient({ questions, answerMap, teams, anyMatchPlayed = false, deadlineByDate = {}, matchesByDay = {}, activeTeamNames = [] }: Props) {
+  const activeSet = new Set(activeTeamNames)
   const preTournament = questions
     .filter((q) => q.type === 'pre_tournament')
     .sort(preSort)
@@ -89,7 +97,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         {daily.length > 0 && (
           <section>
             <div className="flex items-center gap-3 mb-3">
-              <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+              <span className="font-mono text-[10px] text-wk-muted border border-white/15 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
                 Dagelijkse vragen
               </span>
             </div>
@@ -113,7 +121,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         {preTournament.length > 0 && (
           <section>
             <div className="flex items-center gap-3 mb-3">
-              <span className="font-mono text-[10px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+              <span className="font-mono text-[10px] text-wk-muted border border-white/15 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
                 Algemene vragen
               </span>
             </div>
@@ -126,6 +134,7 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
                   teams={isTeamQuestion(q.question) ? teams : []}
                   allTeams={teams}
                   tournamentStarted={anyMatchPlayed}
+                  activeTeamNames={activeSet}
                 />
               ))}
             </div>
@@ -161,6 +170,7 @@ function QuestionCard({
   tournamentStarted = false,
   effectiveDeadline = null,
   dayMatches = [],
+  activeTeamNames = new Set<string>(),
 }: {
   question: Question
   existingAnswer: AnswerEntry | null
@@ -169,6 +179,7 @@ function QuestionCard({
   tournamentStarted?: boolean
   effectiveDeadline?: string | null
   dayMatches?: MatchForDay[]
+  activeTeamNames?: Set<string>
 }) {
   const [answer, setAnswer] = useState(existingAnswer?.answer ?? '')
   const [isPending, startTransition] = useTransition()
@@ -243,17 +254,51 @@ function QuestionCard({
   const flagFor = (country: string | null) =>
     country ? (allTeams.find((t) => t.name === country)?.flag_url ?? null) : null
 
-  // Kleurcodering accent: groen (punten) · rood (0 pt, fout) · geel (onbeantwoord,
-  // of een nog lopende landenvraag met 0 pt) · blauw (beantwoord, uitslag onbekend).
   const answered = saved || !!existingAnswer?.answer
   const runningCountry = isRunningCountryQuestion(question.question)
   const scored = pts !== null && pts !== undefined
+
+  // Onderste 3 landenvragen (goalgetter/defensie/kaartenkoning): kleur o.b.v.
+  // of het gekozen land nog actief is in het toernooi.
+  const chosenCountry = existingAnswer?.answer ?? null
+  const countryActive = chosenCountry ? activeTeamNames.has(chosenCountry) : null
+  const countryEliminated = chosenCountry !== null && countryActive === false
+
+  // Accentbalk links
   let accentBg: string
-  if (scored) {
-    accentBg = pts! > 0 ? 'bg-wk-green' : runningCountry ? 'bg-wk-gold' : 'bg-wk-red'
+  if (runningCountry) {
+    // Blauw zolang het gekozen land meedoet, rood zodra het is uitgeschakeld.
+    accentBg = !chosenCountry ? 'bg-wk-gold' : countryActive ? 'bg-wk-blue' : 'bg-wk-red'
+  } else if (scored) {
+    accentBg = pts! > 0 ? 'bg-wk-green' : 'bg-wk-red'
   } else {
     accentBg = answered ? 'bg-wk-blue' : 'bg-wk-gold'
   }
+
+  // Puntenbadge rechtsboven
+  const pillBase = 'font-mono text-[10px] font-bold px-2 py-1 rounded-full border tracking-[0.12em] uppercase'
+  let badge: ReactNode = null
+  if (runningCountry) {
+    // Geel zolang het land actief is, groen na uitschakeling met punten,
+    // rood na uitschakeling met 0 punten.
+    let cls = 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
+    if (countryEliminated) {
+      cls = (pts ?? 0) > 0
+        ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
+        : 'bg-wk-red/10 border-wk-red/30 text-wk-red'
+    }
+    badge = <span className={`${pillBase} ${cls}`}>{scored ? `${pts} pt` : 'var. pt'}</span>
+  } else if (scored) {
+    const cls = pts! > 0
+      ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
+      : 'bg-wk-red/10 border-wk-red/30 text-wk-red'
+    badge = <span className={`${pillBase} ${cls}`}>{pts} pt</span>
+  } else if (question.type === 'pre_tournament') {
+    // Eerste 4 algemene vragen: te verdienen punten in een grijs bolletje
+    // zolang er nog geen antwoord bekend is.
+    badge = <span className={`${pillBase} bg-white/5 border-white/15 text-wk-muted`}>{ptsToWin(question)}</span>
+  }
+  // Dagelijkse vraag, nog niet gescoord → geen badge (1 punt spreekt voor zich)
 
   return (
     <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
@@ -274,23 +319,7 @@ function QuestionCard({
               )}
             </div>
             <div className="shrink-0 flex items-center gap-2">
-              {scored ? (
-                <span className={`font-mono text-[10px] font-bold px-2 py-1 rounded-full border tracking-[0.12em] uppercase ${
-                  pts! > 0
-                    ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
-                    : runningCountry
-                      ? 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
-                      : 'bg-wk-red/10 border-wk-red/30 text-wk-red'
-                }`}>
-                  {pts} pt
-                </span>
-              ) : (
-                /* Nog niet gescoord: te behalen punten zonder achtergrondkleur.
-                   Openstaande dagvraag toont 0 PT. */
-                <span className="font-mono text-[10px] font-bold text-wk-gold tracking-[0.12em] uppercase">
-                  {question.type === 'daily' ? '0 pt' : ptsToWin(question)}
-                </span>
-              )}
+              {badge}
             </div>
           </div>
 
@@ -329,11 +358,15 @@ function QuestionCard({
                           {m.awayFlag && (
                             <Image src={m.awayFlag} alt={m.away} width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
                           )}
-                          {m.myPred && (
+                          {m.result ? (
+                            <span className="ml-auto font-mono text-[10px] font-bold text-wk-text shrink-0" title="Uitslag">
+                              {m.result}
+                            </span>
+                          ) : m.myPred ? (
                             <span className="ml-auto font-mono text-[10px] font-bold text-wk-gold shrink-0" title="Jouw voorspelling">
                               🔮 {m.myPred}
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       ))}
                     </div>
@@ -416,7 +449,7 @@ function QuestionCard({
                 >
                   <option value="" disabled>Kies een optie…</option>
                   {(question.answer_options ?? []).map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
+                    <option key={opt} value={opt}>{stripOptionLabel(opt)}</option>
                   ))}
                 </select>
               ) : (
@@ -594,7 +627,7 @@ function QuestionCard({
                     <Image src={flagFor(playerCountry(existingAnswer.answer))!} alt={playerCountry(existingAnswer.answer) ?? ''} width={28} height={20} className="rounded-sm object-cover shrink-0 w-7 h-5" />
                   )}
                   <p className="text-sm text-wk-soft">
-                    {existingAnswer.answer}
+                    {stripOptionLabel(existingAnswer.answer)}
                     {inputMode !== 'team' && playerCountry(existingAnswer.answer) && (
                       <span className="ml-2 font-mono text-[10px] text-wk-muted">{playerCountry(existingAnswer.answer)}</span>
                     )}

@@ -60,15 +60,23 @@ export function Bergetappe({
   progress: number; // gespeeld deel van het toernooi, 0–1
 }) {
   const maxPts = entries[0]?.totalPts ?? 0;
+  const minPts = entries[entries.length - 1]?.totalPts ?? 0;
+  const range = maxPts - minPts;
 
-  // De koploper staat op `progress` van het pad; de rest naar rato van punten.
-  // Spelers met (vrijwel) gelijke stand worden iets uit elkaar geschoven.
+  // Spelers worden over de héle berg verdeeld i.p.v. naar rato van het (vroeg in
+  // het toernooi nog kleine) gespeelde deel — anders wordt het een kluitje.
+  // We mengen puntenverschil met klassementspositie zodat het veld ook bij
+  // kleine puntenverschillen leesbaar uitwaaiert. Gelijke standen worden
+  // bovendien iets uit elkaar geschoven.
   const stacked: Record<string, number> = {};
   const markers = entries.map((entry, index) => {
-    const raw = maxPts > 0 ? (entry.totalPts / maxPts) * progress : 0;
-    const key = raw.toFixed(2);
+    const relPts = range > 0 ? (entry.totalPts - minPts) / range : 0;
+    const relRank = entries.length > 1 ? (entries.length - 1 - index) / (entries.length - 1) : 1;
+    const rel = 0.5 * relPts + 0.5 * relRank; // 0 = achterhoede, 1 = koploper
+    const base = 0.08 + rel * 0.84; // spreid over 8%–92% van het pad
+    const key = base.toFixed(2);
     const n = (stacked[key] = (stacked[key] ?? 0) + 1);
-    const { x, y } = pointAt(raw - (n - 1) * 0.018);
+    const { x, y } = pointAt(base - (n - 1) * 0.03);
     return { ...entry, x, y, rank: index };
   });
 
@@ -146,7 +154,7 @@ export function Bergetappe({
                 return (
                   <div
                     key={id}
-                    className="absolute"
+                    className="absolute hover:!z-[999]"
                     style={{
                       left: `${x}%`,
                       top: `${y}%`,
@@ -161,7 +169,7 @@ export function Bergetappe({
                     >
                       <Link
                         href={`/deelnemers/${id}`}
-                        className={`block rounded-full shadow-lg ${
+                        className={`block rounded-full shadow-lg origin-center transition-transform duration-200 hover:scale-150 ${
                           isCurrentUser
                             ? "ring-2 ring-wk-gold ring-offset-2 ring-offset-wk-bg"
                             : isLeader
@@ -204,8 +212,8 @@ export function Bergetappe({
         )}
       </div>
       <p className="font-mono text-[9px] text-wk-muted tracking-[0.12em] text-center">
-        Afstand = voortgang door het toernooi · Hoogte = punten · De beker wacht
-        op de top
+        Hoe hoger op de berg, hoe meer punten en hoe beter de klassementspositie ·
+        De beker wacht op de top
       </p>
     </div>
   );

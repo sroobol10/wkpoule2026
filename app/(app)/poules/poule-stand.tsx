@@ -88,10 +88,67 @@ export async function PouleStand({
     }))
     .sort((a, b) => b.score.total_pts - a.score.total_pts)
 
-  // Prijzengeld hoort bij Schmitt's scorebordstrijd, o.b.v. positie in die league
+  // Gedeelde posities bij gelijk puntentotaal: 1, –, –, 4 i.p.v. 1, 2, 3, 4.
+  // tiedAbove[i] = deze deelnemer heeft hetzelfde totaal als die erboven.
+  const tiedAbove = ranked.map((r, i) => i > 0 && ranked[i - 1].score.total_pts === r.score.total_pts)
+
+  // Prijzengeld hoort bij Schmitt's scorebordstrijd, o.b.v. positie in die league.
+  // Bij ex aequo wordt de som van de betreffende prijzen gelijk verdeeld.
   const isSchmitt = poule.name.toLowerCase().includes('schmitt')
-  const prijsVoor = (index: number): string | null =>
-    isSchmitt && index < PRIJZEN.length ? prijsLabel(PRIJZEN[index]) : null
+  // Ennovate toont de legenda ónder de stand; de overige poules erboven (onder de titel)
+  const isEnnovate = poule.id === ENNOVATE_POULE_ID || poule.name.toLowerCase().includes('ennovate')
+  const prijsByIndex: (string | null)[] = new Array(ranked.length).fill(null)
+  if (isSchmitt) {
+    let i = 0
+    while (i < ranked.length) {
+      let j = i
+      while (j + 1 < ranked.length && ranked[j + 1].score.total_pts === ranked[i].score.total_pts) j++
+      let sum = 0
+      for (let k = i; k <= j; k++) sum += k < PRIJZEN.length ? PRIJZEN[k] : 0
+      const avg = sum / (j - i + 1)
+      if (avg > 0) for (let k = i; k <= j; k++) prijsByIndex[k] = prijsLabel(avg)
+      i = j + 1
+    }
+  }
+  const prijsVoor = (index: number): string | null => prijsByIndex[index] ?? null
+
+  // ── Voorspelde wereldkampioen per deelnemer (vlag naast de naam) ────────────
+  const rankedIds = ranked.map((r) => r.profile.id)
+  const champByUser: Record<string, string> = {}
+  if (rankedIds.length) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: champPicks } = await (supabase as any)
+      .from('bracket_predictions')
+      .select('user_id, predicted_team_id')
+      .eq('slot', 104)
+      .in('user_id', rankedIds)
+    for (const p of (champPicks ?? []) as { user_id: string; predicted_team_id: string }[]) {
+      champByUser[p.user_id] = p.predicted_team_id
+    }
+  }
+  const champTeamIds = [...new Set(Object.values(champByUser))]
+  const { data: champTeams } = champTeamIds.length
+    ? await supabase.from('teams').select('id, name, flag_url').in('id', champTeamIds)
+    : { data: [] }
+  const champTeamById: Record<string, { name: string; flag_url: string }> = {}
+  for (const t of champTeams ?? []) champTeamById[t.id] = t
+
+  // Landen die nog actief zijn (= teams met een nog niet gespeelde wedstrijd).
+  // Bepaalt of het kampioensvlaggetje in kleur of grijstinten staat.
+  const { data: unplayedMatches } = await supabase
+    .from('matches')
+    .select('home_team_id, away_team_id')
+    .eq('result_entered', false)
+  const activeTeamIds = new Set<string>()
+  for (const m of unplayedMatches ?? []) {
+    if (m.home_team_id) activeTeamIds.add(m.home_team_id)
+    if (m.away_team_id) activeTeamIds.add(m.away_team_id)
+  }
+  const champFor = (uid: string) => {
+    const teamId = champByUser[uid]
+    const team = teamId ? champTeamById[teamId] : null
+    return team ? { team, active: activeTeamIds.has(teamId) } : null
+  }
 
   // De bergetappe-weergave is voorlopig alleen beschikbaar in de Ennovate-poule
   const showBergetappe = poule.name.toLowerCase().includes('ennovate')
@@ -107,13 +164,25 @@ export async function PouleStand({
     tournamentProgress = totalMatches ? (playedMatches ?? 0) / totalMatches : 0
   }
 
-  // Sticky-offsets: met prijzenkolom schuift de naamkolom op
+  // Sticky-offsets (desktop). De prijzenkolom staat vooraan (bij Schmitt),
+  // daarna positie, rangwijziging en de naamkolom.
+  const prijsLeft = 'left-0'
+  const posLeft = isSchmitt ? 'left-14' : 'left-0'
+  const changeLeft = isSchmitt ? 'left-22' : 'left-8'
   const naamLeft = isSchmitt ? 'left-28' : 'left-14'
+
+  // Positieweergave (medaille of nummer; – bij gedeelde positie)
+  const posCell = (index: number) => {
+    if (tiedAbove[index]) return '–'
+    const medals = ['🥇', '🥈', '🥉']
+    return index < 3 ? medals[index] : String(index + 1)
+  }
 
   return (
     <div className="space-y-6">
       {showTitle && (
         <div>
+          <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Tussenstand</p>
           {poule.id === ENNOVATE_POULE_ID ? (
             <h2 className="leading-none">
               <Image src="/ennovate.png" alt={poule.name} width={500} height={80} className="h-7 sm:h-8 w-auto" />
@@ -124,6 +193,8 @@ export async function PouleStand({
           <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
             {ranked.length} {ranked.length === 1 ? 'deelnemer' : 'deelnemers'}
           </p>
+          {/* Legenda onder de titel (desktop) — niet bij Ennovate, die staat onder de stand */}
+          {!isEnnovate && <KlassementLegenda className="hidden md:grid mt-4" />}
         </div>
       )}
 
@@ -145,8 +216,8 @@ export async function PouleStand({
         }
       >
 
-      {/* Podium voor de top 3 */}
-      {ranked.length > 0 && (
+      {/* Podium voor de top 3 — niet in de Schmitt-league (daar geldt prijzengeld) */}
+      {ranked.length > 0 && !isSchmitt && (
         <Podium
           currentUserId={currentUserId}
           entries={ranked.slice(0, 3).map(({ profile, score }) => ({
@@ -170,20 +241,24 @@ export async function PouleStand({
           <div className="sm:hidden divide-y divide-white/5">
             {ranked.map(({ profile, score }, index) => {
               const isCurrentUser = profile.id === currentUserId
-              const medals = ['🥇', '🥈', '🥉']
-              const medal = index < 3 ? medals[index] : null
+              const pos = posCell(index)
+              const isMedal = ['🥇', '🥈', '🥉'].includes(pos)
               const prijs = prijsVoor(index)
+              const champ = champFor(profile.id)
               return (
                 <div key={profile.id} className={`px-4 py-3 space-y-1.5 ${isCurrentUser ? 'bg-wk-gold/5' : ''}`}>
                   {/* Rij 1: positie + naam + totaal */}
                   <div className="flex items-center gap-3">
                     <div className="w-6 text-center shrink-0">
-                      {medal ? <span className="text-sm">{medal}</span> : <span className="font-mono text-xs text-wk-muted">{index + 1}</span>}
+                      {isMedal ? <span className="text-sm">{pos}</span> : <span className="font-mono text-xs text-wk-muted">{pos}</span>}
                     </div>
                     <RankBadge change={score.rank_change} />
                     <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={24} />
                     <div className="flex-1 min-w-0">
-                      <Link href={`/deelnemers/${profile.id}`} className={`block text-sm font-medium truncate hover:underline underline-offset-2 ${isCurrentUser ? 'text-wk-gold font-bold' : 'text-wk-text hover:text-wk-gold'}`}>{profile.username}</Link>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Link href={`/deelnemers/${profile.id}`} className={`text-sm font-medium truncate hover:underline underline-offset-2 ${isCurrentUser ? 'text-wk-gold font-bold' : 'text-wk-text hover:text-wk-gold'}`}>{profile.username}</Link>
+                        {champ && <ChampFlag team={champ.team} active={champ.active} />}
+                      </div>
                       {profile.full_name && (
                         <p className="font-mono text-[9px] text-wk-muted truncate leading-tight">{profile.full_name}</p>
                       )}
@@ -236,63 +311,67 @@ export async function PouleStand({
               {/* Header */}
               <thead>
                 <tr className="border-b border-white/10">
-                  <th className="sticky left-0 z-10 bg-wk-surface px-3 py-2.5 w-8 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">#</th>
-                  <th className="sticky left-8 z-10 bg-wk-surface px-0 py-2.5 w-6 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">±</th>
                   {isSchmitt && (
-                    <th className="sticky left-14 z-10 bg-wk-surface px-2 py-2.5 w-14 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center">Prijs</th>
+                    <th className={`sticky ${prijsLeft} z-10 bg-wk-surface px-2 py-2.5 w-14 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center`}>Prijs</th>
                   )}
+                  <th className={`sticky ${posLeft} z-10 bg-wk-surface px-3 py-2.5 w-8 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center`}>#</th>
+                  <th className={`sticky ${changeLeft} z-10 bg-wk-surface px-0 py-2.5 w-6 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center`}>±</th>
                   <th className={`sticky ${naamLeft} z-10 bg-wk-surface pl-2 pr-4 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase`}>Deelnemer</th>
                   <th className="px-3 py-2.5 w-20 min-w-20 font-mono text-[9px] text-wk-gold tracking-widest uppercase text-right">Totaal</th>
-                  <ColHeader label="JOKERS" sublabel="/ 12" />
-                  <ColHeader label="WED" sublabel="Groepsfase" />
-                  <ColHeader label="STAND" sublabel="Eindstand" />
-                  <ColHeader label="KO" sublabel="KO-fase" />
-                  <ColHeader label="BONUS" sublabel="Bonus vooraf" />
-                  <ColHeader label="DAG" sublabel="Bonus dagelijks" />
+                  <ColHeader label="JOKERS" />
+                  <ColHeader label="WED" />
+                  <ColHeader label="STAND" />
+                  <ColHeader label="KO" />
+                  <ColHeader label="BONUS" />
+                  <ColHeader label="DAG" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {ranked.map(({ profile, score }, index) => {
                   const isCurrentUser = profile.id === currentUserId
-                  const medals = ['🥇', '🥈', '🥉']
-                  const medal = index < 3 ? medals[index] : null
+                  const pos = posCell(index)
+                  const isMedal = ['🥇', '🥈', '🥉'].includes(pos)
                   const prijs = prijsVoor(index)
+                  const champ = champFor(profile.id)
 
                   return (
                     <tr
                       key={profile.id}
                       className={`${isCurrentUser ? 'bg-wk-gold/5' : 'hover:bg-white/2'}`}
                     >
-                      {/* Positie */}
-                      <td className="sticky left-0 z-10 bg-inherit px-3 py-3 w-8 text-center">
-                        {medal
-                          ? <span className="text-sm">{medal}</span>
-                          : <span className="font-mono text-xs text-wk-muted">{index + 1}</span>
-                        }
-                      </td>
-
-                      {/* Rang-wijziging */}
-                      <td className="sticky left-8 z-10 bg-inherit px-0 py-3 w-6 text-center">
-                        <RankBadge change={score.rank_change} />
-                      </td>
-
-                      {/* Prijzengeld (alleen Schmitt-league) */}
+                      {/* Prijzengeld (alleen Schmitt-league) — vooraan */}
                       {isSchmitt && (
-                        <td className="sticky left-14 z-10 bg-inherit px-2 py-3 w-14 text-center">
+                        <td className={`sticky ${prijsLeft} z-10 bg-inherit px-2 py-3 w-14 text-center`}>
                           {prijs && (
                             <span className="font-mono text-[10px] font-bold text-wk-green whitespace-nowrap">{prijs}</span>
                           )}
                         </td>
                       )}
 
+                      {/* Positie */}
+                      <td className={`sticky ${posLeft} z-10 bg-inherit px-3 py-3 w-8 text-center`}>
+                        {isMedal
+                          ? <span className="text-sm">{pos}</span>
+                          : <span className="font-mono text-xs text-wk-muted">{pos}</span>
+                        }
+                      </td>
+
+                      {/* Rang-wijziging */}
+                      <td className={`sticky ${changeLeft} z-10 bg-inherit px-0 py-3 w-6 text-center`}>
+                        <RankBadge change={score.rank_change} />
+                      </td>
+
                       {/* Naam */}
                       <td className={`sticky ${naamLeft} z-10 bg-inherit pl-2 pr-4 py-3`}>
                         <div className="flex items-center gap-2 min-w-0">
                           <AvatarCircle username={profile.username} avatarUrl={profile.avatar_url} size={28} />
                           <div className="min-w-0">
-                            <Link href={`/deelnemers/${profile.id}`} className={`block text-sm whitespace-nowrap hover:underline underline-offset-2 ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text hover:text-wk-gold'}`}>
-                              {profile.username}
-                            </Link>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Link href={`/deelnemers/${profile.id}`} className={`text-sm whitespace-nowrap hover:underline underline-offset-2 ${isCurrentUser ? 'font-bold text-wk-gold' : 'font-medium text-wk-text hover:text-wk-gold'}`}>
+                                {profile.username}
+                              </Link>
+                              {champ && <ChampFlag team={champ.team} active={champ.active} />}
+                            </div>
                             {profile.full_name && (
                               <p className="font-mono text-[9px] text-wk-muted whitespace-nowrap leading-tight">{profile.full_name}</p>
                             )}
@@ -333,37 +412,61 @@ export async function PouleStand({
         )}
       </div>
 
-      {/* Legenda */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {[
-          ['WED', 'Groepsfase wedstrijden'],
-          ['STAND', 'Groepsfase eindstanden'],
-          ['KO', 'Knockout-fase'],
-          ['BONUS', 'Bonusvragen vooraf'],
-          ['DAG', 'Bonusvragen dagelijks'],
-          ['JOKERS', 'Ingezette jokers (max. 1 per groep)'],
-        ].map(([abbr, label]) => (
-          <div key={abbr} className="flex items-center gap-2">
-            <span className="font-mono text-[9px] font-bold text-wk-gold bg-wk-gold/10 border border-wk-gold/20 rounded px-1.5 py-0.5 tracking-widest shrink-0">
-              {abbr}
-            </span>
-            <span className="font-mono text-[9px] text-wk-muted tracking-widest">{label}</span>
-          </div>
-        ))}
-      </div>
+      {/* Legenda onder de stand — mobiel altijd, op desktop alleen bij Ennovate */}
+      <KlassementLegenda className={isEnnovate ? '' : 'md:hidden'} />
 
       </LeaderboardTabs>
     </div>
   )
 }
 
+// ─── Legenda ──────────────────────────────────────────────────────────────────
+// Volgorde gelijk aan de kolommen van het klassement (die is leidend).
+const LEGEND_ITEMS: [string, string][] = [
+  ['JOKERS', 'Ingezette jokers (max. 1 per groep)'],
+  ['WED', 'Groepsfase wedstrijden'],
+  ['STAND', 'Groepsfase eindstanden'],
+  ['KO', 'Knockout-fase'],
+  ['BONUS', 'Bonusvragen vooraf'],
+  ['DAG', 'Bonusvragen dagelijks'],
+]
+
+export function KlassementLegenda({ className = '' }: { className?: string }) {
+  return (
+    <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2 ${className}`}>
+      {LEGEND_ITEMS.map(([abbr, label]) => (
+        <div key={abbr} className="flex items-center gap-2">
+          <span className="font-mono text-[9px] font-bold text-wk-gold bg-wk-gold/10 border border-wk-gold/20 rounded px-1.5 py-0.5 tracking-widest shrink-0">
+            {abbr}
+          </span>
+          <span className="font-mono text-[9px] text-wk-muted tracking-widest">{label}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Voorspelde wereldkampioen als vlaggetje naast de naam; grijstinten zodra
+// het gekozen land is uitgeschakeld.
+function ChampFlag({ team, active }: { team: { name: string; flag_url: string }; active: boolean }) {
+  return (
+    <Image
+      src={team.flag_url}
+      alt={team.name}
+      title={`Voorspeld wereldkampioen: ${team.name}${active ? '' : ' (uitgeschakeld)'}`}
+      width={18}
+      height={12}
+      className={`rounded-sm object-cover w-[18px] h-3 shrink-0 ${active ? '' : 'grayscale opacity-60'}`}
+    />
+  )
+}
+
 // ─── Tabel-subcomponenten ─────────────────────────────────────────────────────
 
-function ColHeader({ label, sublabel }: { label: string; sublabel: string }) {
+function ColHeader({ label }: { label: string }) {
   return (
     <th className="px-3 py-2.5 text-right w-20 min-w-20">
       <span className="block font-mono text-[9px] font-bold text-wk-muted tracking-widest uppercase">{label}</span>
-      <span className="block font-mono text-[8px] text-wk-muted/50 tracking-widest normal-case">{sublabel}</span>
     </th>
   )
 }

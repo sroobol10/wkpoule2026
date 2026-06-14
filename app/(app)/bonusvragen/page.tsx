@@ -22,8 +22,20 @@ export default async function BonusvragenPage() {
   // Alle wedstrijden (groepsfase + KO) voor deadline-berekening + wedstrijden-per-dag
   const { data: allGroupMatches } = await supabase
     .from('matches')
-    .select(`id, kickoff_at, home_team:teams!matches_home_team_id_fkey(name, flag_url), away_team:teams!matches_away_team_id_fkey(name, flag_url)`)
+    .select(`id, kickoff_at, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(name, flag_url), away_team:teams!matches_away_team_id_fkey(name, flag_url)`)
     .order('kickoff_at')
+
+  // Landen die nog actief zijn in het toernooi = teams met een nog niet
+  // gespeelde wedstrijd. Een uitgeschakeld land komt enkel nog voor in
+  // gespeelde wedstrijden. (Gebruikt voor de landenbonusvragen.)
+  const activeTeamNames = new Set<string>()
+  for (const m of allGroupMatches ?? []) {
+    if (m.result_entered) continue
+    const h = m.home_team as { name: string } | null
+    const a = m.away_team as { name: string } | null
+    if (h?.name) activeTeamNames.add(h.name)
+    if (a?.name) activeTeamNames.add(a.name)
+  }
 
   // Eigen voorspellingen, voor het 🔮-symbool bij de dagwedstrijden
   const { data: myPreds } = await supabase
@@ -56,6 +68,7 @@ export default async function BonusvragenPage() {
     homeFlag: string | null
     awayFlag: string | null
     myPred: string | null
+    result: string | null   // werkelijke uitslag zodra gespeeld
   }
   const matchesByDay: Record<string, MatchForDay[]> = {}
   for (const m of allGroupMatches ?? []) {
@@ -64,6 +77,7 @@ export default async function BonusvragenPage() {
     if (!matchesByDay[day]) matchesByDay[day] = []
     const home = m.home_team as TeamRef | null
     const away = m.away_team as TeamRef | null
+    const played = m.result_entered && m.home_score != null && m.away_score != null
     matchesByDay[day].push({
       kickoff_at: m.kickoff_at,
       home: home?.name ?? '?',
@@ -71,6 +85,7 @@ export default async function BonusvragenPage() {
       homeFlag: home?.flag_url ?? null,
       awayFlag: away?.flag_url ?? null,
       myPred: myPredByMatch[m.id] ?? null,
+      result: played ? `${m.home_score}–${m.away_score}` : null,
     })
   }
 
@@ -116,6 +131,7 @@ export default async function BonusvragenPage() {
       anyMatchPlayed={anyMatchPlayed}
       deadlineByDate={deadlineByDate}
       matchesByDay={matchesByDay}
+      activeTeamNames={[...activeTeamNames]}
     />
   )
 }

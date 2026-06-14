@@ -222,18 +222,23 @@ export default async function StatistiekenPage({
         .slice(0, 10)
         .map(([id]) => id)
 
+      // Wedstrijden waarop de huidige deelnemer zelf een joker heeft ingezet
+      const myJokerMatchIds = new Set(
+        allJokers.filter((j) => j.user_id === user.id).map((j) => j.match_id)
+      )
+
       // Fetch match details (could be started or upcoming)
       const { data: jokerMatches } = await supabase
         .from('matches')
         .select(`
           id, kickoff_at, result_entered,
-          home_team:teams!matches_home_team_id_fkey(name, group_name),
-          away_team:teams!matches_away_team_id_fkey(name, group_name)
+          home_team:teams!matches_home_team_id_fkey(name, group_name, flag_url),
+          away_team:teams!matches_away_team_id_fkey(name, group_name, flag_url)
         `)
         .in('id', topMatchIds)
 
-      type JokerTeamRef = { name: string; group_name: string }
-      const matchInfoById: Record<string, { homeTeam: string; awayTeam: string; group: string; played: boolean }> = {}
+      type JokerTeamRef = { name: string; group_name: string; flag_url: string | null }
+      const matchInfoById: Record<string, { homeTeam: string; awayTeam: string; homeFlag: string | null; awayFlag: string | null; group: string; played: boolean }> = {}
       for (const m of jokerMatches ?? []) {
         const home = m.home_team as JokerTeamRef | null
         const away = m.away_team as JokerTeamRef | null
@@ -241,6 +246,8 @@ export default async function StatistiekenPage({
           matchInfoById[m.id] = {
             homeTeam: home.name,
             awayTeam: away.name,
+            homeFlag: home.flag_url,
+            awayFlag: away.flag_url,
             group: home.group_name,
             played: m.result_entered || new Date(m.kickoff_at) <= new Date(),
           }
@@ -253,9 +260,12 @@ export default async function StatistiekenPage({
           matchId: id,
           homeTeam: matchInfoById[id].homeTeam,
           awayTeam: matchInfoById[id].awayTeam,
+          homeFlag: matchInfoById[id].homeFlag,
+          awayFlag: matchInfoById[id].awayFlag,
           group: matchInfoById[id].group,
           played: matchInfoById[id].played,
           count: jokerCountByMatch[id],
+          mine: myJokerMatchIds.has(id),
         }))
     }
   }
@@ -298,9 +308,9 @@ export default async function StatistiekenPage({
         played: b.played,
         rank: i + 1,
       })
-      jokerWinst = jokerWinstRaw.slice(0, 10).map(winstEntry)
+      jokerWinst = jokerWinstRaw.slice(0, 5).map(winstEntry)
       const ownIdx = jokerWinstRaw.findIndex((b) => b.userId === user.id)
-      if (ownIdx >= 10) jokerWinst.push(winstEntry(jokerWinstRaw[ownIdx], ownIdx))
+      if (ownIdx >= 5) jokerWinst.push(winstEntry(jokerWinstRaw[ownIdx], ownIdx))
     }
   }
 

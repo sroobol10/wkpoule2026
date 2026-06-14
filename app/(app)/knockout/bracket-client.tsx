@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef } from 'react'
+import { Fragment, useState, useTransition, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { saveBracketPick, clearBracketSlots } from '@/app/actions/bracket'
 import { BRACKET, KO_KICKOFFS, assignThirdPlaceSlots } from '@/lib/bracket'
@@ -206,26 +206,47 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
 
   return (
     <div className="space-y-3">
-      {ordered.map((matchDef) => {
+      {ordered.map((matchDef, idx) => {
         const m = bracket[matchDef.slot]
         // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
         const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
+        // Banner boven elke nieuwe ronde, met extra witruimte ertussen
+        const newStage = matchDef.stage !== (ordered[idx - 1]?.stage ?? null)
         return (
-          <BracketMatchCard
-            key={matchDef.slot}
-            match={m}
-            teamMap={teamMap}
-            locked={locked}
-            isPending={isPending}
-            onPick={(teamId) => pickWinner(m.slot, teamId)}
-            actualWinnerId={actualWinners[matchDef.slot] ?? null}
-            kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
-            advancedTeams={advancedSet}
-            stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
-            pts={ptsPerSlot[matchDef.slot] ?? null}
-          />
+          <Fragment key={matchDef.slot}>
+            {newStage && <RoundBanner stage={matchDef.stage} first={idx === 0} />}
+            <BracketMatchCard
+              match={m}
+              teamMap={teamMap}
+              locked={locked}
+              isPending={isPending}
+              onPick={(teamId) => pickWinner(m.slot, teamId)}
+              actualWinnerId={actualWinners[matchDef.slot] ?? null}
+              kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
+              advancedTeams={advancedSet}
+              stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
+              pts={ptsPerSlot[matchDef.slot] ?? null}
+            />
+          </Fragment>
         )
       })}
+    </div>
+  )
+}
+
+// ─── Ronde-banner ───────────────────────────────────────────────────────────
+// Markeert het begin van een nieuwe knockout-ronde zodat de fasering van het
+// toernooi visueel naar voren komt.
+function RoundBanner({ stage, first }: { stage: string; first: boolean }) {
+  return (
+    <div className={first ? '' : 'pt-6'}>
+      <div className="flex items-center gap-3 rounded-xl border border-wk-gold/25 bg-wk-gold/[0.06] px-4 py-3">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-wk-gold shrink-0" />
+        <span className="font-mono text-xs sm:text-sm font-bold text-wk-gold uppercase tracking-[0.2em] leading-none">
+          {STAGE_LABELS[stage] ?? stage}
+        </span>
+        <span className="flex-1 h-px bg-gradient-to-r from-wk-gold/30 to-transparent" />
+      </div>
     </div>
   )
 }
