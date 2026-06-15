@@ -339,16 +339,19 @@ export default function StatsClient({
                         ? <span className="text-xs">⚽</span>
                         : <span className="font-mono text-[10px] text-wk-muted">{stat.group}</span>}
                     </span>
-                    {stat.homeFlag && (
-                      <Image src={stat.homeFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
-                    )}
-                    <span className={`flex-1 text-sm font-semibold truncate ${mine ? 'text-wk-gold' : 'text-wk-text'}`}>
-                      {stat.homeTeam} – {stat.awayTeam}
-                    </span>
-                    {stat.awayFlag && (
-                      <Image src={stat.awayFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
-                    )}
-                    <span className={`font-mono text-xs font-bold shrink-0 ${mine ? 'text-wk-gold' : 'text-wk-soft'}`}>
+                    {/* Vlag thuis · namen · vlag uit — vlaggen sluiten aan op de teams */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      {stat.homeFlag && (
+                        <Image src={stat.homeFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                      )}
+                      <span className={`text-sm font-semibold truncate ${mine ? 'text-wk-gold' : 'text-wk-text'}`}>
+                        {stat.homeTeam} – {stat.awayTeam}
+                      </span>
+                      {stat.awayFlag && (
+                        <Image src={stat.awayFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                      )}
+                    </div>
+                    <span className={`ml-auto font-mono text-xs font-bold shrink-0 ${mine ? 'text-wk-gold' : 'text-wk-soft'}`}>
                       {stat.count}×
                     </span>
                   </div>
@@ -392,7 +395,7 @@ export default function StatsClient({
                       {entry.username}
                     </span>
                     <span className="font-mono text-[10px] text-wk-muted shrink-0">
-                      {entry.played} {entry.played === 1 ? 'joker' : 'jokers'} gespeeld
+                      {entry.played} {entry.played === 1 ? 'joker' : 'jokers'}
                     </span>
                     <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isMe ? 'text-wk-gold' : 'text-wk-soft'}`}>
                       +{entry.extra}

@@ -105,17 +105,16 @@ export default async function BonusvragenPage() {
   )
 
   // Pre-tournament: altijd zichtbaar (tot toernooi start)
-  // Daily: zichtbaar vanaf 24u VÓÓR de unlock_date zodat deelnemers de vraag
-  // kunnen invullen vóór de wedstrijd die avond/nacht begint.
-  // De vraag gaat op slot OP de unlock_date (midnight UTC).
-  const nowMs = Date.now()
-  const oneDayMs = 24 * 60 * 60 * 1000
+  // Daily: zichtbaar zodra de vraag in het dagoverzicht verschijnt, d.w.z. de
+  // dag van vandaag of morgen (CEST-kalenderdag) — exact dezelfde grens als
+  // DagOverzicht, zodat doorklikken vanuit het dagoverzicht altijd klopt.
+  const cestMs = Date.now() + 2 * 60 * 60 * 1000
+  const tomorrowCest = new Date(cestMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const visibleQuestions = (questions ?? []).filter((q) => {
     if (q.type === 'pre_tournament') return true
     if (!q.unlock_date) return false
-    const unlockMs = new Date(q.unlock_date + 'T00:00:00Z').getTime()
-    // Toon als we binnen 24u vóór de deadline zitten, of als de deadline al voorbij is
-    return nowMs >= unlockMs - oneDayMs
+    // ISO-datums zijn lexicografisch vergelijkbaar
+    return q.unlock_date <= tomorrowCest
   })
 
   const { data: teams } = await supabase

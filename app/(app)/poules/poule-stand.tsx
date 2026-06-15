@@ -13,7 +13,7 @@ const ENNOVATE_POULE_ID = '14ccff59-b97a-41d9-9856-5c6413cd2c05'
 // Prijzengeld per positie — alleen voor Schmitt's scorebordstrijd
 const PRIJZEN = [300, 150, 75, 50, 25, 12.5, 12.5, 12.5]
 const prijsLabel = (bedrag: number) =>
-  `€ ${bedrag.toLocaleString('nl-NL', { minimumFractionDigits: bedrag % 1 ? 2 : 0 })}`
+  `€ ${bedrag.toLocaleString('nl-NL', { minimumFractionDigits: bedrag % 1 ? 2 : 0, maximumFractionDigits: 2 })}`
 
 // Volledig klassement van één poule: titel, podium/bergetappe, tabel en legenda.
 // Wordt gebruikt op /poules (direct de eigen league) en /poules/[id].
