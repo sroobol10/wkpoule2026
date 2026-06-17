@@ -39,7 +39,6 @@ function GoatFigure({
   onActivate,
   active,
   dimmed,
-  isLeading,
   delay,
 }: {
   src: string
@@ -49,7 +48,6 @@ function GoatFigure({
   onActivate: () => void
   active: boolean
   dimmed: boolean
-  isLeading: boolean
   delay: number
 }) {
   const [imgOk, setImgOk] = useState(true)
@@ -70,9 +68,6 @@ function GoatFigure({
         }`}
         style={{ background: `radial-gradient(closest-side, ${color}, transparent)` }}
       />
-      {isLeading && (
-        <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-2xl sm:text-3xl drop-shadow-lg z-10">👑</span>
-      )}
       {imgOk ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -248,8 +243,7 @@ export default function GoatClient({
             color={MESSI_BLUE}
             onActivate={() => cheer('messi', '/ankara-messi-best-sound.mp3')}
             active={takeover === 'messi'}
-            dimmed={takeover === 'ronaldo'}
-            isLeading={messiGoals > ronaldoGoals}
+            dimmed={theme === 'ronaldo'}
             delay={0.25}
           />
 
@@ -298,8 +292,7 @@ export default function GoatClient({
             color={RONALDO_RED}
             onActivate={() => cheer('ronaldo', '/ronaldo-siuuuu.mp3')}
             active={takeover === 'ronaldo'}
-            dimmed={takeover === 'messi'}
-            isLeading={ronaldoGoals > messiGoals}
+            dimmed={theme === 'messi'}
             delay={0.4}
           />
         </div>
@@ -312,7 +305,7 @@ export default function GoatClient({
             supporters={messiSupporters}
             currentUserId={currentUserId}
             align="left"
-            dimmed={takeover === 'ronaldo'}
+            dimmed={theme === 'ronaldo'}
           />
           <SupporterList
             title="Team Ronaldo"
@@ -320,7 +313,7 @@ export default function GoatClient({
             supporters={ronaldoSupporters}
             currentUserId={currentUserId}
             align="right"
-            dimmed={takeover === 'messi'}
+            dimmed={theme === 'messi'}
           />
         </div>
 

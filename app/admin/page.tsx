@@ -19,6 +19,17 @@ export default async function AdminPage() {
 
   if (!profile?.is_admin) redirect('/voorspellingen')
 
+  // GOAT-doelpuntenstand (beheerd via app_settings)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: goatSettings } = await (supabase as any)
+    .from('app_settings')
+    .select('key, value')
+    .in('key', ['goat_messi_goals', 'goat_ronaldo_goals'])
+  const goatMap: Record<string, string> = {}
+  for (const s of (goatSettings ?? []) as { key: string; value: string }[]) goatMap[s.key] = s.value
+  const goatMessi = parseInt(goatMap.goat_messi_goals ?? '0', 10) || 0
+  const goatRonaldo = parseInt(goatMap.goat_ronaldo_goals ?? '0', 10) || 0
+
   const { data: matches } = await supabase
     .from('matches')
     .select('id, stage, kickoff_at, match_number, home_team_id, away_team_id, home_score, away_score, result_entered')
@@ -212,6 +223,8 @@ export default async function AdminPage() {
           allPoules={allPoules}
           totalGroupMatches={totalGroupMatches}
           totalBonusQuestions={totalBonusQuestions}
+          goatMessi={goatMessi}
+          goatRonaldo={goatRonaldo}
         />
       </main>
     </div>

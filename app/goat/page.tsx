@@ -2,16 +2,23 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import GoatClient, { type GoatSupporter } from './goat-client'
 
-// Doelpuntenstand WK 2026 — handmatig bijwerken na elke goal van een van de twee.
-const MESSI_GOALS = 0
-const RONALDO_GOALS = 0
-
 export const metadata = { title: 'Het GOAT-duel · WK Poule 2026' }
 
 export default async function GoatPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  // Doelpuntenstand wordt door de admin beheerd (app_settings)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: settings } = await (supabase as any)
+    .from('app_settings')
+    .select('key, value')
+    .in('key', ['goat_messi_goals', 'goat_ronaldo_goals'])
+  const settingsMap: Record<string, string> = {}
+  for (const s of (settings ?? []) as { key: string; value: string }[]) settingsMap[s.key] = s.value
+  const messiGoals = parseInt(settingsMap.goat_messi_goals ?? '0', 10) || 0
+  const ronaldoGoals = parseInt(settingsMap.goat_ronaldo_goals ?? '0', 10) || 0
 
   // De GOAT-bonusvraag (zelfde herkenning als op de bonusvragenpagina)
   const { data: questions } = await supabase
@@ -47,8 +54,8 @@ export default async function GoatPage() {
 
   return (
     <GoatClient
-      messiGoals={MESSI_GOALS}
-      ronaldoGoals={RONALDO_GOALS}
+      messiGoals={messiGoals}
+      ronaldoGoals={ronaldoGoals}
       messiSupporters={messiSupporters}
       ronaldoSupporters={ronaldoSupporters}
       currentUserId={user.id}

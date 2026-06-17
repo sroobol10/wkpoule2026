@@ -1176,3 +1176,31 @@ export async function setDeelnemerActive(userId: string, isActive: boolean): Pro
   revalidatePath('/poules')
   return { ok: true }
 }
+
+// ─── GOAT-duel: doelpuntenstand Messi vs Ronaldo beheren ──────────────────────
+export async function setGoatGoals(messiGoals: number, ronaldoGoals: number): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+
+  const messi = Math.max(0, Math.floor(messiGoals))
+  const ronaldo = Math.max(0, Math.floor(ronaldoGoals))
+
+  // app_settings heeft alleen een SELECT-policy — schrijven via de service role
+  const service = createServiceClient()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from('app_settings')
+    .upsert(
+      [
+        { key: 'goat_messi_goals', value: String(messi), updated_at: new Date().toISOString() },
+        { key: 'goat_ronaldo_goals', value: String(ronaldo), updated_at: new Date().toISOString() },
+      ],
+      { onConflict: 'key' }
+    )
+
+  if (error) return { ok: false, error: 'Opslaan mislukt.' }
+
+  revalidatePath('/goat')
+  revalidatePath('/admin')
+  return { ok: true }
+}

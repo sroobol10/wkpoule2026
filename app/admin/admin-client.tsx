@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { setMatchResult, setBonusCorrectAnswer, updateBonusAnswerConfig, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus, setDeelnemerActive } from '@/app/actions/admin'
+import { setMatchResult, setBonusCorrectAnswer, updateBonusAnswerConfig, setKnockoutResult, autoFillGroupResults, autoFillGroupResultsUntil, clearAllGroupResults, scoreGroupAdvancement, scoreAllGroupAdvancement, assignNextKoRoundTeams, simulateFullKo, rescoreBracket, clearKoResults, createKoMatches, saveMatchCards, awardCountryBonus, setDeelnemerActive, setGoatGoals } from '@/app/actions/admin'
 import { formatInAmsterdam } from '@/lib/format'
 import { AvatarCircle } from '@/components/avatar-circle'
 
@@ -56,6 +56,8 @@ type Props = {
   allPoules: PouleRef[]
   totalGroupMatches: number
   totalBonusQuestions: number
+  goatMessi: number
+  goatRonaldo: number
 }
 
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L']
@@ -71,7 +73,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 type Tab = 'groepsfase' | 'bonusvragen' | 'knockout' | 'deelnemers'
 
-export default function AdminClient({ matches, teams, questions, cardsByMatch, participants, allPoules, totalGroupMatches, totalBonusQuestions }: Props) {
+export default function AdminClient({ matches, teams, questions, cardsByMatch, participants, allPoules, totalGroupMatches, totalBonusQuestions, goatMessi, goatRonaldo }: Props) {
   const [tab, setTab] = useState<Tab>('groepsfase')
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
@@ -119,7 +121,7 @@ export default function AdminClient({ matches, teams, questions, cardsByMatch, p
         <GroupTab matches={groupMatches} teamMap={teamMap} cardsByMatch={cardsByMatch} />
       )}
       {tab === 'bonusvragen' && (
-        <BonusTab questions={questions} />
+        <BonusTab questions={questions} goatMessi={goatMessi} goatRonaldo={goatRonaldo} />
       )}
       {tab === 'knockout' && (
         <KnockoutTab matches={knockoutMatches} teamMap={teamMap} cardsByMatch={cardsByMatch} />
@@ -748,13 +750,78 @@ function ActiveToggle({ userId, isActive }: { userId: string; isActive: boolean 
 
 // ─── Bonus questions tab ──────────────────────────────────────────────────────
 
-function BonusTab({ questions }: { questions: BonusQuestion[] }) {
+// GOAT-duel: doelpuntenstand Messi vs Ronaldo (getoond op /goat)
+function GoatGoalsEditor({ messi, ronaldo }: { messi: number; ronaldo: number }) {
+  const router = useRouter()
+  const [m, setM] = useState(messi)
+  const [r, setR] = useState(ronaldo)
+  const [isPending, startTransition] = useTransition()
+  const [toast, setToast] = useState<string | null>(null)
+  const dirty = m !== messi || r !== ronaldo
+
+  function save() {
+    startTransition(async () => {
+      const res = await setGoatGoals(m, r)
+      setToast(res.ok ? 'Opgeslagen!' : res.error)
+      if (res.ok) router.refresh()
+      setTimeout(() => setToast(null), 2500)
+    })
+  }
+
+  const stepper = (label: string, value: number, setValue: (n: number) => void, color: string) => (
+    <div className="flex-1 text-center">
+      <p className="font-mono text-[10px] tracking-[0.16em] uppercase mb-2" style={{ color }}>{label}</p>
+      <div className="flex items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={() => setValue(Math.max(0, value - 1))}
+          className="w-8 h-8 rounded-full border border-white/15 text-wk-soft hover:border-white/30 font-mono text-lg leading-none cursor-pointer"
+        >−</button>
+        <span className="font-display text-3xl text-wk-text w-10 tabular-nums">{value}</span>
+        <button
+          type="button"
+          onClick={() => setValue(value + 1)}
+          className="w-8 h-8 rounded-full border border-white/15 text-wk-soft hover:border-white/30 font-mono text-lg leading-none cursor-pointer"
+        >+</button>
+      </div>
+    </div>
+  )
+
+  return (
+    <section>
+      <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
+        GOAT-duel · doelpuntenstand <span className="text-wk-muted/50">· getoond op /goat</span>
+      </p>
+      <div className="bg-wk-surface border border-white/10 rounded-xl p-5">
+        <div className="flex items-center gap-4">
+          {stepper('Messi', m, setM, '#6CACE4')}
+          <span className="font-display text-xl text-wk-muted/50">–</span>
+          {stepper('Ronaldo', r, setR, '#E63946')}
+        </div>
+        <div className="mt-4 flex items-center justify-end gap-3">
+          {toast && <span className="font-mono text-[10px] text-wk-green tracking-[0.12em] uppercase">{toast}</span>}
+          <button
+            type="button"
+            onClick={save}
+            disabled={isPending || !dirty}
+            className="rounded bg-wk-green px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-40 transition-opacity"
+          >
+            {isPending ? '…' : 'Opslaan'}
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function BonusTab({ questions, goatMessi, goatRonaldo }: { questions: BonusQuestion[]; goatMessi: number; goatRonaldo: number }) {
   const pre   = questions.filter((q) => q.type === 'pre_tournament')
   const daily = questions.filter((q) => q.type === 'daily')
     .sort((a, b) => (a.unlock_date ?? '').localeCompare(b.unlock_date ?? ''))
 
   return (
     <div className="space-y-6">
+      <GoatGoalsEditor messi={goatMessi} ronaldo={goatRonaldo} />
       {pre.length > 0 && (
         <section>
           <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
