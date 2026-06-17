@@ -117,9 +117,13 @@ export default async function StatistiekenPage({
   // ── Gestarte groepswedstrijden (basis voor joker-winst) ──────────────────
   const { data: startedMatches } = await supabase
     .from('matches')
-    .select('id')
+    .select('id, result_entered')
     .eq('stage', 'group')
     .lte('kickoff_at', new Date().toISOString())
+
+  // Set van reeds gespeelde wedstrijden (uitslag ingevoerd) — bepaalt welke
+  // ingezette jokers meetellen in de joker-winst.
+  const playedMatchIds = new Set((startedMatches ?? []).filter((m) => m.result_entered).map((m) => m.id))
 
   // Punten per voorspelling (voor joker-winst)
   const predPtsByUserMatch: Record<string, number | null> = {}
@@ -145,18 +149,16 @@ export default async function StatistiekenPage({
     const allJokers = (allJokersRaw ?? []).filter((j) => memberIds.has(j.user_id))
 
     if (allJokers && allJokers.length > 0) {
-      // Joker-winst per deelnemer: alleen jokers op wedstrijden waarvan de
-      // punten al zijn toegekend. Een joker verdubbelt de basispunten, dus de
-      // winst is de helft van het behaalde totaal op die wedstrijd.
-      const decided = allJokers
-        .map((j) => ({ userId: j.user_id, matchId: j.match_id, pts: predPtsByUserMatch[`${j.user_id}:${j.match_id}`] }))
-        .filter((d): d is { userId: string; matchId: string; pts: number } => d.pts != null)
-
+      // Joker-winst per deelnemer. We tellen alleen jokers op reeds GESPEELDE
+      // wedstrijden (uitslag ingevoerd). `played` = aantal van die jokers;
+      // `extra` = de winst (joker verdubbelt, dus de helft van het totaal).
       const winstByUser: Record<string, { extra: number; played: number }> = {}
-      for (const d of decided) {
-        const u = (winstByUser[d.userId] ??= { extra: 0, played: 0 })
-        u.extra += d.pts / 2
+      for (const j of allJokers) {
+        if (!playedMatchIds.has(j.match_id)) continue
+        const u = (winstByUser[j.user_id] ??= { extra: 0, played: 0 })
         u.played++
+        const pts = predPtsByUserMatch[`${j.user_id}:${j.match_id}`]
+        if (pts != null) u.extra += pts / 2
       }
       jokerWinstRaw = Object.entries(winstByUser)
         .map(([userId, v]) => ({ userId, extra: Math.round(v.extra), played: v.played }))
