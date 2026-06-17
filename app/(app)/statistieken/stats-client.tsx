@@ -47,18 +47,6 @@ export type JokerWinstEntry = {
   rank: number   // positie in de volledige ranking
 }
 
-export type VerloopData = {
-  days: string[]
-  series: {
-    userId: string
-    username: string
-    isCurrentUser: boolean
-    values: number[]
-  }[]
-}
-
-export type DayPointsEntry = { day: string; pts: number }
-
 type Props = {
   tournamentStarted: boolean
   currentUserId: string
@@ -69,8 +57,6 @@ type Props = {
   bonusQuestionStats: BonusQuestionStat[]
   jokerStats: JokerStat[]
   jokerWinst: JokerWinstEntry[]
-  verloop: VerloopData | null
-  dayPoints: DayPointsEntry[]
   teamFlags: Record<string, string> // landnaam → vlag-URL
 }
 
@@ -145,8 +131,6 @@ export default function StatsClient({
   bonusQuestionStats,
   jokerStats,
   jokerWinst,
-  verloop,
-  dayPoints,
   teamFlags,
 }: Props) {
   const preBonusStats = bonusQuestionStats
@@ -211,29 +195,6 @@ export default function StatsClient({
           <span className="font-display text-xl text-wk-gold group-hover:translate-x-1 transition-transform shrink-0">→</span>
         </div>
       </Link>
-
-      {/* Klassementverloop */}
-      {verloop && tournamentStarted && (
-        <section className="animate-fade-up" style={{ animationDelay: '75ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Klassementverloop 📈 — top 5 per speeldag
-          </p>
-          <VerloopChart data={verloop} />
-          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
-            Cumulatieve wedstrijdpunten uit de groepsfase
-          </p>
-        </section>
-      )}
-
-      {/* Punten per speeldag */}
-      {dayPoints.length > 1 && tournamentStarted && (
-        <section className="animate-fade-up" style={{ animationDelay: '100ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Punten-regen 🌧️ — gescoorde punten per speeldag
-          </p>
-          <DayPointsChart data={dayPoints} />
-        </section>
-      )}
 
       {/* WK-kampioen verdeling */}
       {tournamentStarted ? (
@@ -444,128 +405,6 @@ export default function StatsClient({
           </div>
         </section>
       )}
-    </div>
-  )
-}
-
-// ─── Klassementverloop lijngrafiek ────────────────────────────────────────────
-
-// Kleuren voor de niet-eigen series; de ingelogde gebruiker is altijd goud
-const SERIES_COLORS = ['#2D6BE5', '#E63946', '#2EA84B', '#A78BFA', '#C8CCD6']
-
-function VerloopChart({ data }: { data: VerloopData }) {
-  const [drawn, setDrawn] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setDrawn(true), 200)
-    return () => clearTimeout(t)
-  }, [])
-
-  const W = 600, H = 240, PL = 36, PR = 14, PT = 12, PB = 26
-  const maxVal = Math.max(...data.series.flatMap((s) => s.values), 1)
-  const x = (i: number) => PL + (i / Math.max(data.days.length - 1, 1)) * (W - PL - PR)
-  const y = (v: number) => PT + (1 - v / maxVal) * (H - PT - PB)
-  const colorOf = (s: VerloopData['series'][number], si: number) =>
-    s.isCurrentUser ? '#F4B92E' : SERIES_COLORS[si % SERIES_COLORS.length]
-  // Maximaal ~8 x-labels, anders wordt het een brij
-  const labelEvery = Math.max(1, Math.ceil(data.days.length / 8))
-
-  return (
-    <div className="bg-wk-surface border border-white/10 rounded-xl p-4">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Puntenverloop per speeldag">
-        {/* Horizontale gridlijnen + y-as labels */}
-        {Array.from({ length: 5 }, (_, i) => {
-          const v = Math.round((maxVal / 4) * i)
-          return (
-            <g key={i}>
-              <line x1={PL} x2={W - PR} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
-              <text x={PL - 7} y={y(v) + 3} textAnchor="end" fontSize="9" fill="#7C8398" fontFamily="ui-monospace, monospace">
-                {v}
-              </text>
-            </g>
-          )
-        })}
-        {/* X-as labels */}
-        {data.days.map((d, i) =>
-          i % labelEvery === 0 ? (
-            <text key={`${d}-${i}`} x={x(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="#7C8398" fontFamily="ui-monospace, monospace">
-              {d}
-            </text>
-          ) : null
-        )}
-        {/* Lijnen — tekenen zich in via stroke-dashoffset */}
-        {data.series.map((s, si) => {
-          const color = colorOf(s, si)
-          const points = s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')
-          const last = s.values[s.values.length - 1]
-          return (
-            <g key={s.userId}>
-              <polyline
-                points={points}
-                fill="none"
-                stroke={color}
-                strokeWidth={s.isCurrentUser ? 2.5 : 1.8}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                opacity={0.9}
-                pathLength={1}
-                strokeDasharray={1}
-                strokeDashoffset={drawn ? 0 : 1}
-                style={{ transition: `stroke-dashoffset 1.3s ease-out ${si * 0.12}s` }}
-              />
-              <circle
-                cx={x(s.values.length - 1)}
-                cy={y(last)}
-                r={3}
-                fill={color}
-                opacity={drawn ? 1 : 0}
-                style={{ transition: 'opacity 0.3s', transitionDelay: `${1.1 + si * 0.12}s` }}
-              />
-            </g>
-          )
-        })}
-      </svg>
-
-      {/* Legenda */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3">
-        {data.series.map((s, si) => (
-          <span key={s.userId} className="flex items-center gap-1.5 font-mono text-[10px] text-wk-soft">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: colorOf(s, si) }} />
-            <span className={`truncate max-w-28 ${s.isCurrentUser ? 'text-wk-gold font-bold' : ''}`}>
-              {s.username}{s.isCurrentUser ? ' (jij)' : ''}
-            </span>
-            <span className="text-wk-muted">{s.values[s.values.length - 1]}pt</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Punten per speeldag ──────────────────────────────────────────────────────
-
-function DayPointsChart({ data }: { data: DayPointsEntry[] }) {
-  const max = Math.max(...data.map((d) => d.pts), 1)
-  return (
-    <div className="bg-wk-surface border border-white/10 rounded-xl px-4 pt-4 pb-3">
-      <div className="flex items-end gap-1 sm:gap-1.5 h-36">
-        {data.map((d, i) => {
-          const isMax = d.pts === max && d.pts > 0
-          return (
-            <div key={`${d.day}-${i}`} className="flex-1 flex flex-col items-center justify-end h-full min-w-0">
-              <span className={`font-mono text-[8px] mb-1 ${isMax ? 'text-wk-gold font-bold' : 'text-wk-muted'}`}>
-                {d.pts}
-              </span>
-              <div
-                className={`w-full rounded-t animate-podium-rise ${
-                  isMax ? 'bg-gradient-to-t from-wk-gold/50 to-wk-gold' : 'bg-white/15'
-                }`}
-                style={{ height: `${Math.max((d.pts / max) * 100, 2)}%`, animationDelay: `${i * 70}ms` }}
-              />
-              <span className="font-mono text-[8px] text-wk-muted mt-1 truncate max-w-full">{d.day}</span>
-            </div>
-          )
-        })}
-      </div>
     </div>
   )
 }

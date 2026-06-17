@@ -2,10 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
-import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat, type JokerStat, type JokerWinstEntry, type VerloopData, type DayPointsEntry } from './stats-client'
-
-// '2026-06-12' → '12/6'
-const dayLabel = (d: string) => `${parseInt(d.slice(8), 10)}/${parseInt(d.slice(5, 7), 10)}`
+import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat, type JokerStat, type JokerWinstEntry } from './stats-client'
 
 export default async function StatistiekenPage({
   searchParams,
@@ -117,69 +114,24 @@ export default async function StatistiekenPage({
     }
   }
 
-  // ── Gestarte wedstrijden (basis voor verloop, speeldagen en joker-winst) ──
+  // ── Gestarte groepswedstrijden (basis voor joker-winst) ──────────────────
   const { data: startedMatches } = await supabase
     .from('matches')
-    .select('id, kickoff_at')
+    .select('id')
     .eq('stage', 'group')
     .lte('kickoff_at', new Date().toISOString())
-    .order('kickoff_at')
 
-  // Voor joker-winst
+  // Punten per voorspelling (voor joker-winst)
   const predPtsByUserMatch: Record<string, number | null> = {}
-
-  // Voor de grafieken: klassementverloop, heatmap en punten per speeldag
-  let verloopRaw: { userId: string; isCurrentUser: boolean; values: number[] }[] = []
-  let verloopDays: string[] = []
-  let verloopData: VerloopData | null = null
-  let dayPointsData: DayPointsEntry[] = []
-
   if (startedMatches && startedMatches.length > 0) {
     const matchIds = startedMatches.map((m) => m.id)
-
     const { data: allPredictions } = await supabase
       .from('predictions')
-      .select('user_id, match_id, predicted_home, predicted_away, points_awarded')
+      .select('user_id, match_id, points_awarded')
       .in('match_id', matchIds)
-    const predictions = (allPredictions ?? []).filter((p) => memberIds.has(p.user_id))
-
-    // Punten per voorspelling (voor joker-winst)
-    for (const p of predictions ?? []) {
-      predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
+    for (const p of allPredictions ?? []) {
+      if (memberIds.has(p.user_id)) predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
     }
-
-    // ── Grafiekdata: speeldag per wedstrijd (CEST) ───────────────────────────
-    const dayByMatch: Record<string, string> = {}
-    for (const m of startedMatches) {
-      const cest = new Date(new Date(m.kickoff_at).getTime() + 2 * 60 * 60 * 1000)
-      dayByMatch[m.id] = cest.toISOString().slice(0, 10)
-    }
-    verloopDays = [...new Set(Object.values(dayByMatch))].sort()
-
-    // Punten per speeldag (poule-breed) + cumulatief verloop per deelnemer
-    const ptsByDay: Record<string, number> = {}
-    const ptsByUserDay: Record<string, Record<string, number>> = {}
-    for (const p of predictions ?? []) {
-      const day = dayByMatch[p.match_id]
-      if (!day || p.points_awarded == null) continue
-      ptsByDay[day] = (ptsByDay[day] ?? 0) + p.points_awarded
-      ;(ptsByUserDay[p.user_id] ??= {})[day] = (ptsByUserDay[p.user_id][day] ?? 0) + p.points_awarded
-    }
-    dayPointsData = verloopDays.map((day) => ({ day: dayLabel(day), pts: ptsByDay[day] ?? 0 }))
-
-    const totals = Object.entries(ptsByUserDay)
-      .map(([uid, byDay]) => [uid, Object.values(byDay).reduce((a, b) => a + b, 0)] as const)
-      .sort((a, b) => b[1] - a[1])
-    const chartIds = totals.slice(0, 5).map(([uid]) => uid)
-    if (ptsByUserDay[user.id] && !chartIds.includes(user.id)) chartIds.push(user.id)
-    verloopRaw = chartIds.map((uid) => {
-      let cum = 0
-      return {
-        userId: uid,
-        isCurrentUser: uid === user.id,
-        values: verloopDays.map((d) => (cum += ptsByUserDay[uid][d] ?? 0)),
-      }
-    })
   }
 
   // ── Joker hotspots + rendement ───────────────────────────────────────────
@@ -270,48 +222,29 @@ export default async function StatistiekenPage({
     }
   }
 
-  // ── Joker-winst + verloop: ranglijsten met profielen ─────────────────────
+  // ── Joker-winst: ranglijst met profielen ─────────────────────────────────
   let jokerWinst: JokerWinstEntry[] = []
-  if (tournamentStarted && (jokerWinstRaw.length > 0 || verloopRaw.length > 0)) {
-    const userIds = [...new Set([
-      ...jokerWinstRaw.map((b) => b.userId),
-      ...verloopRaw.map((s) => s.userId),
-    ])]
+  if (tournamentStarted && jokerWinstRaw.length > 0) {
+    const userIds = [...new Set(jokerWinstRaw.map((b) => b.userId))]
+    const { data: profileRows } = await supabase
+      .from('profiles')
+      .select('id, username, avatar_url')
+      .in('id', userIds)
+    const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
+    for (const p of profileRows ?? []) profileById[p.id] = p
 
-    if (userIds.length > 0) {
-      const { data: profileRows } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .in('id', userIds)
-
-      const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
-      for (const p of profileRows ?? []) profileById[p.id] = p
-
-      if (verloopRaw.length > 0 && verloopDays.length >= 2) {
-        verloopData = {
-          days: verloopDays.map(dayLabel),
-          series: verloopRaw.map((s) => ({
-            userId: s.userId,
-            username: profileById[s.userId]?.username ?? '?',
-            isCurrentUser: s.isCurrentUser,
-            values: s.values,
-          })),
-        }
-      }
-
-      // Top-10, plus je eigen rij (met echte positie) als je daarbuiten valt
-      const winstEntry = (b: typeof jokerWinstRaw[number], i: number): JokerWinstEntry => ({
-        userId: b.userId,
-        username: profileById[b.userId]?.username ?? '?',
-        avatarUrl: profileById[b.userId]?.avatar_url ?? null,
-        extra: b.extra,
-        played: b.played,
-        rank: i + 1,
-      })
-      jokerWinst = jokerWinstRaw.slice(0, 5).map(winstEntry)
-      const ownIdx = jokerWinstRaw.findIndex((b) => b.userId === user.id)
-      if (ownIdx >= 5) jokerWinst.push(winstEntry(jokerWinstRaw[ownIdx], ownIdx))
-    }
+    // Top-5, plus je eigen rij (met echte positie) als je daarbuiten valt
+    const winstEntry = (b: typeof jokerWinstRaw[number], i: number): JokerWinstEntry => ({
+      userId: b.userId,
+      username: profileById[b.userId]?.username ?? '?',
+      avatarUrl: profileById[b.userId]?.avatar_url ?? null,
+      extra: b.extra,
+      played: b.played,
+      rank: i + 1,
+    })
+    jokerWinst = jokerWinstRaw.slice(0, 5).map(winstEntry)
+    const ownIdx = jokerWinstRaw.findIndex((b) => b.userId === user.id)
+    if (ownIdx >= 5) jokerWinst.push(winstEntry(jokerWinstRaw[ownIdx], ownIdx))
   }
 
   // ── Bonus-vraag statistieken ─────────────────────────────────────────────
@@ -394,8 +327,6 @@ export default async function StatistiekenPage({
       bonusQuestionStats={bonusQuestionStats}
       jokerStats={jokerStats}
       jokerWinst={jokerWinst}
-      verloop={(playedCount ?? 0) >= 20 ? verloopData : null}
-      dayPoints={(playedCount ?? 0) >= 20 ? dayPointsData : []}
       teamFlags={teamFlags}
     />
   )
