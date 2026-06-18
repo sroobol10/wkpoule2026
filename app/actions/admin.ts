@@ -8,6 +8,34 @@ import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
 
 type AdminResult = { ok: true } | { ok: false; error: string }
 
+// PostgREST levert standaard max. 1000 rijen — paginate bij bulk-fetches.
+async function fetchAllAdmin<T>(
+  make: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const PAGE = 1000
+  const out: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await make(from, from + PAGE - 1)
+    if (!data || data.length === 0) break
+    out.push(...data)
+    if (data.length < PAGE) break
+  }
+  return out
+}
+
+// Voer taken parallel uit met een begrensde concurrency (voorkomt dat we de
+// database overspoelen, maar veel sneller dan strikt sequentieel).
+async function runPool<T>(items: T[], limit: number, fn: (item: T) => PromiseLike<unknown>): Promise<void> {
+  let i = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++
+      await fn(items[idx])
+    }
+  })
+  await Promise.all(workers)
+}
+
 async function assertAdmin() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -79,15 +107,23 @@ async function scoreBracketAdvancement(
   if (!picks?.length) return []
 
   const affectedUsers: string[] = []
+  const correctIds: string[] = []
+  const wrongIds: string[] = []
   for (const pick of picks as { id: string; user_id: string; predicted_team_id: string }[]) {
-    const pts = advancedTeams.has(pick.predicted_team_id) ? pointsForStage : 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (supabase as any)
-      .from('bracket_predictions')
-      .update({ points_awarded: pts })
-      .eq('id', pick.id)
+    ;(advancedTeams.has(pick.predicted_team_id) ? correctIds : wrongIds).push(pick.id)
     affectedUsers.push(pick.user_id)
   }
+  // Twee bulk-updates i.p.v. één per pick
+  await Promise.all([
+    correctIds.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? (supabase as any).from('bracket_predictions').update({ points_awarded: pointsForStage }).in('id', correctIds)
+      : Promise.resolve(),
+    wrongIds.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ? (supabase as any).from('bracket_predictions').update({ points_awarded: 0 }).in('id', wrongIds)
+      : Promise.resolve(),
+  ])
   return affectedUsers
 }
 
@@ -124,9 +160,9 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
 
   const affectedPouleIds = [...new Set(memberships.map((m) => m.poule_id))]
 
-  // Snapshot huidige rangschikking per poule (vóór de update)
+  // Snapshot huidige rangschikking per poule (vóór de update) — parallel
   const oldRankMap: Record<string, Record<string, number>> = {}
-  for (const pouleId of affectedPouleIds) {
+  await Promise.all(affectedPouleIds.map(async (pouleId) => {
     const { data: cur } = await supabase
       .from('poule_scores')
       .select('user_id, total_pts')
@@ -136,7 +172,7 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
       oldRankMap[pouleId] = {}
       cur.forEach((s, i) => { oldRankMap[pouleId][s.user_id] = i + 1 })
     }
-  }
+  }))
 
   // Haal pre-tournament vraag-IDs eenmalig op voor bonus-opsplitsing
   const { data: preQRows } = await supabase
@@ -152,62 +188,95 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     .from('matches').select('id', { count: 'exact', head: true }).eq('stage', 'group').eq('result_entered', true)
   const allGroupMatchesPlayed = (totalGroupMatches ?? 0) > 0 && totalGroupMatches === playedGroupMatches
 
-  // Herbereken punten per gebruiker (inclusief breakdown)
+  // ── Bulk-fetch alle scoringsdata voor álle betrokken gebruikers in één keer ──
+  // Voorheen deden we per gebruiker 6 queries + per-poule upserts (sequentieel),
+  // wat bij ~65 deelnemers honderden round-trips opleverde (~30s). Nu halen we
+  // alles in 6 gepagineerde bulk-queries op en schrijven in batches weg.
+  type PredRow = {
+    user_id: string
+    points_awarded: number | null
+    predicted_home: number
+    predicted_away: number
+    match: { home_score: number | null; away_score: number | null; result_entered: boolean } | null
+  }
+  const [preds, koPreds, advancement, bonuses, jokerRows, bracketRows] = await Promise.all([
+    fetchAllAdmin<PredRow>((from, to) => supabase.from('predictions')
+      .select('user_id, points_awarded, predicted_home, predicted_away, match:matches!predictions_match_id_fkey(home_score, away_score, result_entered)')
+      .in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
+    fetchAllAdmin<{ user_id: string; points_awarded: number | null }>((from, to) => supabase.from('knockout_predictions')
+      .select('user_id, points_awarded').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
+    fetchAllAdmin<{ user_id: string; points_awarded: number | null }>((from, to) => supabase.from('group_advancement')
+      .select('user_id, points_awarded').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
+    fetchAllAdmin<{ user_id: string; points_awarded: number | null; question_id: string }>((from, to) => supabase.from('bonus_answers')
+      .select('user_id, points_awarded, question_id').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetchAllAdmin<{ user_id: string; match: { result_entered: boolean } | null }>((from, to) => supabase.from('jokers')
+      .select('user_id, match:matches!jokers_match_id_fkey(result_entered)').in('user_id', userIds).range(from, to)),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetchAllAdmin<{ user_id: string; points_awarded: number | null }>((from, to) => (supabase as any).from('bracket_predictions')
+      .select('user_id, points_awarded').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
+  ])
+
+  // Groepeer per gebruiker
+  const groupBy = <T extends { user_id: string }>(rows: T[]) => {
+    const m = new Map<string, T[]>()
+    for (const r of rows) {
+      const arr = m.get(r.user_id) ?? []
+      arr.push(r)
+      m.set(r.user_id, arr)
+    }
+    return m
+  }
+  const predsByUser   = groupBy(preds)
+  const koByUser      = groupBy(koPreds)
+  const advByUser     = groupBy(advancement)
+  const bonusByUser   = groupBy(bonuses)
+  const jokersByUser  = groupBy(jokerRows)
+  const bracketByUser = groupBy(bracketRows)
+  const poulesByUser  = new Map<string, string[]>()
+  for (const m of memberships) {
+    const arr = poulesByUser.get(m.user_id) ?? []
+    arr.push(m.poule_id)
+    poulesByUser.set(m.user_id, arr)
+  }
+
+  // Bereken per gebruiker en bouw alle upsert-rijen op
+  type ScoredPred = {
+    predicted_home: number
+    predicted_away: number
+    match: { home_score: number | null; away_score: number | null; result_entered: boolean } | null
+  }
+  type ScoreRow = {
+    user_id: string; poule_id: string; total_pts: number; exact_hits: number; correct_results: number
+    group_match_pts: number; group_standings_pts: number; knockout_pts: number
+    bonus_pre_pts: number; bonus_daily_pts: number; jokers_played: number
+  }
+  const upsertRows: ScoreRow[] = []
   for (const userId of userIds) {
-    const [predsRes, koRes, advRes, bonusRes, jokersRes, bracketRes] = await Promise.all([
-      supabase.from('predictions')
-        .select('points_awarded, predicted_home, predicted_away, match:matches!predictions_match_id_fkey(home_score, away_score, result_entered)')
-        .eq('user_id', userId).not('points_awarded', 'is', null),
-      supabase.from('knockout_predictions').select('points_awarded')
-        .eq('user_id', userId).not('points_awarded', 'is', null),
-      supabase.from('group_advancement').select('points_awarded')
-        .eq('user_id', userId).not('points_awarded', 'is', null),
-      supabase.from('bonus_answers').select('points_awarded, question_id')
-        .eq('user_id', userId).not('points_awarded', 'is', null),
-      // Jokers op al-gespeelde wedstrijden (result_entered = true)
-      supabase.from('jokers')
-        .select('id, match:matches!jokers_match_id_fkey(result_entered)')
-        .eq('user_id', userId),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any).from('bracket_predictions').select('points_awarded')
-        .eq('user_id', userId).not('points_awarded', 'is', null),
-    ])
+    const uPreds   = predsByUser.get(userId)   ?? []
+    const uKo      = koByUser.get(userId)      ?? []
+    const uAdv     = advByUser.get(userId)     ?? []
+    const uBonus   = bonusByUser.get(userId)   ?? []
+    const uJokers  = jokersByUser.get(userId)  ?? []
+    const uBracket = bracketByUser.get(userId) ?? []
 
-    const preds       = predsRes.data   ?? []
-    const koPreds     = koRes.data      ?? []
-    const advancement = advRes.data     ?? []
-    const bonuses     = bonusRes.data   ?? []
-    const jokerRows   = jokersRes.data  ?? []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bracketRows = (bracketRes.data ?? []) as { points_awarded: number | null }[]
-
-    const groupMatchPts     = preds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    // Eindstand-punten alleen meenemen als de volledige groepsfase klaar is
+    const groupMatchPts     = uPreds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const groupStandingsPts = allGroupMatchesPlayed
-      ? advancement.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+      ? uAdv.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
       : 0
-    const knockoutPts       = koPreds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-                            + bracketRows.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const bonusPrePts       = bonuses.filter((b) => preQuestionIds.has(b.question_id))
+    const knockoutPts       = uKo.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+                            + uBracket.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
+    const bonusPrePts       = uBonus.filter((b) => preQuestionIds.has(b.question_id))
                                 .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const bonusDailyPts     = bonuses.filter((b) => !preQuestionIds.has(b.question_id))
+    const bonusDailyPts     = uBonus.filter((b) => !preQuestionIds.has(b.question_id))
                                 .reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const jokersPlayed      = jokerRows.filter(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (j: any) => j.match?.result_entered === true
-    ).length
+    const jokersPlayed      = uJokers.filter((j) => j.match?.result_entered === true).length
 
-    const totalPts       = groupMatchPts + groupStandingsPts + knockoutPts + bonusPrePts + bonusDailyPts
+    const totalPts = groupMatchPts + groupStandingsPts + knockoutPts + bonusPrePts + bonusDailyPts
 
     // Exact/correct op basis van de echte uitslag — niet op puntwaarden,
     // want jokers verdubbelen de punten (richting+1 mét joker = 6 ≠ exact)
-    type ScoredPred = {
-      predicted_home: number
-      predicted_away: number
-      match: { home_score: number | null; away_score: number | null; result_entered: boolean } | null
-    }
-    const scored = (preds as unknown as ScoredPred[]).filter(
+    const scored = (uPreds as unknown as ScoredPred[]).filter(
       (r) => r.match?.result_entered && r.match.home_score != null && r.match.away_score != null
     )
     const isExact = (r: ScoredPred) =>
@@ -217,43 +286,42 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
       (r) => !isExact(r) && Math.sign(r.predicted_home - r.predicted_away) === Math.sign((r.match!.home_score ?? 0) - (r.match!.away_score ?? 0))
     ).length
 
-    const userPoules = memberships.filter((m) => m.user_id === userId).map((m) => m.poule_id)
-    for (const pouleId of userPoules) {
-      await supabase.from('poule_scores').upsert(
-        {
-          user_id: userId, poule_id: pouleId,
-          total_pts: totalPts, exact_hits: exactHits, correct_results: correctResults,
-          group_match_pts: groupMatchPts, group_standings_pts: groupStandingsPts,
-          knockout_pts: knockoutPts, bonus_pre_pts: bonusPrePts, bonus_daily_pts: bonusDailyPts,
-          jokers_played: jokersPlayed,
-        },
-        { onConflict: 'user_id,poule_id' }
-      )
+    for (const pouleId of poulesByUser.get(userId) ?? []) {
+      upsertRows.push({
+        user_id: userId, poule_id: pouleId,
+        total_pts: totalPts, exact_hits: exactHits, correct_results: correctResults,
+        group_match_pts: groupMatchPts, group_standings_pts: groupStandingsPts,
+        knockout_pts: knockoutPts, bonus_pre_pts: bonusPrePts, bonus_daily_pts: bonusDailyPts,
+        jokers_played: jokersPlayed,
+      })
     }
   }
 
-  // Bereken nieuwe rangschikking en sla rank_change op
-  for (const pouleId of affectedPouleIds) {
+  // Bulk-upsert in batches
+  const CHUNK = 200
+  for (let i = 0; i < upsertRows.length; i += CHUNK) {
+    await supabase.from('poule_scores').upsert(upsertRows.slice(i, i + CHUNK), { onConflict: 'user_id,poule_id' })
+  }
+
+  // Bereken nieuwe rangschikking en sla rank_change op (per poule parallel,
+  // updates met begrensde concurrency)
+  await Promise.all(affectedPouleIds.map(async (pouleId) => {
     const { data: updated } = await supabase
       .from('poule_scores')
       .select('user_id, total_pts')
       .eq('poule_id', pouleId)
       .order('total_pts', { ascending: false })
-    if (!updated) continue
+    if (!updated) return
 
     const oldRanks = oldRankMap[pouleId] ?? {}
-    for (let i = 0; i < updated.length; i++) {
-      const uid = updated[i].user_id
-      const newRank = i + 1
-      const oldRank = oldRanks[uid] ?? null
-      const rankChange = oldRank != null ? oldRank - newRank : null
-      await supabase
-        .from('poule_scores')
-        .update({ rank_change: rankChange })
-        .eq('poule_id', pouleId)
-        .eq('user_id', uid)
-    }
-  }
+    const changes = updated.map((row, i) => {
+      const oldRank = oldRanks[row.user_id] ?? null
+      return { uid: row.user_id, rankChange: oldRank != null ? oldRank - (i + 1) : null }
+    })
+    await runPool(changes, 12, (c) =>
+      supabase.from('poule_scores').update({ rank_change: c.rankChange }).eq('poule_id', pouleId).eq('user_id', c.uid)
+    )
+  }))
 }
 
 // ─── Enter a match result and recalculate points ───────────────────────────────
@@ -284,11 +352,21 @@ export async function setMatchResult(
       .eq('match_id', matchId)
     const jokerUserIds = new Set((jokers ?? []).map((j) => j.user_id))
 
+    // Groepeer voorspellingen op puntenwaarde → één update per waarde i.p.v.
+    // één per voorspelling (scheelt tientallen round-trips per wedstrijd).
+    const idsByPts = new Map<number, string[]>()
     for (const pred of preds) {
       const base = calcMatchPoints(homeScore, awayScore, pred.predicted_home, pred.predicted_away)
       const pts  = base * (jokerUserIds.has(pred.user_id) ? 2 : 1)
-      await supabase.from('predictions').update({ points_awarded: pts }).eq('id', pred.id)
+      const arr = idsByPts.get(pts) ?? []
+      arr.push(pred.id)
+      idsByPts.set(pts, arr)
     }
+    await Promise.all(
+      [...idsByPts.entries()].map(([pts, ids]) =>
+        supabase.from('predictions').update({ points_awarded: pts }).in('id', ids)
+      )
+    )
     await recalcPouleScores(supabase, [...new Set(preds.map((p) => p.user_id))])
   }
 
@@ -337,6 +415,7 @@ export async function setBonusCorrectAnswer(
       : 1
     const normalized = correctAnswer.trim().toLowerCase()
 
+    const idsByPts = new Map<number, string[]>()
     for (const ans of answers) {
       let pts: number
       if (isGedoseerd && !isNaN(correctNum)) {
@@ -345,8 +424,15 @@ export async function setBonusCorrectAnswer(
       } else {
         pts = ans.answer.trim().toLowerCase() === normalized ? pointsForCorrect : 0
       }
-      await supabase.from('bonus_answers').update({ points_awarded: pts }).eq('id', ans.id)
+      const arr = idsByPts.get(pts) ?? []
+      arr.push(ans.id)
+      idsByPts.set(pts, arr)
     }
+    await Promise.all(
+      [...idsByPts.entries()].map(([pts, ids]) =>
+        supabase.from('bonus_answers').update({ points_awarded: pts }).in('id', ids)
+      )
+    )
     await recalcPouleScores(supabase, [...new Set(answers.map((a) => a.user_id))])
   }
 
@@ -405,11 +491,16 @@ export async function setKnockoutResult(
   const affectedUsers = new Set<string>()
 
   if (preds && preds.length > 0) {
+    const correctIds: string[] = []
+    const wrongIds: string[] = []
     for (const pred of preds) {
-      const pts = pred.predicted_winner_id === winnerId ? pointsForRound : 0
-      await supabase.from('knockout_predictions').update({ points_awarded: pts }).eq('id', pred.id)
+      ;(pred.predicted_winner_id === winnerId ? correctIds : wrongIds).push(pred.id)
       affectedUsers.add(pred.user_id)
     }
+    await Promise.all([
+      correctIds.length ? supabase.from('knockout_predictions').update({ points_awarded: pointsForRound }).in('id', correctIds) : Promise.resolve(),
+      wrongIds.length ? supabase.from('knockout_predictions').update({ points_awarded: 0 }).in('id', wrongIds) : Promise.resolve(),
+    ])
   }
 
   // Bracket-voorspellingen: score alle picks voor deze ronde o.b.v. doorgestoten ploegen
@@ -578,10 +669,15 @@ export async function scoreGroupAdvancement(group: string): Promise<AdminResult>
 
   if (!picks || picks.length === 0) return { ok: true }
 
+  const correctIds: string[] = []
+  const wrongIds: string[] = []
   for (const pick of picks) {
-    const pts = (actualPosition[pick.team_id] ?? 99) === pick.predicted_position ? 5 : 0
-    await supabase.from('group_advancement').update({ points_awarded: pts }).eq('id', pick.id)
+    ;((actualPosition[pick.team_id] ?? 99) === pick.predicted_position ? correctIds : wrongIds).push(pick.id)
   }
+  await Promise.all([
+    correctIds.length ? supabase.from('group_advancement').update({ points_awarded: 5 }).in('id', correctIds) : Promise.resolve(),
+    wrongIds.length ? supabase.from('group_advancement').update({ points_awarded: 0 }).in('id', wrongIds) : Promise.resolve(),
+  ])
 
   await recalcPouleScores(supabase, [...new Set(picks.map((p) => p.user_id))])
 
@@ -688,11 +784,19 @@ export async function awardCountryBonus(questionId: string): Promise<AdminResult
   if (!answers?.length) return { ok: true }
 
   const affectedUserIds = new Set<string>()
+  const idsByPts = new Map<number, string[]>()
   for (const ans of answers) {
     const pts = pointsByName[ans.answer.trim()] ?? 0
-    await supabase.from('bonus_answers').update({ points_awarded: pts }).eq('id', ans.id)
+    const arr = idsByPts.get(pts) ?? []
+    arr.push(ans.id)
+    idsByPts.set(pts, arr)
     affectedUserIds.add(ans.user_id)
   }
+  await Promise.all(
+    [...idsByPts.entries()].map(([pts, ids]) =>
+      supabase.from('bonus_answers').update({ points_awarded: pts }).in('id', ids)
+    )
+  )
 
   await recalcPouleScores(supabase, [...affectedUserIds])
 

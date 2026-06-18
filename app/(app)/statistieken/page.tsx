@@ -4,6 +4,23 @@ import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
 import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat, type JokerStat, type JokerWinstEntry } from './stats-client'
 
+// PostgREST levert standaard max. 1000 rijen per query. Met ~65 deelnemers ×
+// tientallen wedstrijden/vragen lopen voorspellingen en bonusantwoorden daar
+// ruim overheen, waardoor o.a. de joker-winst werd ondergeteld. Pagineren dus.
+async function fetchAllRows<T>(
+  makeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const PAGE = 1000
+  const out: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await makeQuery(from, from + PAGE - 1)
+    if (!data || data.length === 0) break
+    out.push(...data)
+    if (data.length < PAGE) break
+  }
+  return out
+}
+
 export default async function StatistiekenPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ league?: string }> }>) {
@@ -129,11 +146,14 @@ export default async function StatistiekenPage({
   const predPtsByUserMatch: Record<string, number | null> = {}
   if (startedMatches && startedMatches.length > 0) {
     const matchIds = startedMatches.map((m) => m.id)
-    const { data: allPredictions } = await supabase
-      .from('predictions')
-      .select('user_id, match_id, points_awarded')
-      .in('match_id', matchIds)
-    for (const p of allPredictions ?? []) {
+    const allPredictions = await fetchAllRows<{ user_id: string; match_id: string; points_awarded: number | null }>(
+      (from, to) => supabase
+        .from('predictions')
+        .select('user_id, match_id, points_awarded')
+        .in('match_id', matchIds)
+        .range(from, to),
+    )
+    for (const p of allPredictions) {
       if (memberIds.has(p.user_id)) predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
     }
   }
@@ -143,10 +163,10 @@ export default async function StatistiekenPage({
   let jokerWinstRaw: { userId: string; extra: number; played: number }[] = []
 
   if (tournamentStarted) {
-    const { data: allJokersRaw } = await supabase
-      .from('jokers')
-      .select('match_id, user_id')
-    const allJokers = (allJokersRaw ?? []).filter((j) => memberIds.has(j.user_id))
+    const allJokersRaw = await fetchAllRows<{ match_id: string; user_id: string }>(
+      (from, to) => supabase.from('jokers').select('match_id, user_id').range(from, to),
+    )
+    const allJokers = allJokersRaw.filter((j) => memberIds.has(j.user_id))
 
     if (allJokers && allJokers.length > 0) {
       // Joker-winst per deelnemer. We tellen alleen jokers op reeds GESPEELDE
@@ -160,9 +180,11 @@ export default async function StatistiekenPage({
         const pts = predPtsByUserMatch[`${j.user_id}:${j.match_id}`]
         if (pts != null) u.extra += pts / 2
       }
+      // Sorteer op winstpunten (hoog → laag); bij gelijke winst staat wie de
+      // minste jokers speelde bovenaan (efficiënter benut).
       jokerWinstRaw = Object.entries(winstByUser)
         .map(([userId, v]) => ({ userId, extra: Math.round(v.extra), played: v.played }))
-        .sort((a, b) => b.extra - a.extra || b.played - a.played)
+        .sort((a, b) => b.extra - a.extra || a.played - b.played)
 
       // Count per match
       const jokerCountByMatch: Record<string, number> = {}
@@ -256,10 +278,16 @@ export default async function StatistiekenPage({
     .order('type')
     .order('unlock_date')
 
-  const { data: allBonusAnswers } = await supabase
-    .from('bonus_answers')
-    .select('user_id, question_id, answer')
-  const bonusAnswers = (allBonusAnswers ?? []).filter((a) => memberIds.has(a.user_id))
+  const allBonusAnswers = await fetchAllRows<{ user_id: string; question_id: string; answer: string }>(
+    (from, to) => supabase.from('bonus_answers').select('user_id, question_id, answer').range(from, to),
+  )
+  const bonusAnswers = allBonusAnswers.filter((a) => memberIds.has(a.user_id))
+
+  // Eigen antwoord per vraag — om de eigen selectie in de verdeling te markeren
+  const myAnswerByQuestion: Record<string, string> = {}
+  for (const a of allBonusAnswers) {
+    if (a.user_id === user.id && a.answer) myAnswerByQuestion[a.question_id] = a.answer
+  }
 
   const answersByQuestion: Record<string, string[]> = {}
   for (const a of bonusAnswers ?? []) {
@@ -284,6 +312,7 @@ export default async function StatistiekenPage({
 
     const total = answers.length
     const correctLower = q.correct_answer?.toLowerCase() ?? null
+    const myAnswerLower = myAnswerByQuestion[q.id]?.toLowerCase() ?? null
     // Alle antwoorden, oplopend gesorteerd (numeriek waar mogelijk)
     const topAnswers = Object.entries(countMap)
       .sort(([a], [b]) => {
@@ -297,6 +326,7 @@ export default async function StatistiekenPage({
         count,
         pct: total > 0 ? Math.round((count / total) * 100) : 0,
         is_correct: correctLower !== null && answer.toLowerCase() === correctLower,
+        is_mine: myAnswerLower !== null && answer.toLowerCase() === myAnswerLower,
       }))
 
     bonusQuestionStats.push({

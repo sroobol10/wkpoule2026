@@ -85,6 +85,55 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
     .filter((q) => q.type === 'daily')
     .sort((a, b) => (b.unlock_date ?? '').localeCompare(a.unlock_date ?? '')) // nieuwste bovenaan
 
+  // ── Mobiele volgorde ───────────────────────────────────────────────────────
+  // Het aantal dagvragen loopt op; op mobiel scrollt dat ver weg vóór de
+  // algemene vragen. Daarom op mobiel: eerst de actuele dagvragen
+  // (morgen → vandaag → gisteren), dan de algemene vragen, dan de oudere
+  // dagvragen. CEST (+2) conform de rest van de app.
+  const [{ todayCest, yesterdayCest, tomorrowCest }] = useState(() => {
+    const cestMs = Date.now() + 2 * 60 * 60 * 1000
+    return {
+      todayCest: new Date(cestMs).toISOString().slice(0, 10),
+      yesterdayCest: new Date(cestMs - 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      tomorrowCest: new Date(cestMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    }
+  })
+  const recentOrder = [tomorrowCest, todayCest, yesterdayCest]
+  const recentDaily = recentOrder
+    .map((d) => daily.find((q) => q.unlock_date === d))
+    .filter((q): q is Question => !!q)
+  const olderDaily = daily.filter((q) => !recentOrder.includes(q.unlock_date ?? ''))
+
+  const renderDaily = (q: Question) => (
+    <QuestionCard
+      key={q.id}
+      question={q}
+      existingAnswer={answerMap[q.id] ?? null}
+      teams={[]}
+      allTeams={teams}
+      effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
+      dayMatches={q.unlock_date ? (matchesByDay[q.unlock_date] ?? []) : []}
+    />
+  )
+  const renderPre = (q: Question) => (
+    <QuestionCard
+      key={q.id}
+      question={q}
+      existingAnswer={answerMap[q.id] ?? null}
+      teams={isTeamQuestion(q.question) ? teams : []}
+      allTeams={teams}
+      tournamentStarted={anyMatchPlayed}
+      activeTeamNames={activeSet}
+    />
+  )
+  const sectionLabel = (label: string) => (
+    <div className="flex items-center gap-3 mb-3">
+      <span className="font-mono text-[10px] text-wk-muted border border-white/15 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+        {label}
+      </span>
+    </div>
+  )
+
   return (
     <div className="space-y-8">
       <div>
@@ -92,52 +141,42 @@ export default function BonusvragenClient({ questions, answerMap, teams, anyMatc
         <h1 className="font-display text-2xl text-wk-text uppercase leading-none">Bonusvragen</h1>
       </div>
 
-      <div className={daily.length > 0 ? "lg:grid lg:grid-cols-2 lg:gap-8 space-y-8 lg:space-y-0" : "space-y-8"}>
-        {/* Links: Dagelijkse vragen (eerst) */}
-        {daily.length > 0 && (
+      {/* Desktop: twee kolommen — dagelijks links, algemeen rechts (ongewijzigd) */}
+      <div className={`hidden lg:block`}>
+        <div className={daily.length > 0 ? "lg:grid lg:grid-cols-2 lg:gap-8" : ""}>
+          {daily.length > 0 && (
+            <section>
+              {sectionLabel('Dagelijkse vragen')}
+              <div className="space-y-3">{daily.map(renderDaily)}</div>
+            </section>
+          )}
+          {preTournament.length > 0 && (
+            <section>
+              {sectionLabel('Algemene vragen')}
+              <div className="space-y-3">{preTournament.map(renderPre)}</div>
+            </section>
+          )}
+        </div>
+      </div>
+
+      {/* Mobiel: actuele dagvragen → algemene vragen → oudere dagvragen */}
+      <div className="lg:hidden space-y-8">
+        {recentDaily.length > 0 && (
           <section>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="font-mono text-[10px] text-wk-muted border border-white/15 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-                Dagelijkse vragen
-              </span>
-            </div>
-            <div className="space-y-3">
-              {daily.map((q) => (
-                <QuestionCard
-                  key={q.id}
-                  question={q}
-                  existingAnswer={answerMap[q.id] ?? null}
-                  teams={[]}
-                  allTeams={teams}
-                  effectiveDeadline={q.unlock_date ? (deadlineByDate[q.unlock_date] ?? null) : null}
-                  dayMatches={q.unlock_date ? (matchesByDay[q.unlock_date] ?? []) : []}
-                />
-              ))}
-            </div>
+            {sectionLabel('Dagelijkse vragen')}
+            <div className="space-y-3">{recentDaily.map(renderDaily)}</div>
           </section>
         )}
-
-        {/* Rechts: Vóór het toernooi */}
         {preTournament.length > 0 && (
           <section>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="font-mono text-[10px] text-wk-muted border border-white/15 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
-                Algemene vragen
-              </span>
-            </div>
-            <div className="space-y-3">
-              {preTournament.map((q) => (
-                <QuestionCard
-                  key={q.id}
-                  question={q}
-                  existingAnswer={answerMap[q.id] ?? null}
-                  teams={isTeamQuestion(q.question) ? teams : []}
-                  allTeams={teams}
-                  tournamentStarted={anyMatchPlayed}
-                  activeTeamNames={activeSet}
-                />
-              ))}
-            </div>
+            {sectionLabel('Algemene vragen')}
+            <div className="space-y-3">{preTournament.map(renderPre)}</div>
+          </section>
+        )}
+        {olderDaily.length > 0 && (
+          <section>
+            {sectionLabel('Eerdere dagelijkse vragen')}
+            <div className="space-y-3">{olderDaily.map(renderDaily)}</div>
           </section>
         )}
       </div>

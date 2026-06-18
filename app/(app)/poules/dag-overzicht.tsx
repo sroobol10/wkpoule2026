@@ -208,7 +208,7 @@ function SubSection({ title, children }: { title: string; children: React.ReactN
   return (
     <section>
       <div className="mb-3">
-        <span className="font-mono text-[11px] text-wk-blue border border-wk-blue/30 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
+        <span className="font-mono text-[11px] text-wk-muted border border-white/15 rounded-full px-3 py-1 tracking-[0.16em] uppercase">
           {title}
         </span>
       </div>
@@ -276,7 +276,12 @@ function PlayedRow({ m, pred, ko, joker }: { m: Match; pred?: Pred; ko?: KoPred;
       </div>
       <div className="pl-12 mt-1.5 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
         <span>Voorspeld <b className="ml-1 text-wk-soft">{voorspeld ?? '—'}</b></span>
-        <span>Uitslag <b className="ml-1 text-wk-text">{m.home_score}–{m.away_score}</b></span>
+        <Link href={`/wedstrijd/${m.id}`} className="group/uitslag" title="Bekijk wie wat koos">
+          Uitslag{' '}
+          <b className="ml-1 text-wk-text underline decoration-wk-muted/50 underline-offset-2 group-hover/uitslag:decoration-wk-gold transition-colors">
+            {m.home_score}–{m.away_score}
+          </b>
+        </Link>
         {joker && <JokerTag />}
       </div>
     </div>

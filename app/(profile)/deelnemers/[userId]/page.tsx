@@ -6,6 +6,7 @@ import { AvatarCircle } from '@/components/avatar-circle'
 import { CountUp } from '@/components/count-up'
 import DeelnemerClient from './deelnemer-client'
 import DeelnemerBackground from './deelnemer-background'
+import CloseButton from './close-button'
 
 export default async function DeelnemerProfilePage({
   params,
@@ -97,6 +98,7 @@ export default async function DeelnemerProfilePage({
   return (
     <>
       <DeelnemerBackground avatarUrl={targetProfile.avatar_url} />
+      <CloseButton />
     <div className="relative z-10 space-y-8">
       <ProfileHeader
         profile={targetProfile}

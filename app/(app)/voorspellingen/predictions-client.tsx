@@ -68,6 +68,7 @@ type Props = Readonly<{
   pouleStandings: PouleStanding[];
   pouleGroupStandings: PouleGroupStanding[];
   distByMatch: Record<string, MatchDist>;
+  jokerCountByMatch: Record<string, number>;
   currentUserId: string;
 }>;
 
@@ -89,6 +90,7 @@ export default function PredictionsClient({
   pouleStandings,
   pouleGroupStandings,
   distByMatch,
+  jokerCountByMatch,
   currentUserId,
 }: Props) {
   const router = useRouter();
@@ -508,6 +510,7 @@ export default function PredictionsClient({
                   myHome={pred?.predicted_home ?? null}
                   myAway={pred?.predicted_away ?? null}
                   hasJoker={jokerSet.has(match.id)}
+                  jokerOthers={(jokerCountByMatch[match.id] ?? 0) - (jokerSet.has(match.id) ? 1 : 0)}
                   jokerLocked={anyGroupMatchPlayed}
                   exactScore={exactScore}
                   onScoreChange={setScore}
@@ -755,6 +758,7 @@ type MatchRowProps = {
   myHome: number | null;
   myAway: number | null;
   hasJoker: boolean;
+  jokerOthers: number;
   jokerLocked: boolean;
   exactScore: boolean;
   onScoreChange: (matchId: string, side: "home" | "away", val: string) => void;
@@ -771,6 +775,7 @@ function MatchRow({
   myHome,
   myAway,
   hasJoker,
+  jokerOthers,
   jokerLocked,
   exactScore,
   onScoreChange,
@@ -811,10 +816,15 @@ function MatchRow({
         {/* Datum-rij: joker links · datum midden · punten rechts */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center mb-3">
           {/* Joker-indicator links bovenin (zodra wedstrijd gespeeld) */}
-          <div className="flex justify-start">
+          <div className="flex items-center gap-2 justify-start">
             {hasJoker && !jokerable && (
               <span className="flex items-center gap-1 font-mono text-[10px] font-bold text-wk-gold border border-wk-gold/60 bg-wk-gold/15 rounded-full px-2 py-0.5 tracking-[0.12em] uppercase">
                 <span className="text-xs">★</span> Joker
+              </span>
+            )}
+            {hasJoker && !jokerable && jokerOthers > 0 && (
+              <span className="hidden md:inline font-mono text-[10px] text-wk-muted tracking-[0.1em]" title="Aantal anderen met een joker op deze wedstrijd">
+                +{jokerOthers} {jokerOthers === 1 ? 'ander' : 'anderen'}
               </span>
             )}
           </div>
@@ -854,6 +864,11 @@ function MatchRow({
               <span className="text-sm">★</span>
               <span className="tracking-[0.12em] uppercase">Joker</span>
             </button>
+            {hasJoker && jokerOthers > 0 && (
+              <span className="hidden md:inline self-center font-mono text-[10px] text-wk-muted tracking-[0.1em]" title="Aantal anderen met een joker op deze wedstrijd">
+                +{jokerOthers} {jokerOthers === 1 ? 'ander' : 'anderen'}
+              </span>
+            )}
           </div>
         )}
 

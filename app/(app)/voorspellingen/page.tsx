@@ -156,6 +156,25 @@ export default async function VoorspellingenPage() {
     const key = `${p.predicted_home}-${p.predicted_away}`
     ;(distCounts[p.match_id] ??= {})[key] = (distCounts[p.match_id][key] ?? 0) + 1
   }
+  // ── Joker-verdeling per wedstrijd ─────────────────────────────────────────
+  // Hoeveel (andere) leden van je league zetten op deze wedstrijd ook een joker?
+  // Geteld over dezelfde actieve league-leden als de uitslagverdeling.
+  type JokerRow = { user_id: string; match_id: string }
+  const allJokers: JokerRow[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await supabase
+      .from('jokers')
+      .select('user_id, match_id')
+      .range(from, from + 999)
+    allJokers.push(...((page ?? []) as JokerRow[]))
+    if (!page || page.length < 1000) break
+  }
+  const jokerCountByMatch: Record<string, number> = {}
+  for (const j of allJokers) {
+    if (!distMemberIds.has(j.user_id)) continue
+    jokerCountByMatch[j.match_id] = (jokerCountByMatch[j.match_id] ?? 0) + 1
+  }
+
   const distByMatch: Record<string, MatchDist> = {}
   for (const [matchId, counts] of Object.entries(distCounts)) {
     const scores = Object.entries(counts)
@@ -191,6 +210,7 @@ export default async function VoorspellingenPage() {
       pouleStandings={pouleStandings}
       pouleGroupStandings={pouleGroupStandings}
       distByMatch={distByMatch}
+      jokerCountByMatch={jokerCountByMatch}
       currentUserId={user.id}
     />
   )

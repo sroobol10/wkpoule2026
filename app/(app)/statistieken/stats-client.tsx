@@ -23,7 +23,7 @@ export type BonusQuestionStat = {
   correct_answer_set: boolean
   total_answers: number
   participation_pct: number
-  top_answers: { answer: string; count: number; pct: number; is_correct: boolean }[]
+  top_answers: { answer: string; count: number; pct: number; is_correct: boolean; is_mine: boolean }[]
 }
 
 export type JokerStat = {
@@ -457,22 +457,39 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
       {stat.top_answers.length > 0 ? (
         /* Grid met gedeelde naamkolom (auto) zodat alle balken op dezelfde x starten */
         <div className="px-5 py-3 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 sm:gap-x-3 gap-y-2">
-          {stat.top_answers.map(({ answer, count, pct, is_correct }) => {
+          {stat.top_answers.map(({ answer, count, pct, is_correct, is_mine }) => {
             const flag = answerFlag(stat.question, answer, teamFlags)
+            // Kleurregels:
+            // - correct antwoord → groen (met ✓)
+            // - eigen keuze, dagelijkse vraag met bekende uitslag & fout → rood
+            //   (zelfde markering als de groepsfase-statistieken)
+            // - eigen keuze, overig (algemeen of nog open) → geel, net als bij jokers
+            let textColor = 'text-wk-soft'
+            let barColor = 'bg-wk-muted/40'
+            if (is_correct) {
+              textColor = 'text-wk-green'; barColor = 'bg-wk-green'
+            } else if (is_mine) {
+              if (stat.type === 'daily' && stat.correct_answer_set) {
+                textColor = 'text-wk-red'; barColor = 'bg-wk-red'
+              } else {
+                textColor = 'text-wk-gold'; barColor = 'bg-wk-gold'
+              }
+            }
             return (
               <Fragment key={answer}>
                 <div className="flex items-center gap-1.5 min-w-0">
                   {flag && (
                     <Image src={flag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
                   )}
-                  <span className={`font-mono text-xs font-semibold whitespace-nowrap ${is_correct ? 'text-wk-green' : 'text-wk-soft'}`}>
+                  <span className={`font-mono text-xs font-semibold whitespace-nowrap ${textColor}`}>
                     <span className="sm:hidden">{mobileLabel(answer)}</span>
                     <span className="hidden sm:inline">{answer}</span>
                     {is_correct && <span className="ml-1 text-wk-green">✓</span>}
+                    {is_mine && <span className="ml-1 opacity-70">·&nbsp;jij</span>}
                   </span>
                 </div>
                 <div className="min-w-[28px] h-1.5 bg-white/10 rounded-full overflow-hidden">
-                  <AnimatedBar pct={pct} color={is_correct ? 'bg-wk-green' : 'bg-wk-muted/40'} />
+                  <AnimatedBar pct={pct} color={barColor} />
                 </div>
                 <span className="font-mono text-[9px] text-wk-muted text-right whitespace-nowrap">
                   {count}× ({pct}%)
