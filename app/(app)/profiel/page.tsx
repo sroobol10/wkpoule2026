@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { preBonusIndex } from '@/lib/bonus-order'
 import ProfielClient from './profiel-client'
+import type { PuntenDetail } from './punten-overzicht'
 
 export default async function ProfielPage() {
   const supabase = await createClient()
@@ -84,6 +86,53 @@ export default async function ProfielPage() {
   const bracketScoredCount = bracketRows.length
   const bracketCorrectCount = bracketRows.filter((b) => (b.points_awarded ?? 0) > 0).length
 
+  // ─── Gedetailleerd puntenoverzicht (eigen data — altijd zichtbaar) ──────────
+  type BonusQ = { id: string; question: string; type: string; unlock_date: string | null }
+  const [mRes, pRes, jRes, aRes, bqRes, baRes, tRes, brRes] = await Promise.all([
+    supabase
+      .from('matches')
+      .select(`id, kickoff_at, match_number, home_score, away_score, result_entered,
+        home_team:teams!matches_home_team_id_fkey(id, name, flag_url, group_name),
+        away_team:teams!matches_away_team_id_fkey(id, name, flag_url, group_name)`)
+      .eq('stage', 'group')
+      .order('kickoff_at'),
+    supabase.from('predictions').select('match_id, predicted_home, predicted_away, points_awarded').eq('user_id', user.id),
+    supabase.from('jokers').select('match_id').eq('user_id', user.id),
+    supabase.from('group_advancement').select('team_id, predicted_position').eq('user_id', user.id),
+    supabase.from('bonus_questions').select('id, question, type, unlock_date').order('type').order('created_at'),
+    supabase.from('bonus_answers').select('question_id, answer, points_awarded').eq('user_id', user.id),
+    supabase.from('teams').select('id, name, flag_url, group_name'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).from('bracket_predictions').select('slot, predicted_team_id, points_awarded').eq('user_id', user.id).order('slot'),
+  ])
+
+  // Dagelijkse vragen: alleen tonen als van gisteren of eerder én beantwoord
+  const today = new Date().toISOString().split('T')[0]
+  const bonusAnswerRows = (baRes.data ?? []) as PuntenDetail['bonusAnswerRows']
+  const answeredIds = new Set(bonusAnswerRows.map((a) => a.question_id))
+  const visibleBonusQuestions = ((bqRes.data ?? []) as BonusQ[])
+    .filter((q) => {
+      if (q.type === 'pre_tournament') return true
+      if (!q.unlock_date || q.unlock_date >= today) return false
+      return answeredIds.has(q.id)
+    })
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'pre_tournament' ? -1 : 1
+      if (a.type === 'pre_tournament') return preBonusIndex(a.question) - preBonusIndex(b.question)
+      return (a.unlock_date ?? '').localeCompare(b.unlock_date ?? '')
+    })
+
+  const detail: PuntenDetail = {
+    matches: (mRes.data ?? []) as unknown as PuntenDetail['matches'],
+    predRows: (pRes.data ?? []) as PuntenDetail['predRows'],
+    jokerRows: (jRes.data ?? []) as PuntenDetail['jokerRows'],
+    advancementRows: (aRes.data ?? []) as PuntenDetail['advancementRows'],
+    bracketRows: (brRes.data ?? []) as PuntenDetail['bracketRows'],
+    allTeams: (tRes.data ?? []) as PuntenDetail['allTeams'],
+    bonusQuestions: visibleBonusQuestions,
+    bonusAnswerRows,
+  }
+
   return (
     <ProfielClient
       profile={profile ?? { id: user.id, username: user.email ?? '', email: user.email ?? '', avatar_url: null, created_at: '' }}
@@ -100,6 +149,7 @@ export default async function ProfielPage() {
         bracketScoredCount,
         bracketCorrectCount,
       }}
+      detail={detail}
     />
   )
 }

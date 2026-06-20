@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { setTheme } from "@/app/actions/profile";
 import { AvatarCircle } from "@/components/avatar-circle";
+import PuntenOverzicht, { type PuntenDetail } from "./punten-overzicht";
 
 type Profile = {
   id: string;
@@ -42,6 +43,7 @@ type Props = Readonly<{
   pouleDeelnemers: number;
   currentTheme: string;
   accuracy: Accuracy;
+  detail: PuntenDetail;
 }>;
 
 export default function ProfielClient({
@@ -53,6 +55,7 @@ export default function ProfielClient({
   pouleDeelnemers,
   currentTheme,
   accuracy,
+  detail,
 }: Props) {
   const [username, setUsername] = useState(profile.username);
   const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url);
@@ -64,6 +67,9 @@ export default function ProfielClient({
     ok: boolean;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [mobileTab, setMobileTab] = useState<"overzicht" | "instellingen">(
+    "overzicht",
+  );
   const router = useRouter();
 
   async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -148,8 +154,13 @@ export default function ProfielClient({
     { label: "Dagelijkse bonus", pts: score?.bonus_daily_pts ?? 0 },
   ].filter((r) => r.pts > 0);
 
+  const mobileTabs = [
+    { id: "overzicht" as const, label: "Puntenoverzicht" },
+    { id: "instellingen" as const, label: "Instellingen" },
+  ];
+
   return (
-    <div className="space-y-6 max-w-lg">
+    <div className="space-y-6 max-w-lg md:max-w-5xl">
       {/* Header */}
       <div className="flex items-center gap-4">
         <div className="relative shrink-0">
@@ -240,6 +251,29 @@ export default function ProfielClient({
         </div>
       </div>
 
+      {/* Mobiele tabs — desktop toont beide kolommen naast elkaar */}
+      <div className="md:hidden flex gap-1 bg-wk-surface/80 border border-white/10 rounded-full p-1 backdrop-blur-sm">
+        {mobileTabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setMobileTab(t.id)}
+            className={`flex-1 py-2 rounded-full font-mono text-[10px] tracking-[0.14em] uppercase border transition-all duration-200 ${
+              mobileTab === t.id
+                ? "bg-wk-gold/15 border-wk-gold/30 text-wk-gold shadow-[0_0_16px_-4px_rgba(var(--color-wk-gold-raw),0.5)]"
+                : "border-transparent text-wk-muted hover:text-wk-soft hover:bg-white/5"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Twee kolommen op desktop: links instellingen, rechts puntenoverzicht */}
+      <div className="md:grid md:grid-cols-2 md:gap-6 md:items-start md:space-y-0 space-y-6">
+        {/* Puntenoverzicht-kolom (rechts op desktop) */}
+        <div
+          className={`${mobileTab === "overzicht" ? "" : "hidden"} md:block md:order-2 space-y-6`}
+        >
       {/* Puntenopbouw */}
       {breakdown.length > 0 && (
         <section>
@@ -269,6 +303,9 @@ export default function ProfielClient({
           </div>
         </section>
       )}
+
+      {/* Gedetailleerd puntenoverzicht */}
+      <PuntenOverzicht {...detail} />
 
       {/* Stats grid */}
       <section>
@@ -335,6 +372,12 @@ export default function ProfielClient({
         </section>
       )}
 
+        </div>
+
+        {/* Instellingen-kolom (links op desktop) */}
+        <div
+          className={`${mobileTab === "instellingen" ? "" : "hidden"} md:block md:order-1 space-y-6`}
+        >
       {/* Instellingen */}
       <div className="bg-wk-surface border border-white/10 rounded-xl p-5">
         <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-4">
@@ -484,6 +527,8 @@ export default function ProfielClient({
       >
         Uitloggen
       </button>
+        </div>
+      </div>
 
       {/* Toast */}
       {toast && (
