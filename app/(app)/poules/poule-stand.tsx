@@ -6,6 +6,7 @@ import { getActivePlayerIds } from '@/lib/active-players'
 import { Podium } from './[id]/podium'
 import { Bergetappe } from './[id]/bergetappe'
 import { LeaderboardTabs } from './[id]/leaderboard-tabs'
+import { StandFilter, type StandFilterEntry } from './[id]/stand-filter'
 
 // Deze poule krijgt het Ennovate-logo als titel i.p.v. de poulenaam
 const ENNOVATE_POULE_ID = '14ccff59-b97a-41d9-9856-5c6413cd2c05'
@@ -150,6 +151,60 @@ export async function PouleStand({
     return team ? { team, active: activeTeamIds.has(teamId) } : null
   }
 
+  // ── Jokerpunten (alleen voor de Ennovate-statfilter) ────────────────────────
+  // Een joker verdubbelt de wedstrijdpunten; de jokerbonus is dus de helft van
+  // de toegekende punten op die wedstrijd. Alleen gespeelde (uitslag-ingevoerde)
+  // jokers tellen mee.
+  // Aantal gespeelde groepswedstrijden = noemer voor het 'correct resultaat'-
+  // percentage (elke actieve deelnemer heeft alle groepswedstrijden voorspeld).
+  let playedGroupMatches = 0
+  const jokerPointsByUser: Record<string, number> = {}
+  if (isEnnovate && rankedIds.length) {
+    const { count } = await supabase
+      .from('matches')
+      .select('id', { count: 'exact', head: true })
+      .eq('stage', 'group')
+      .eq('result_entered', true)
+    playedGroupMatches = count ?? 0
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: jokerRows } = await (supabase as any)
+      .from('jokers')
+      .select('user_id, match_id, match:matches!jokers_match_id_fkey(result_entered)')
+      .in('user_id', rankedIds)
+    const activeJokers = ((jokerRows ?? []) as {
+      user_id: string; match_id: string; match: { result_entered: boolean } | null
+    }[]).filter((j) => j.match?.result_entered)
+    if (activeJokers.length) {
+      const jokerMatchIds = [...new Set(activeJokers.map((j) => j.match_id))]
+      const { data: predRows } = await supabase
+        .from('predictions')
+        .select('user_id, match_id, points_awarded')
+        .in('user_id', rankedIds)
+        .in('match_id', jokerMatchIds)
+      const predPts: Record<string, number> = {}
+      for (const p of predRows ?? []) predPts[`${p.user_id}:${p.match_id}`] = p.points_awarded ?? 0
+      for (const j of activeJokers) {
+        const pts = predPts[`${j.user_id}:${j.match_id}`] ?? 0
+        jokerPointsByUser[j.user_id] = (jokerPointsByUser[j.user_id] ?? 0) + Math.round(pts / 2)
+      }
+    }
+  }
+
+  const filterEntries: StandFilterEntry[] = ranked.map(({ profile, score }) => ({
+    id: profile.id,
+    username: profile.username,
+    fullName: profile.full_name,
+    avatarUrl: profile.avatar_url,
+    // 'Correct resultaat' = juiste richting incl. exacte scores, net als op de
+    // deelnemer-detailpagina (poule_scores.correct_results telt exact NIET mee).
+    correct: score.correct_results + score.exact_hits,
+    exact: score.exact_hits,
+    joker: jokerPointsByUser[profile.id] ?? 0,
+    dag: score.bonus_daily_pts,
+    bonus: score.bonus_pre_pts,
+  }))
+
   // De bergetappe-weergave is voorlopig alleen beschikbaar in de Ennovate-poule
   const showBergetappe = poule.name.toLowerCase().includes('ennovate')
   let tournamentProgress = 0
@@ -215,6 +270,9 @@ export async function PouleStand({
           ) : undefined
         }
       >
+
+      {/* Statfilter (alleen Ennovate): bekijk de stand per losse statistiek */}
+      <StandFilter enabled={isEnnovate} entries={filterEntries} playedCount={playedGroupMatches} currentUserId={currentUserId}>
 
       {/* Podium voor de top 3 — niet in de Schmitt-league (daar geldt prijzengeld) */}
       {ranked.length > 0 && !isSchmitt && (
@@ -411,6 +469,8 @@ export async function PouleStand({
           </>
         )}
       </div>
+
+      </StandFilter>
 
       {/* Legenda onder de stand — mobiel altijd, op desktop alleen bij Ennovate */}
       <KlassementLegenda className={isEnnovate ? '' : 'md:hidden'} />
