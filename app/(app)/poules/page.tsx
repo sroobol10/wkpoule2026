@@ -1,12 +1,18 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { PouleStand } from './poule-stand'
 import { DagOverzicht } from './dag-overzicht'
+import { isPadelUser } from '@/lib/padel'
 
 export default async function PoulesPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  // Padel Club: alleen zichtbaar voor de vier leden
+  const { data: meProfile } = await supabase.from('profiles').select('username').eq('id', user.id).single()
+  const isPadelMember = isPadelUser(meProfile?.username)
 
   type PouleRef = { id: string; name: string; is_general: boolean }
   const { data: memberships } = await supabase
@@ -28,6 +34,23 @@ export default async function PoulesPage() {
 
   return (
     <div className="space-y-8">
+      {/* Padel Club — exclusieve takeover voor de vier leden */}
+      {isPadelMember && (
+        <Link
+          href="/padelclub"
+          className="group flex items-center gap-3 rounded-xl border border-wk-gold/30 bg-gradient-to-r from-wk-gold/10 via-wk-green/10 to-wk-blue/10 px-5 py-3.5 transition-colors hover:border-wk-gold/60"
+        >
+          <span className="text-2xl">🎾</span>
+          <div className="flex-1 min-w-0">
+            <p className="font-display text-lg uppercase leading-none bg-gradient-to-r from-wk-gold via-wk-green to-wk-blue bg-clip-text text-transparent">
+              Padel Club
+            </p>
+            <p className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase mt-0.5">De onderlinge strijd</p>
+          </div>
+          <span className="font-mono text-xs text-wk-gold tracking-[0.14em] uppercase group-hover:translate-x-0.5 transition-transform">→</span>
+        </Link>
+      )}
+
       {/* Dagoverzicht — compacte samenvatting van vandaag, per deelnemer */}
       <DagOverzicht userId={user.id} />
 

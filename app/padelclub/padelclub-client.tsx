@@ -1,0 +1,406 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import Image from 'next/image'
+import { useRouter } from 'next/navigation'
+import { AvatarCircle } from '@/components/avatar-circle'
+
+export type PadelPlayer = {
+  id: string
+  username: string
+  fullName: string | null
+  avatarUrl: string | null
+  totalPts: number
+  groupMatchPts: number
+  groupStandingsPts: number
+  knockoutPts: number
+  bonusPrePts: number
+  bonusDailyPts: number
+  jokersPlayed: number
+  jokerPts: number
+  exactHits: number
+  correctResults: number
+}
+
+export type DayMatch = {
+  id: string
+  time: string
+  home: { name: string; flag: string | null } | null
+  away: { name: string; flag: string | null } | null
+  actual: string | null
+  preds: Record<string, { text: string | null; pts: number | null }>
+}
+
+export type DayQuestion = {
+  question: string
+  correctAnswer: string | null
+  answers: Record<string, { answer: string | null; pts: number | null }>
+} | null
+
+// Vaste kleur per speler (volgorde = PADEL_USERNAMES) — overal consistent
+const PLAYER_COLORS = ['#F4B92E', '#2D6BE5', '#2EA84B', '#E63946'] // goud, blauw, groen, rood
+
+function useCountUp(target: number, delay = 250, duration = 1100) {
+  const [value, setValue] = useState(0)
+  useEffect(() => {
+    if (target === 0) { setValue(0); return }
+    let raf: number
+    const start = performance.now() + delay
+    const tick = (now: number) => {
+      const t = Math.min(1, Math.max(0, (now - start) / duration))
+      setValue(Math.round(target * (1 - Math.pow(1 - t, 3))))
+      if (t < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, delay, duration])
+  return value
+}
+
+function GrowBar({ pct, color, delay }: { pct: number; color: string; delay: number }) {
+  const [grow, setGrow] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setGrow(true), delay)
+    return () => clearTimeout(t)
+  }, [delay])
+  return (
+    <div className="h-full rounded-full" style={{
+      width: grow ? `${pct}%` : '0%',
+      background: color,
+      transition: 'width 0.9s cubic-bezier(0.34,1.56,0.64,1)',
+    }} />
+  )
+}
+
+const firstName = (p: PadelPlayer) => (p.fullName?.split(' ')[0]) || p.username
+
+// Dagscore-kaartje (avatar + getelde punten van vandaag), leider in goud
+function DayScoreCard({ p, color, pts, isLead, delay }: { p: PadelPlayer; color: string; pts: number; isLead: boolean; delay: number }) {
+  const count = useCountUp(pts, delay)
+  return (
+    <div
+      className={`flex flex-col items-center gap-1 rounded-xl border py-3 px-1 ${isLead ? 'border-wk-gold/50 bg-wk-gold/[0.06]' : 'border-white/10 bg-wk-surface'}`}
+    >
+      <span className="rounded-full ring-2 ring-offset-1 ring-offset-wk-bg" style={{ ['--tw-ring-color' as string]: color }} title={firstName(p)}>
+        <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={34} />
+      </span>
+      <span className="font-display text-2xl leading-none" style={{ color }}>{count}</span>
+      <span className="font-mono text-[8px] text-wk-muted tracking-[0.12em] uppercase">pt vandaag</span>
+    </div>
+  )
+}
+
+// Compacte avatar met spelerskleur-ring — gebruikt bij scores i.p.v. de naam
+function PlayerAvatar({ p, color, size = 24 }: { p: PadelPlayer; color: string; size?: number }) {
+  return (
+    <span className="rounded-full ring-1 shrink-0 inline-flex" style={{ ['--tw-ring-color' as string]: color }} title={firstName(p)}>
+      <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={size} />
+    </span>
+  )
+}
+
+export default function PadelclubClient({
+  players,
+  dayLabel,
+  dayMatches,
+  dayQuestion,
+  currentUserId,
+}: {
+  players: PadelPlayer[]
+  dayLabel: string
+  dayMatches: DayMatch[]
+  dayQuestion: DayQuestion
+  currentUserId: string
+}) {
+  const router = useRouter()
+  const colorById = useMemo(
+    () => Object.fromEntries(players.map((p, i) => [p.id, PLAYER_COLORS[i % PLAYER_COLORS.length]])),
+    [players],
+  )
+
+  const ranked = useMemo(() => [...players].sort((a, b) => b.totalPts - a.totalPts), [players])
+
+  // Punten van vandaag = som van de dag-wedstrijdpunten + de dag-bonusvraag
+  const dayPoints = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const p of players) m[p.id] = 0
+    for (const dm of dayMatches) for (const p of players) {
+      const pts = dm.preds[p.id]?.pts
+      if (pts != null) m[p.id] += pts
+    }
+    if (dayQuestion) for (const p of players) {
+      const pts = dayQuestion.answers[p.id]?.pts
+      if (pts != null) m[p.id] += pts
+    }
+    return m
+  }, [players, dayMatches, dayQuestion])
+  const dayLead = Math.max(0, ...players.map((p) => dayPoints[p.id]))
+
+  const close = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) router.back()
+    else router.push('/poules')
+  }
+
+  const fmtDate = (iso: string) =>
+    new Date(iso + 'T12:00:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' })
+  const fmtTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam' })
+
+  const CATEGORIES: { label: string; key: keyof PadelPlayer; unit: string }[] = [
+    { label: 'Wedstrijden', key: 'groupMatchPts', unit: 'pt' },
+    { label: 'Eindstand', key: 'groupStandingsPts', unit: 'pt' },
+    { label: 'Knockout', key: 'knockoutPts', unit: 'pt' },
+    { label: 'Bonus vooraf', key: 'bonusPrePts', unit: 'pt' },
+    { label: 'Bonus dag', key: 'bonusDailyPts', unit: 'pt' },
+    { label: 'Jokerpunten', key: 'jokerPts', unit: 'pt' },
+    { label: 'Exact goed', key: 'exactHits', unit: '×' },
+    { label: 'Toto goed', key: 'correctResults', unit: '×' },
+  ]
+
+  return (
+    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      {/* Speelse spotlights in de spelerskleuren */}
+      {players.map((p, i) => (
+        <div
+          key={p.id}
+          className="pointer-events-none absolute w-[420px] h-[420px] rounded-full blur-3xl opacity-[0.13] animate-pulse"
+          style={{
+            background: `radial-gradient(closest-side, ${colorById[p.id]}, transparent)`,
+            top: i < 2 ? '-6rem' : 'auto',
+            bottom: i >= 2 ? '-6rem' : 'auto',
+            left: i % 2 === 0 ? '-8rem' : 'auto',
+            right: i % 2 === 1 ? '-8rem' : 'auto',
+            animationDelay: `${i * 0.4}s`,
+          }}
+        />
+      ))}
+
+      {/* Kruisje rechtsboven */}
+      <button
+        type="button"
+        onClick={close}
+        aria-label="Sluiten"
+        className="fixed top-4 right-4 z-50 flex items-center justify-center w-10 h-10 rounded-full bg-wk-surface border border-white/10 text-wk-soft hover:text-wk-text hover:border-white/30 transition-colors cursor-pointer"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
+      <div className="relative max-w-3xl mx-auto px-4 py-10 sm:py-14 space-y-10">
+        {/* ── Hero header (2:1) ─────────────────────────────────────────── */}
+        <header className="animate-fade-up">
+          <div className="relative aspect-[2/1] -mx-4 sm:mx-0 sm:rounded-2xl overflow-hidden border-y sm:border border-white/10">
+            <Image src="/padel.jpeg" alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover animate-ken-burns" />
+            <div className="absolute inset-0 bg-gradient-to-t from-wk-bg via-wk-bg/55 to-wk-bg/10" />
+            <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6 text-center">
+              <div className="inline-block animate-podium-float text-3xl sm:text-5xl mb-1 drop-shadow-lg">🎾</div>
+              <h1 className="font-display text-4xl sm:text-6xl uppercase leading-none bg-gradient-to-r from-wk-gold via-wk-green to-wk-blue bg-clip-text text-transparent drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
+                Padel Club
+              </h1>
+              <p className="font-mono text-[10px] sm:text-xs text-wk-soft tracking-[0.3em] uppercase mt-2 drop-shadow">
+                De onderlinge strijd · onder ons
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-center gap-1.5">
+            {players.map((p) => (
+              <span key={p.id} className="h-1.5 w-8 rounded-full" style={{ background: colorById[p.id] }} />
+            ))}
+          </div>
+        </header>
+
+        {/* ── Dagdashboard: vraag + uitslagen van de speeldag ───────────── */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] text-wk-gold tracking-[0.2em] uppercase">📋 Dagdashboard</span>
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase">{fmtDate(dayLabel)}</span>
+            <div className="flex-1 h-px bg-white/10" />
+          </div>
+
+          {/* spelers-legenda */}
+          <div className="flex flex-wrap gap-3">
+            {players.map((p) => (
+              <div key={p.id} className="flex items-center gap-1.5">
+                <span className="rounded-full ring-2 ring-offset-1 ring-offset-wk-bg" style={{ ['--tw-ring-color' as string]: colorById[p.id] }}>
+                  <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={22} />
+                </span>
+                <span className="text-xs font-semibold" style={{ color: colorById[p.id] }}>{firstName(p)}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Punten van vandaag — de vier naast elkaar */}
+          <div className="grid grid-cols-4 gap-2 animate-fade-up">
+            {players.map((p, i) => (
+              <DayScoreCard
+                key={p.id}
+                p={p}
+                color={colorById[p.id]}
+                pts={dayPoints[p.id]}
+                isLead={dayPoints[p.id] > 0 && dayPoints[p.id] === dayLead}
+                delay={200 + i * 120}
+              />
+            ))}
+          </div>
+
+          {/* Dag-bonusvraag (1×) met de vier antwoorden */}
+          {dayQuestion && (
+            <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden animate-fade-up">
+              <div className="px-4 py-3 border-b border-white/5">
+                <p className="font-mono text-[9px] text-wk-gold/80 tracking-[0.16em] uppercase mb-1">Dagvraag</p>
+                <p className="text-sm font-semibold text-wk-text leading-snug">{dayQuestion.question}</p>
+                {dayQuestion.correctAnswer && (
+                  <p className="font-mono text-[10px] text-wk-green tracking-[0.1em] uppercase mt-1">✓ Juist: {dayQuestion.correctAnswer}</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-white/5">
+                {players.map((p) => {
+                  const a = dayQuestion.answers[p.id]
+                  const scored = a?.pts != null
+                  const good = scored && (a!.pts as number) > 0
+                  return (
+                    <div key={p.id} className="px-3 py-2.5 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <PlayerAvatar p={p} color={colorById[p.id]} />
+                        {scored && (
+                          <span className={`ml-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${good ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>{a!.pts}</span>
+                        )}
+                      </div>
+                      <p className={`text-xs truncate ${a?.answer ? 'text-wk-text font-medium' : 'text-wk-muted/40'}`} title={a?.answer ?? undefined}>{a?.answer ?? '—'}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Voorspelde uitslagen van die dag */}
+          {dayMatches.length === 0 ? (
+            <p className="bg-wk-surface border border-white/10 rounded-xl px-5 py-8 text-center font-mono text-xs text-wk-muted tracking-[0.12em]">
+              Geen wedstrijden op deze dag.
+            </p>
+          ) : (
+            dayMatches.map((m, mi) => (
+              <div key={m.id} className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden animate-fade-up" style={{ animationDelay: `${0.1 + mi * 0.05}s` }}>
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
+                  <span className="font-mono text-[10px] text-wk-muted w-10 shrink-0">{fmtTime(m.time)}</span>
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
+                    <span className="text-xs font-semibold text-wk-soft truncate">{m.home?.name ?? '?'}</span>
+                    {m.home?.flag && <Image src={m.home.flag} alt={m.home.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
+                  </div>
+                  <span className="font-display text-sm text-wk-text shrink-0 px-1">{m.actual ?? 'vs'}</span>
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    {m.away?.flag && <Image src={m.away.flag} alt={m.away.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
+                    <span className="text-xs font-semibold text-wk-soft truncate">{m.away?.name ?? '?'}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-white/5">
+                  {players.map((p) => {
+                    const pr = m.preds[p.id]
+                    const scored = pr?.pts != null
+                    const good = scored && (pr!.pts as number) > 0
+                    return (
+                      <div key={p.id} className="px-3 py-2.5 min-w-0 text-center">
+                        <div className="flex items-center justify-center gap-1.5 mb-1">
+                          <PlayerAvatar p={p} color={colorById[p.id]} />
+                          {scored && (
+                            <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${good ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>{pr!.pts}</span>
+                          )}
+                        </div>
+                        <p className={`font-display text-base ${pr?.text ? 'text-wk-text' : 'text-wk-muted/40'}`}>{pr?.text ?? '—'}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+
+        {/* ── Head-to-head-to-head-to-head ──────────────────────────────── */}
+        <section className="space-y-5">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] text-wk-gold tracking-[0.2em] uppercase">⚔️ De onderlinge strijd</span>
+            <div className="flex-1 h-px bg-white/10" />
+          </div>
+
+          {/* Ranglijst met telanimatie */}
+          <div className="bg-wk-surface border border-white/10 rounded-2xl overflow-hidden">
+            {ranked.map((p, i) => (
+              <RankRow
+                key={p.id}
+                player={p}
+                rank={i + 1}
+                color={colorById[p.id]}
+                topPts={ranked[0]?.totalPts ?? 1}
+                isCurrent={p.id === currentUserId}
+                delay={300 + i * 140}
+              />
+            ))}
+          </div>
+
+          {/* Categorie-vergelijking — kaart per categorie met 4 balken */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {CATEGORIES.map((cat, ci) => {
+              const max = Math.max(1, ...players.map((p) => p[cat.key] as number))
+              const lead = Math.max(...players.map((p) => p[cat.key] as number))
+              return (
+                <div key={cat.label} className="bg-wk-surface border border-white/10 rounded-xl px-4 py-3 animate-fade-up" style={{ animationDelay: `${0.2 + ci * 0.05}s` }}>
+                  <p className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase mb-2.5">{cat.label}</p>
+                  <div className="space-y-2">
+                    {players.map((p, pi) => {
+                      const v = p[cat.key] as number
+                      const isLead = v === lead && lead > 0
+                      return (
+                        <div key={p.id} className="flex items-center gap-2">
+                          <PlayerAvatar p={p} color={colorById[p.id]} size={26} />
+                          <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+                            <GrowBar pct={(v / max) * 100} color={colorById[p.id]} delay={400 + ci * 60 + pi * 50} />
+                          </div>
+                          <span className={`font-mono text-[10px] w-9 text-right shrink-0 ${isLead ? 'text-wk-gold font-bold' : 'text-wk-soft'}`}>
+                            {v}{cat.unit}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function RankRow({
+  player, rank, color, topPts, isCurrent, delay,
+}: {
+  player: PadelPlayer; rank: number; color: string; topPts: number; isCurrent: boolean; delay: number
+}) {
+  const count = useCountUp(player.totalPts, delay)
+  const pct = topPts > 0 ? (player.totalPts / topPts) * 100 : 0
+  const medal = ['🥇', '🥈', '🥉'][rank - 1] ?? null
+  return (
+    <div className={`relative flex items-center gap-3 px-4 py-3.5 border-b border-white/5 last:border-b-0 ${isCurrent ? 'bg-white/[0.03]' : ''}`}>
+      {/* achtergrondbalk = aandeel t.o.v. koploper */}
+      <div className="absolute inset-y-0 left-0 opacity-[0.08]" style={{ width: `${pct}%`, background: color }} />
+      <span className="relative w-7 text-center shrink-0">
+        {medal ? <span className="text-lg">{medal}</span> : <span className="font-mono text-sm text-wk-muted">{rank}</span>}
+      </span>
+      <span className="relative rounded-full ring-2 ring-offset-2 ring-offset-wk-surface shrink-0" style={{ ['--tw-ring-color' as string]: color }}>
+        <AvatarCircle username={player.username} avatarUrl={player.avatarUrl} size={rank === 1 ? 44 : 36} />
+      </span>
+      <div className="relative flex-1 min-w-0">
+        <p className="text-base font-bold truncate" style={{ color }}>{firstName(player)}</p>
+        {player.fullName && <p className="font-mono text-[9px] text-wk-muted truncate leading-tight">{player.fullName}</p>}
+      </div>
+      <div className="relative text-right shrink-0">
+        <span className="font-display text-2xl sm:text-3xl leading-none" style={{ color }}>{count}</span>
+        <span className="font-mono text-[10px] text-wk-muted ml-1">pt</span>
+      </div>
+    </div>
+  )
+}
