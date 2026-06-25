@@ -40,6 +40,13 @@ export type DayQuestion = {
 // Vaste kleur per speler (volgorde = PADEL_USERNAMES) — overal consistent
 const PLAYER_COLORS = ['#F4B92E', '#2D6BE5', '#2EA84B', '#E63946'] // goud, blauw, groen, rood
 
+// "Links Rechts" (Snollebollekes): figuren die per beat dwars overvliegen.
+const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png']
+// Beat-momenten (seconden in /linksrechts.mp3) + richting per beat.
+const LR_BEAT_TIMES = [0, 3, 6, 9]
+const LR_BEAT_DIRS: ('left' | 'right')[] = ['left', 'right', 'left', 'right']
+const LR_END_TIME = 12
+
 function useCountUp(target: number, delay = 250, duration = 1100) {
   const [value, setValue] = useState(0)
   useEffect(() => {
@@ -118,52 +125,87 @@ export default function PadelclubClient({
   // links, rechts). Per run komt links.png/rechts.png in beeld én vliegt een random
   // figuur dwars over het scherm. Rick vliegt altijd tégen de flow in. Synct met
   // /linksrechts.mp3 en de hele pagina krijgt confetti (ballen + padelrackets).
-  const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png']
   const [shakeDir, setShakeDir] = useState<'left' | 'right' | null>(null)
   const [playing, setPlaying] = useState(false)
   const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number } | null>(null)
   const runningRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const rafRef = useRef<number | null>(null)
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  // Audio vooraf inladen, zodat de eerste klik direct (zonder buffer-latency) start
+  useEffect(() => {
+    const a = new Audio('/linksrechts.mp3')
+    a.preload = 'auto'
+    audioRef.current = a
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+      timersRef.current.forEach(clearTimeout)
+      a.pause()
+    }
+  }, [])
+
+  const triggerBeat = (i: number) => {
+    const dir = LR_BEAT_DIRS[i]
+    setShakeDir(dir)
+    const src = FLYERS[Math.floor(Math.random() * FLYERS.length)]
+    // Normaal vliegt de figuur mét de flow; Rick precies andersom.
+    const flowToRight = dir === 'right'
+    const isRick = src === 'rick.png'
+    setFly({
+      key: i,
+      src,
+      toRight: isRick ? !flowToRight : flowToRight,
+      top: 14 + Math.floor(Math.random() * 24),   // 14–38%: blijft mobiel in beeld
+      size: 220 + Math.floor(Math.random() * 200), // 220–420px
+    })
+  }
+
+  const stopLinksRechts = () => {
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+    timersRef.current.forEach(clearTimeout)
+    timersRef.current = []
+    setShakeDir(null)
+    setFly(null)
+    setPlaying(false)
+    runningRef.current = false
+  }
+
   const doLinksRechts = () => {
     if (runningRef.current) return
     runningRef.current = true
     setPlaying(true)
-    const audio = (audioRef.current ??= new Audio('/linksrechts.mp3'))
+    const audio = audioRef.current ?? (audioRef.current = new Audio('/linksrechts.mp3'))
     audio.currentTime = 0
-    void audio.play().catch(() => {})
-    const steps: ('left' | 'right')[] = ['left', 'right', 'left', 'right']
-    steps.forEach((dir, i) => {
-      timersRef.current.push(setTimeout(() => {
-        setShakeDir(dir)
-        const src = FLYERS[Math.floor(Math.random() * FLYERS.length)]
-        // Normaal vliegt de figuur mét de flow; Rick precies andersom.
-        const flowToRight = dir === 'right'
-        const isRick = src === 'rick.png'
-        setFly({
-          key: i,
-          src,
-          toRight: isRick ? !flowToRight : flowToRight,
-          top: 8 + Math.floor(Math.random() * 50),
-          size: 280 + Math.floor(Math.random() * 320), // 280–600px, random groot
-        })
-      }, i * 3000))
-    })
-    timersRef.current.push(setTimeout(() => {
-      setShakeDir(null)
-      setFly(null)
-      setPlaying(false)
-      runningRef.current = false
-    }, steps.length * 3000))
+    let nextBeat = 0
+    // Beats worden getriggerd op basis van de wérkelijke afspeelpositie (currentTime),
+    // niet vanaf de klik — zo lopen de bewegingen synchroon met de mp3.
+    const loop = () => {
+      if (!runningRef.current) return
+      const ct = audio.currentTime
+      while (nextBeat < LR_BEAT_TIMES.length && ct >= LR_BEAT_TIMES[nextBeat]) {
+        triggerBeat(nextBeat)
+        nextBeat++
+      }
+      if (audio.ended || ct >= LR_END_TIME) { stopLinksRechts(); return }
+      rafRef.current = requestAnimationFrame(loop)
+    }
+    audio.play()
+      .then(() => { rafRef.current = requestAnimationFrame(loop) })
+      .catch(() => {
+        // Autoplay geblokkeerd → val terug op timers vanaf de klik
+        LR_BEAT_TIMES.forEach((t, i) => timersRef.current.push(setTimeout(() => triggerBeat(i), t * 1000)))
+        timersRef.current.push(setTimeout(stopLinksRechts, LR_END_TIME * 1000))
+      })
   }
-  useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
 
   // Scheidsrechter-ballen rollen langzaam van boven naar beneden (≥10 stuks).
   // Gelijkmatig over de breedte verdeeld (i/length) + wat jitter, zodat ze niet
   // aan één kant clusteren. Wordt pas client-side getoond, dus Math.random is veilig.
+  const BALL_COUNT = 8
   const balls = useMemo(
-    () => Array.from({ length: 14 }, (_, i) => ({
-      left: Math.min(92, Math.max(0, Math.round((i / 14) * 92 + (Math.random() - 0.5) * 12))),
+    () => Array.from({ length: BALL_COUNT }, (_, i) => ({
+      left: Math.min(92, Math.max(0, Math.round((i / BALL_COUNT) * 92 + (Math.random() - 0.5) * 12))),
       delay: +(Math.random() * 5).toFixed(2),
       duration: +(7 + Math.random() * 6).toFixed(2), // 7–13s, lekker langzaam
       size: 32 + Math.round(Math.random() * 56),       // 32–88px
@@ -217,18 +259,18 @@ export default function PadelclubClient({
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      {/* Speelse spotlights in de spelerskleuren */}
+      {/* Speelse spotlights in de spelerskleuren — statisch (geen pulse) zodat de
+          grote blur-vlakken niet elke frame herschilderen op mobiel */}
       {players.map((p, i) => (
         <div
           key={p.id}
-          className="pointer-events-none absolute w-[420px] h-[420px] rounded-full blur-3xl opacity-[0.13] animate-pulse"
+          className="pointer-events-none absolute w-[420px] h-[420px] rounded-full blur-3xl opacity-[0.13]"
           style={{
             background: `radial-gradient(closest-side, ${colorById[p.id]}, transparent)`,
             top: i < 2 ? '-6rem' : 'auto',
             bottom: i >= 2 ? '-6rem' : 'auto',
             left: i % 2 === 0 ? '-8rem' : 'auto',
             right: i % 2 === 1 ? '-8rem' : 'auto',
-            animationDelay: `${i * 0.4}s`,
           }}
         />
       ))}
@@ -251,12 +293,13 @@ export default function PadelclubClient({
           {balls.map((b, i) => (
             <Image
               key={i}
-              src="/referee.png" alt="" width={140} height={140} aria-hidden
+              src="/referee.png" alt="" width={88} height={88} aria-hidden loading="eager"
               className="absolute top-0 rounded-full drop-shadow-xl"
               style={{
                 left: `${b.left}%`,
                 width: `${b.size}px`,
                 height: `${b.size}px`,
+                willChange: 'transform',
                 animation: `confetti-fall ${b.duration}s linear ${b.delay}s infinite both`,
               }}
             />
@@ -264,16 +307,20 @@ export default function PadelclubClient({
         </div>
       )}
 
-      {/* Random figuur vliegt per run dwars over het scherm (Rick tégen de flow in) */}
+      {/* Random figuur vliegt per run dwars over het scherm (Rick tégen de flow in).
+          maxHeight begrenst de figuur zodat hij ook op een korte mobiele viewport
+          volledig in beeld blijft. */}
       {fly && (
         <Image
           key={fly.key}
-          src={`/${fly.src}`} alt="" width={600} height={600} aria-hidden
-          className="pointer-events-none fixed left-0 z-40 h-auto drop-shadow-2xl"
+          src={`/${fly.src}`} alt="" width={420} height={420} aria-hidden loading="eager"
+          className="pointer-events-none fixed left-0 z-40 h-auto w-auto object-contain drop-shadow-2xl"
           style={{
             top: `${fly.top}%`,
             width: `${fly.size}px`,
-            maxWidth: '85vw',
+            maxWidth: '72vw',
+            maxHeight: '50vh',
+            willChange: 'transform',
             // 2.9s < de 3s run, zodat de figuur z'n oversteek áf maakt vóór de volgende
             animation: `${fly.toRight ? 'cross-right' : 'cross-left'} 2.9s linear both`,
           }}
