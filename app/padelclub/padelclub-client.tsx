@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { AvatarCircle } from '@/components/avatar-circle'
@@ -79,13 +79,13 @@ function DayScoreCard({ p, color, pts, isLead, delay }: { p: PadelPlayer; color:
   const count = useCountUp(pts, delay)
   return (
     <div
-      className={`flex flex-col items-center gap-1 rounded-xl border py-3 px-1 ${isLead ? 'border-wk-gold/50 bg-wk-gold/[0.06]' : 'border-white/10 bg-wk-surface'}`}
+      className={`flex flex-col items-center rounded-xl border py-3 px-1 ${isLead ? 'border-wk-gold/50 bg-wk-gold/[0.06]' : 'border-white/10 bg-wk-surface'}`}
     >
       <span className="rounded-full ring-2 ring-offset-1 ring-offset-wk-bg" style={{ ['--tw-ring-color' as string]: color }} title={firstName(p)}>
         <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={34} />
       </span>
-      <span className="font-display text-2xl leading-none" style={{ color }}>{count}</span>
-      <span className="font-mono text-[8px] text-wk-muted tracking-[0.12em] uppercase">pt vandaag</span>
+      <span className="font-fun font-semibold text-3xl leading-none mt-3" style={{ color }}>{count}</span>
+      <span className="font-mono text-[8px] text-wk-muted tracking-[0.12em] uppercase mt-0.5">pt vandaag</span>
     </div>
   )
 }
@@ -113,6 +113,64 @@ export default function PadelclubClient({
   currentUserId: string
 }) {
   const router = useRouter()
+
+  // 🎾 in de hero → "Links Rechts" (Snollebollekes): 4 runs van 3s (links, rechts,
+  // links, rechts). Per run komt links.png/rechts.png in beeld én vliegt een random
+  // figuur dwars over het scherm. Rick vliegt altijd tégen de flow in. Synct met
+  // /linksrechts.mp3 en de hele pagina krijgt confetti (ballen + padelrackets).
+  const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png']
+  const [shakeDir, setShakeDir] = useState<'left' | 'right' | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number } | null>(null)
+  const runningRef = useRef(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  const doLinksRechts = () => {
+    if (runningRef.current) return
+    runningRef.current = true
+    setPlaying(true)
+    const audio = (audioRef.current ??= new Audio('/linksrechts.mp3'))
+    audio.currentTime = 0
+    void audio.play().catch(() => {})
+    const steps: ('left' | 'right')[] = ['left', 'right', 'left', 'right']
+    steps.forEach((dir, i) => {
+      timersRef.current.push(setTimeout(() => {
+        setShakeDir(dir)
+        const src = FLYERS[Math.floor(Math.random() * FLYERS.length)]
+        // Normaal vliegt de figuur mét de flow; Rick precies andersom.
+        const flowToRight = dir === 'right'
+        const isRick = src === 'rick.png'
+        setFly({
+          key: i,
+          src,
+          toRight: isRick ? !flowToRight : flowToRight,
+          top: 8 + Math.floor(Math.random() * 50),
+          size: 280 + Math.floor(Math.random() * 320), // 280–600px, random groot
+        })
+      }, i * 3000))
+    })
+    timersRef.current.push(setTimeout(() => {
+      setShakeDir(null)
+      setFly(null)
+      setPlaying(false)
+      runningRef.current = false
+    }, steps.length * 3000))
+  }
+  useEffect(() => () => { timersRef.current.forEach(clearTimeout) }, [])
+
+  // Scheidsrechter-ballen rollen langzaam van boven naar beneden (≥10 stuks).
+  // Gelijkmatig over de breedte verdeeld (i/length) + wat jitter, zodat ze niet
+  // aan één kant clusteren. Wordt pas client-side getoond, dus Math.random is veilig.
+  const balls = useMemo(
+    () => Array.from({ length: 14 }, (_, i) => ({
+      left: Math.min(92, Math.max(0, Math.round((i / 14) * 92 + (Math.random() - 0.5) * 12))),
+      delay: +(Math.random() * 5).toFixed(2),
+      duration: +(7 + Math.random() * 6).toFixed(2), // 7–13s, lekker langzaam
+      size: 32 + Math.round(Math.random() * 56),       // 32–88px
+    })),
+    [],
+  )
+
   const colorById = useMemo(
     () => Object.fromEntries(players.map((p, i) => [p.id, PLAYER_COLORS[i % PLAYER_COLORS.length]])),
     [players],
@@ -187,6 +245,66 @@ export default function PadelclubClient({
         </svg>
       </button>
 
+      {/* Scheidsrechter-ballen rollen langzaam van boven naar beneden */}
+      {playing && (
+        <div className="pointer-events-none fixed inset-0 z-30 overflow-hidden" aria-hidden>
+          {balls.map((b, i) => (
+            <Image
+              key={i}
+              src="/referee.png" alt="" width={140} height={140} aria-hidden
+              className="absolute top-0 rounded-full drop-shadow-xl"
+              style={{
+                left: `${b.left}%`,
+                width: `${b.size}px`,
+                height: `${b.size}px`,
+                animation: `confetti-fall ${b.duration}s linear ${b.delay}s infinite both`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Random figuur vliegt per run dwars over het scherm (Rick tégen de flow in) */}
+      {fly && (
+        <Image
+          key={fly.key}
+          src={`/${fly.src}`} alt="" width={600} height={600} aria-hidden
+          className="pointer-events-none fixed left-0 z-40 h-auto drop-shadow-2xl"
+          style={{
+            top: `${fly.top}%`,
+            width: `${fly.size}px`,
+            maxWidth: '85vw',
+            // 2.9s < de 3s run, zodat de figuur z'n oversteek áf maakt vóór de volgende
+            animation: `${fly.toRight ? 'cross-right' : 'cross-left'} 2.9s linear both`,
+          }}
+        />
+      )}
+
+      {/* Links/Rechts mascottes — schuiven van de zijkant in (buitenste laag) en
+          wiebelen heen en weer (binnenste laag, zodat transforms niet botsen) */}
+      <div
+        className="pointer-events-none fixed top-2 sm:top-4 left-2 sm:left-8 z-40 transition-transform duration-700 ease-out"
+        style={{ transform: shakeDir === 'left' ? 'translateX(0)' : 'translateX(120vw)' }}
+        aria-hidden
+      >
+        <Image
+          src="/links.png" alt="" width={280} height={280}
+          className="w-44 sm:w-72 h-auto drop-shadow-2xl"
+          style={{ animation: 'rock-left 1.1s ease-in-out infinite' }}
+        />
+      </div>
+      <div
+        className="pointer-events-none fixed top-2 sm:top-4 right-2 sm:right-8 z-40 transition-transform duration-700 ease-out"
+        style={{ transform: shakeDir === 'right' ? 'translateX(0)' : 'translateX(-120vw)' }}
+        aria-hidden
+      >
+        <Image
+          src="/rechts.png" alt="" width={280} height={280}
+          className="w-44 sm:w-72 h-auto drop-shadow-2xl"
+          style={{ animation: 'rock-right 1.1s ease-in-out infinite' }}
+        />
+      </div>
+
       <div className="relative max-w-3xl mx-auto px-4 py-10 sm:py-14 space-y-10">
         {/* ── Hero header (2:1) ─────────────────────────────────────────── */}
         <header className="animate-fade-up">
@@ -194,7 +312,15 @@ export default function PadelclubClient({
             <Image src="/padel.jpeg" alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover animate-ken-burns" />
             <div className="absolute inset-0 bg-gradient-to-t from-wk-bg via-wk-bg/55 to-wk-bg/10" />
             <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6 text-center">
-              <div className="inline-block animate-podium-float text-3xl sm:text-5xl mb-1 drop-shadow-lg">🎾</div>
+              <button
+                type="button"
+                onClick={doLinksRechts}
+                aria-label="Links Rechts!"
+                title="Links Rechts!"
+                className="inline-block animate-podium-float text-3xl sm:text-5xl mb-1 drop-shadow-lg cursor-pointer select-none transition-transform hover:scale-125 active:scale-95"
+              >
+                🎾
+              </button>
               <h1 className="font-display text-4xl sm:text-6xl uppercase leading-none bg-gradient-to-r from-wk-gold via-wk-green to-wk-blue bg-clip-text text-transparent drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
                 Padel Club
               </h1>
@@ -244,37 +370,6 @@ export default function PadelclubClient({
             ))}
           </div>
 
-          {/* Dag-bonusvraag (1×) met de vier antwoorden */}
-          {dayQuestion && (
-            <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden animate-fade-up">
-              <div className="px-4 py-3 border-b border-white/5">
-                <p className="font-mono text-[9px] text-wk-gold/80 tracking-[0.16em] uppercase mb-1">Dagvraag</p>
-                <p className="text-sm font-semibold text-wk-text leading-snug">{dayQuestion.question}</p>
-                {dayQuestion.correctAnswer && (
-                  <p className="font-mono text-[10px] text-wk-green tracking-[0.1em] uppercase mt-1">✓ Juist: {dayQuestion.correctAnswer}</p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-white/5">
-                {players.map((p) => {
-                  const a = dayQuestion.answers[p.id]
-                  const scored = a?.pts != null
-                  const good = scored && (a!.pts as number) > 0
-                  return (
-                    <div key={p.id} className="px-3 py-2.5 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <PlayerAvatar p={p} color={colorById[p.id]} />
-                        {scored && (
-                          <span className={`ml-auto font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${good ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>{a!.pts}</span>
-                        )}
-                      </div>
-                      <p className={`text-xs truncate ${a?.answer ? 'text-wk-text font-medium' : 'text-wk-muted/40'}`} title={a?.answer ?? undefined}>{a?.answer ?? '—'}</p>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Voorspelde uitslagen van die dag */}
           {dayMatches.length === 0 ? (
             <p className="bg-wk-surface border border-white/10 rounded-xl px-5 py-8 text-center font-mono text-xs text-wk-muted tracking-[0.12em]">
@@ -283,17 +378,19 @@ export default function PadelclubClient({
           ) : (
             dayMatches.map((m, mi) => (
               <div key={m.id} className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden animate-fade-up" style={{ animationDelay: `${0.1 + mi * 0.05}s` }}>
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
-                  <span className="font-mono text-[10px] text-wk-muted w-10 shrink-0">{fmtTime(m.time)}</span>
-                  <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
-                    <span className="text-xs font-semibold text-wk-soft truncate">{m.home?.name ?? '?'}</span>
-                    {m.home?.flag && <Image src={m.home.flag} alt={m.home.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
+                <div className="px-4 py-3 border-b border-white/5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
+                      <span className="text-xs font-semibold text-wk-soft truncate">{m.home?.name ?? '?'}</span>
+                      {m.home?.flag && <Image src={m.home.flag} alt={m.home.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
+                    </div>
+                    <span className="font-fun font-semibold text-base text-wk-text shrink-0 px-1">{m.actual ?? 'vs'}</span>
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      {m.away?.flag && <Image src={m.away.flag} alt={m.away.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
+                      <span className="text-xs font-semibold text-wk-soft truncate">{m.away?.name ?? '?'}</span>
+                    </div>
                   </div>
-                  <span className="font-display text-sm text-wk-text shrink-0 px-1">{m.actual ?? 'vs'}</span>
-                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                    {m.away?.flag && <Image src={m.away.flag} alt={m.away.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
-                    <span className="text-xs font-semibold text-wk-soft truncate">{m.away?.name ?? '?'}</span>
-                  </div>
+                  <p className="mt-1.5 text-center font-mono text-[10px] text-wk-muted tracking-[0.12em]">{fmtTime(m.time)}</p>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-white/5">
                   {players.map((p) => {
@@ -308,7 +405,7 @@ export default function PadelclubClient({
                             <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${good ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>{pr!.pts}</span>
                           )}
                         </div>
-                        <p className={`font-display text-base ${pr?.text ? 'text-wk-text' : 'text-wk-muted/40'}`}>{pr?.text ?? '—'}</p>
+                        <p className={`font-fun font-medium text-lg ${pr?.text ? 'text-wk-text' : 'text-wk-muted/40'}`}>{pr?.text ?? '—'}</p>
                       </div>
                     )
                   })}
@@ -398,7 +495,7 @@ function RankRow({
         {player.fullName && <p className="font-mono text-[9px] text-wk-muted truncate leading-tight">{player.fullName}</p>}
       </div>
       <div className="relative text-right shrink-0">
-        <span className="font-display text-2xl sm:text-3xl leading-none" style={{ color }}>{count}</span>
+        <span className="font-fun font-semibold text-3xl sm:text-4xl leading-none" style={{ color }}>{count}</span>
         <span className="font-mono text-[10px] text-wk-muted ml-1">pt</span>
       </div>
     </div>
