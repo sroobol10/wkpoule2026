@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -21,6 +21,7 @@ export type SpelerData = Deelnemer & {
   bonusPrePts: number
   bonusDailyPts: number
   jokersPlayed: number
+  jokerPts: number
   exactHits: number
   correctResults: number
 }
@@ -41,6 +42,26 @@ export type BonusVergelijk = {
   question: string
   a: string | null
   b: string | null
+  ptsA: number | null
+  ptsB: number | null
+}
+
+// Knockout-voorspelling van één deelnemer (afgeleid uit bracket_predictions).
+// Elke pick is de voorspelde winnaar van dat slot; null = niet ingevuld.
+export type KoPick = { name: string; flag: string | null } | null
+export type KnockoutSide = {
+  sf1: [KoPick, KoPick]; sf1Winner: KoPick
+  sf2: [KoPick, KoPick]; sf2Winner: KoPick
+  finalists: [KoPick, KoPick]; champion: KoPick
+  third: KoPick
+}
+
+// Head-to-head eindstand van een afgeronde groep: per kant de voorspelde
+// rangschikking (index = positie-1) met land en punten (5 = goed, 0 = fout).
+export type GroupVergelijk = {
+  group: string
+  a: { name: string; flag: string | null; pts: number }[]
+  b: { name: string; flag: string | null; pts: number }[]
 }
 
 const COLOR_A = '#2D6BE5' // wk-blue
@@ -137,6 +158,70 @@ function SpelerKop({ speler, color, isLeading, delay }: { speler: SpelerData; co
   )
 }
 
+// Eén voorspeld knockout-team (vlag + naam), winnaar in goud
+function KoTeam({ pick, highlight }: { pick: KoPick; highlight?: boolean }) {
+  if (!pick) return <span className="text-[11px] text-wk-muted/40">—</span>
+  return (
+    <span className="flex items-center gap-1.5 min-w-0">
+      {pick.flag && (
+        <Image src={pick.flag} alt={pick.name} width={16} height={11} className="rounded-sm object-cover w-4 h-[11px] shrink-0" />
+      )}
+      <span className={`text-[11px] truncate ${highlight ? 'text-wk-gold font-bold' : 'text-wk-soft'}`}>{pick.name}</span>
+    </span>
+  )
+}
+
+// Een duel met twee teams; de voorspelde winnaar krijgt de goud-markering
+function KoMatchup({ pair, winner }: { pair: [KoPick, KoPick]; winner: KoPick }) {
+  const isWin = (p: KoPick) => !!p && !!winner && p.name === winner.name
+  return (
+    <div className="space-y-1 border-l-2 border-white/10 pl-2.5">
+      <KoTeam pick={pair[0]} highlight={isWin(pair[0])} />
+      <KoTeam pick={pair[1]} highlight={isWin(pair[1])} />
+    </div>
+  )
+}
+
+function KoBlock({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="font-mono text-[8px] text-wk-muted/60 tracking-[0.16em] uppercase">{label}</p>
+      {children}
+    </div>
+  )
+}
+
+function KoSide({ ko }: { ko: KnockoutSide | null }) {
+  if (!ko) {
+    return <p className="font-mono text-[10px] text-wk-muted/50 tracking-[0.1em] uppercase py-2">Niet ingevuld</p>
+  }
+  return (
+    <div className="space-y-5">
+      <KoBlock label="Halve finales">
+        <div className="space-y-3">
+          <KoMatchup pair={ko.sf1} winner={ko.sf1Winner} />
+          <KoMatchup pair={ko.sf2} winner={ko.sf2Winner} />
+        </div>
+      </KoBlock>
+      <KoBlock label="Finale">
+        <KoMatchup pair={ko.finalists} winner={ko.champion} />
+      </KoBlock>
+      <KoBlock label="🏆 Kampioen"><KoTeam pick={ko.champion} highlight /></KoBlock>
+      <KoBlock label="Winnaar 3e plek"><KoTeam pick={ko.third} highlight /></KoBlock>
+    </div>
+  )
+}
+
+// Puntenpil: groen bij een juiste eindpositie (5 pt), rood bij 0
+function PtsPill({ pts }: { pts: number }) {
+  const good = pts > 0
+  return (
+    <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${good ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>
+      {pts} pt
+    </span>
+  )
+}
+
 export default function VergelijkClient({
   deelnemers,
   poules,
@@ -147,6 +232,9 @@ export default function VergelijkClient({
   spelerB,
   matches,
   bonus,
+  groepsfase,
+  koA,
+  koB,
 }: {
   deelnemers: Deelnemer[]
   poules: { id: string; name: string }[]
@@ -157,6 +245,9 @@ export default function VergelijkClient({
   spelerB: SpelerData | null
   matches: MatchVergelijk[]
   bonus: BonusVergelijk[]
+  groepsfase: GroupVergelijk[]
+  koA: KnockoutSide | null
+  koB: KnockoutSide | null
 }) {
   const router = useRouter()
   const navigate = (a: string | null, b: string | null, poule: string | null = pouleId) => {
@@ -189,6 +280,7 @@ export default function VergelijkClient({
     { label: 'Exact goed', a: spelerA.exactHits, b: spelerB.exactHits },
     { label: 'Toto goed', a: spelerA.correctResults, b: spelerB.correctResults },
     { label: 'Jokers', a: spelerA.jokersPlayed, b: spelerB.jokersPlayed },
+    { label: 'Jokerpunten', a: spelerA.jokerPts, b: spelerB.jokerPts },
   ] : []
 
   const selectClass = 'w-full rounded-lg bg-wk-surface border px-3 py-2 text-sm text-wk-text focus:outline-none focus:ring-2 focus:ring-wk-gold/20 transition appearance-none'
@@ -333,6 +425,55 @@ export default function VergelijkClient({
               ))}
             </div>
 
+            {/* Overzicht groepsfase — afgeronde groepen head-to-head */}
+            {groepsfase.length > 0 && (
+              <div className="animate-fade-up bg-wk-surface border border-white/10 rounded-xl overflow-hidden" style={{ animationDelay: '0.55s' }}>
+                <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase px-5 pt-4 pb-2 text-center">
+                  Overzicht groepsfase
+                </p>
+                {/* Namen per kant */}
+                <div className="grid grid-cols-2 gap-3 sm:gap-5 px-4 sm:px-5 pb-3">
+                  <span className="text-xs font-bold truncate" style={{ color: COLOR_A }}>{spelerA.username}</span>
+                  <span className="text-xs font-bold truncate text-right" style={{ color: COLOR_B }}>{spelerB.username}</span>
+                </div>
+                <div className="divide-y divide-white/5 border-t border-white/5">
+                  {groepsfase.map((g) => (
+                    <div key={g.group} className="px-4 sm:px-5 py-4">
+                      <p className="font-mono text-[10px] text-wk-text font-bold tracking-[0.12em] uppercase mb-3">Groep {g.group}</p>
+                      <div className="grid grid-cols-2 gap-3 sm:gap-6">
+                        {/* Links: speler A */}
+                        <div className="space-y-1.5">
+                          {g.a.map((row, i) => (
+                            <div key={i} className="grid grid-cols-[1rem_auto_1fr_auto] items-center gap-1.5 sm:gap-2">
+                              <span className="font-mono text-[10px] text-wk-muted text-center">{i + 1}</span>
+                              {row.flag
+                                ? <Image src={row.flag} alt={row.name} width={18} height={12} className="rounded-sm object-cover w-[18px] h-3" />
+                                : <span className="w-[18px]" />}
+                              <span className="text-[11px] text-wk-text truncate">{row.name}</span>
+                              <PtsPill pts={row.pts} />
+                            </div>
+                          ))}
+                        </div>
+                        {/* Rechts: speler B (gespiegeld) */}
+                        <div className="space-y-1.5">
+                          {g.b.map((row, i) => (
+                            <div key={i} className="grid grid-cols-[auto_1fr_auto_1rem] items-center gap-1.5 sm:gap-2">
+                              <PtsPill pts={row.pts} />
+                              <span className="text-[11px] text-wk-text truncate text-right">{row.name}</span>
+                              {row.flag
+                                ? <Image src={row.flag} alt={row.name} width={18} height={12} className="rounded-sm object-cover w-[18px] h-3" />
+                                : <span className="w-[18px]" />}
+                              <span className="font-mono text-[10px] text-wk-muted text-center">{i + 1}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Bonuskeuzes naast elkaar */}
             {bonus.length > 0 && (
               <div className="animate-fade-up bg-wk-surface border border-white/10 rounded-xl overflow-hidden" style={{ animationDelay: '0.6s' }}>
@@ -340,22 +481,51 @@ export default function VergelijkClient({
                   Bonusvoorspellingen
                 </p>
                 <div className="divide-y divide-white/5">
-                  {bonus.map(({ question, a, b }) => {
+                  {bonus.map(({ question, a, b, ptsA, ptsB }) => {
                     const same = a !== null && b !== null && a.trim().toLowerCase() === b.trim().toLowerCase()
+                    const ptsPill = (pts: number | null) =>
+                      pts == null ? null : (
+                        <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${pts > 0 ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>
+                          {pts}
+                        </span>
+                      )
                     return (
                       <div key={question} className={`grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 sm:px-5 py-2.5 ${same ? 'bg-wk-gold/[0.04]' : ''}`}>
-                        <span className="text-sm font-semibold truncate text-right" style={{ color: COLOR_A }} title={a ?? undefined}>
-                          {a ?? <span className="text-wk-muted/40 font-normal">—</span>}
+                        <span className="flex items-center justify-end gap-1.5 min-w-0" title={a ?? undefined}>
+                          {ptsPill(ptsA)}
+                          <span className="text-sm font-semibold truncate" style={{ color: COLOR_A }}>
+                            {a ?? <span className="text-wk-muted/40 font-normal">—</span>}
+                          </span>
                         </span>
                         <span className="font-mono text-[9px] text-wk-muted tracking-[0.1em] uppercase text-center max-w-40 sm:max-w-56 leading-tight" title={question}>
                           {same && <span className="mr-1">🤝</span>}{question.length > 60 ? question.slice(0, 57) + '…' : question}
                         </span>
-                        <span className="text-sm font-semibold truncate" style={{ color: COLOR_B }} title={b ?? undefined}>
-                          {b ?? <span className="text-wk-muted/40 font-normal">—</span>}
+                        <span className="flex items-center gap-1.5 min-w-0" title={b ?? undefined}>
+                          <span className="text-sm font-semibold truncate" style={{ color: COLOR_B }}>
+                            {b ?? <span className="text-wk-muted/40 font-normal">—</span>}
+                          </span>
+                          {ptsPill(ptsB)}
                         </span>
                       </div>
                     )
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* Eindfase-voorspelling: vanaf de halve finale */}
+            {(koA || koB) && (
+              <div className="animate-fade-up bg-wk-surface border border-white/10 rounded-xl overflow-hidden" style={{ animationDelay: '0.65s' }}>
+                <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase px-5 pt-4 pb-2 text-center">
+                  Vanaf de halve finale
+                </p>
+                <div className="grid grid-cols-2 gap-4 sm:gap-8 px-4 sm:px-6 pb-2">
+                  <span className="text-xs font-bold truncate" style={{ color: COLOR_A }}>{spelerA.username}</span>
+                  <span className="text-xs font-bold truncate text-right" style={{ color: COLOR_B }}>{spelerB.username}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4 sm:gap-8 px-4 sm:px-6 pb-5 border-t border-white/5 pt-5">
+                  <KoSide ko={koA} />
+                  <KoSide ko={koB} />
                 </div>
               </div>
             )}

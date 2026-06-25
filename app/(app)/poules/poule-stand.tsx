@@ -159,7 +159,7 @@ export async function PouleStand({
     return team ? { team, active: activeTeamIds.has(teamId) } : null
   }
 
-  // ── Jokerpunten (alleen voor de Ennovate-statfilter) ────────────────────────
+  // ── Jokerpunten (voor de statfilter) ────────────────────────────────────────
   // Een joker verdubbelt de wedstrijdpunten; de jokerbonus is dus de helft van
   // de toegekende punten op die wedstrijd. Alleen gespeelde (uitslag-ingevoerde)
   // jokers tellen mee.
@@ -167,7 +167,7 @@ export async function PouleStand({
   // percentage (elke actieve deelnemer heeft alle groepswedstrijden voorspeld).
   let playedGroupMatches = 0
   const jokerPointsByUser: Record<string, number> = {}
-  if (isEnnovate && rankedIds.length) {
+  if (rankedIds.length) {
     const { count } = await supabase
       .from('matches')
       .select('id', { count: 'exact', head: true })
@@ -175,23 +175,41 @@ export async function PouleStand({
       .eq('result_entered', true)
     playedGroupMatches = count ?? 0
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: jokerRows } = await (supabase as any)
-      .from('jokers')
-      .select('user_id, match_id, match:matches!jokers_match_id_fkey(result_entered)')
-      .in('user_id', rankedIds)
-    const activeJokers = ((jokerRows ?? []) as {
-      user_id: string; match_id: string; match: { result_entered: boolean } | null
-    }[]).filter((j) => j.match?.result_entered)
+    // PostgREST levert standaard max. 1000 rijen — bij een grote poule (Schmitt)
+    // overschrijden de jokers/voorspellingen dat, waardoor deelnemers ten onrechte
+    // op 0 jokerpunten zouden vallen. Daarom gepagineerd ophalen.
+    const PAGE = 1000
+    type JokerRow = { user_id: string; match_id: string; match: { result_entered: boolean } | null }
+    const jokerRows: JokerRow[] = []
+    for (let from = 0; ; from += PAGE) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase as any)
+        .from('jokers')
+        .select('user_id, match_id, match:matches!jokers_match_id_fkey(result_entered)')
+        .in('user_id', rankedIds)
+        .range(from, from + PAGE - 1)
+      const rows = (data ?? []) as JokerRow[]
+      jokerRows.push(...rows)
+      if (rows.length < PAGE) break
+    }
+    const activeJokers = jokerRows.filter((j) => j.match?.result_entered)
     if (activeJokers.length) {
       const jokerMatchIds = [...new Set(activeJokers.map((j) => j.match_id))]
-      const { data: predRows } = await supabase
-        .from('predictions')
-        .select('user_id, match_id, points_awarded')
-        .in('user_id', rankedIds)
-        .in('match_id', jokerMatchIds)
+      type PredRow = { user_id: string; match_id: string; points_awarded: number | null }
+      const predRows: PredRow[] = []
+      for (let from = 0; ; from += PAGE) {
+        const { data } = await supabase
+          .from('predictions')
+          .select('user_id, match_id, points_awarded')
+          .in('user_id', rankedIds)
+          .in('match_id', jokerMatchIds)
+          .range(from, from + PAGE - 1)
+        const rows = (data ?? []) as PredRow[]
+        predRows.push(...rows)
+        if (rows.length < PAGE) break
+      }
       const predPts: Record<string, number> = {}
-      for (const p of predRows ?? []) predPts[`${p.user_id}:${p.match_id}`] = p.points_awarded ?? 0
+      for (const p of predRows) predPts[`${p.user_id}:${p.match_id}`] = p.points_awarded ?? 0
       for (const j of activeJokers) {
         const pts = predPts[`${j.user_id}:${j.match_id}`] ?? 0
         jokerPointsByUser[j.user_id] = (jokerPointsByUser[j.user_id] ?? 0) + Math.round(pts / 2)
@@ -279,8 +297,8 @@ export async function PouleStand({
         }
       >
 
-      {/* Statfilter (alleen Ennovate): bekijk de stand per losse statistiek */}
-      <StandFilter enabled={isEnnovate} entries={filterEntries} playedCount={playedGroupMatches} currentUserId={currentUserId}>
+      {/* Statfilter: bekijk de stand per losse statistiek */}
+      <StandFilter entries={filterEntries} playedCount={playedGroupMatches} currentUserId={currentUserId}>
 
       {/* Podium voor de top 3 — niet in de Schmitt-league (daar geldt prijzengeld) */}
       {ranked.length > 0 && !isSchmitt && (

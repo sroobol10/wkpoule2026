@@ -3,11 +3,14 @@ import { createClient } from '@/lib/supabase/server'
 import { getActivePlayerIds } from '@/lib/active-players'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { preBonusIndex } from '@/lib/bonus-order'
+import { sortGroupStandings, type TeamStat } from '@/lib/group-standings'
 import VergelijkClient, {
   type Deelnemer,
   type SpelerData,
   type MatchVergelijk,
   type BonusVergelijk,
+  type GroupVergelijk,
+  type KnockoutSide,
 } from './vergelijk-client'
 
 export const metadata = { title: 'Head-to-head · WK Poule 2026' }
@@ -134,6 +137,7 @@ export default async function VergelijkPage({
       bonusPrePts: s.bonus_pre_pts,
       bonusDailyPts: s.bonus_daily_pts,
       jokersPlayed: s.jokers_played,
+      jokerPts: 0,
       exactHits: s.exact_hits,
       correctResults: s.correct_results,
     }
@@ -143,6 +147,9 @@ export default async function VergelijkPage({
   let spelerB: SpelerData | null = null
   let matches: MatchVergelijk[] = []
   let bonus: BonusVergelijk[] = []
+  let groepsfase: GroupVergelijk[] = []
+  let koA: KnockoutSide | null = null
+  let koB: KnockoutSide | null = null
 
   if (idA && idB) {
     spelerA = buildSpeler(idA)
@@ -162,11 +169,32 @@ export default async function VergelijkPage({
         supabase.from('predictions').select(predSelect).eq('user_id', idB),
         supabase.from('jokers').select('user_id, match_id').in('user_id', [idA, idB]),
         supabase.from('bonus_questions').select('id, question').eq('type', 'pre_tournament').order('created_at'),
-        supabase.from('bonus_answers').select('user_id, question_id, answer').in('user_id', [idA, idB]),
+        supabase.from('bonus_answers').select('user_id, question_id, answer, points_awarded').in('user_id', [idA, idB]),
       ])
 
     const jokersA = new Set((jokers ?? []).filter((j) => j.user_id === idA).map((j) => j.match_id))
     const jokersB = new Set((jokers ?? []).filter((j) => j.user_id === idB).map((j) => j.match_id))
+
+    // Exact/Toto consistent met de profielpagina berekenen (Toto = juiste
+    // 1X2-uitslag, inclusief exacte scores) i.p.v. de afwijkende stored waarde.
+    // Plus jokerpunten = het extra dat de joker oplevert. De joker verdubbelt de
+    // score, dus de bonus is de helft van de behaalde punten op die wedstrijd.
+    const calcStats = (preds: PredRow[], jset: Set<string>) => {
+      let exact = 0, toto = 0, jokerPts = 0
+      for (const p of preds) {
+        const m = p.match
+        if (!m) continue
+        if (jset.has(m.id)) jokerPts += (p.points_awarded ?? 0) / 2
+        if (!m.result_entered || m.home_score == null || m.away_score == null) continue
+        if (p.predicted_home === m.home_score && p.predicted_away === m.away_score) exact++
+        if (Math.sign(p.predicted_home - p.predicted_away) === Math.sign(m.home_score - m.away_score)) toto++
+      }
+      return { exact, toto, jokerPts }
+    }
+    const statsA = calcStats((predsA ?? []) as unknown as PredRow[], jokersA)
+    const statsB = calcStats((predsB ?? []) as unknown as PredRow[], jokersB)
+    spelerA.exactHits = statsA.exact; spelerA.correctResults = statsA.toto; spelerA.jokerPts = statsA.jokerPts
+    spelerB.exactHits = statsB.exact; spelerB.correctResults = statsB.toto; spelerB.jokerPts = statsB.jokerPts
 
     const predAByMatch: Record<string, PredRow> = {}
     for (const p of (predsA ?? []) as unknown as PredRow[]) {
@@ -206,16 +234,126 @@ export default async function VergelijkPage({
     rows.sort((x, y) => y.kickoffAt.localeCompare(x.kickoffAt)) // nieuwste eerst
     matches = rows
 
-    const answerFor = (uid: string, qid: string) =>
-      (bonusAnswers ?? []).find((ba) => ba.user_id === uid && ba.question_id === qid)?.answer ?? null
+    const bonusFor = (uid: string, qid: string) =>
+      (bonusAnswers ?? []).find((ba) => ba.user_id === uid && ba.question_id === qid) ?? null
     // Zelfde volgorde als de bonusvragenpagina: topscorer eerst, kaartenkoning laatst
     bonus = [...(preQuestions ?? [])]
       .sort((x, y) => preBonusIndex(x.question) - preBonusIndex(y.question))
-      .map((q) => ({
-        question: q.question,
-        a: answerFor(idA, q.id),
-        b: answerFor(idB, q.id),
-      }))
+      .map((q) => {
+        const ba = bonusFor(idA, q.id)
+        const bb = bonusFor(idB, q.id)
+        return {
+          question: q.question,
+          a: ba?.answer ?? null,
+          b: bb?.answer ?? null,
+          ptsA: ba?.points_awarded ?? null,
+          ptsB: bb?.points_awarded ?? null,
+        }
+      })
+
+    // ── Afgeronde groepen: head-to-head eindstand met punten ────────────────
+    const { data: groupMatchRows } = await supabase
+      .from('matches')
+      .select(`
+        id, home_score, away_score, result_entered,
+        home_team:teams!matches_home_team_id_fkey(id, name, flag_url, group_name),
+        away_team:teams!matches_away_team_id_fkey(id, name, flag_url, group_name)
+      `)
+      .eq('stage', 'group')
+
+    type GTeam = { id: string; name: string; flag_url: string | null; group_name: string }
+    type GMatch = { id: string; home: GTeam; away: GTeam; hs: number | null; as: number | null; done: boolean }
+    const teamMeta: Record<string, { name: string; flag: string | null }> = {}
+    const teamNameById: Record<string, string> = {}
+    const matchesByGroup: Record<string, GMatch[]> = {}
+    for (const m of groupMatchRows ?? []) {
+      const ht = m.home_team as GTeam | null
+      const at = m.away_team as GTeam | null
+      if (!ht || !at) continue
+      teamMeta[ht.id] = { name: ht.name, flag: ht.flag_url }
+      teamMeta[at.id] = { name: at.name, flag: at.flag_url }
+      teamNameById[ht.id] = ht.name; teamNameById[at.id] = at.name
+      ;(matchesByGroup[ht.group_name] ??= []).push({ id: m.id, home: ht, away: at, hs: m.home_score, as: m.away_score, done: m.result_entered })
+    }
+
+    // matchId → voorspelde uitslag per speler
+    const predScore = (preds: PredRow[]): Record<string, { h: number; a: number }> => {
+      const r: Record<string, { h: number; a: number }> = {}
+      for (const p of preds) if (p.match) r[p.match.id] = { h: p.predicted_home, a: p.predicted_away }
+      return r
+    }
+    const scoreA = predScore((predsA ?? []) as unknown as PredRow[])
+    const scoreB = predScore((predsB ?? []) as unknown as PredRow[])
+
+    // Eindrangschikking (teamId[]) op basis van een score-getter, met FIFA-tiebreak
+    const orderFromScores = (gms: GMatch[], getScore: (gm: GMatch) => { h: number; a: number } | null): string[] => {
+      const st: Record<string, TeamStat> = {}
+      const h2h: { homeTeamId: string; awayTeamId: string; homeGoals: number; awayGoals: number }[] = []
+      for (const gm of gms) { st[gm.home.id] ??= { points: 0, gd: 0, gf: 0 }; st[gm.away.id] ??= { points: 0, gd: 0, gf: 0 } }
+      for (const gm of gms) {
+        const sc = getScore(gm)
+        if (!sc) continue
+        const { h, a } = sc
+        st[gm.home.id].gf += h; st[gm.home.id].gd += h - a
+        st[gm.away.id].gf += a; st[gm.away.id].gd += a - h
+        if (h > a) st[gm.home.id].points += 3
+        else if (h < a) st[gm.away.id].points += 3
+        else { st[gm.home.id].points += 1; st[gm.away.id].points += 1 }
+        h2h.push({ homeTeamId: gm.home.id, awayTeamId: gm.away.id, homeGoals: h, awayGoals: a })
+      }
+      return sortGroupStandings(Object.entries(st) as [string, TeamStat][], h2h, teamNameById).map(([id]) => id)
+    }
+
+    const GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+    for (const g of GROUPS) {
+      const gms = matchesByGroup[g]
+      if (!gms || gms.length < 6 || !gms.every((m) => m.done)) continue
+      const actualOrder = orderFromScores(gms, (gm) => (gm.hs != null && gm.as != null ? { h: gm.hs, a: gm.as } : null))
+      const sideFor = (scoreMap: Record<string, { h: number; a: number }>) => {
+        const order = orderFromScores(gms, (gm) => scoreMap[gm.id] ?? null)
+        return order.map((teamId, i) => ({
+          name: teamMeta[teamId]?.name ?? '?',
+          flag: teamMeta[teamId]?.flag ?? null,
+          pts: teamId === actualOrder[i] ? 5 : 0,
+        }))
+      }
+      groepsfase.push({ group: g, a: sideFor(scoreA), b: sideFor(scoreB) })
+    }
+
+    // ── Knockout-voorspelling (halve finales, finale, 3e plek, kampioen) ────
+    // Elk slot bewaart de voorspelde winnaar: KF 97-100, HF 101-102, 3e 103,
+    // finale 104. De HF-teams zijn de KF-winnaars, de finalisten de HF-winnaars.
+    const KO_SLOTS = [97, 98, 99, 100, 101, 102, 103, 104]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: brackets } = await (supabase as any)
+      .from('bracket_predictions')
+      .select('user_id, slot, predicted_team_id')
+      .in('user_id', [idA, idB])
+      .in('slot', KO_SLOTS)
+    type BracketRow = { user_id: string; slot: number; predicted_team_id: string | null }
+    const bracketRows = (brackets ?? []) as BracketRow[]
+    const koTeamIds = [...new Set(bracketRows.map((b) => b.predicted_team_id).filter(Boolean))] as string[]
+    const { data: koTeamRows } = koTeamIds.length
+      ? await supabase.from('teams').select('id, name, flag_url').in('id', koTeamIds)
+      : { data: [] }
+    const koTeamById: Record<string, { name: string; flag: string | null }> = {}
+    for (const t of koTeamRows ?? []) koTeamById[t.id] = { name: t.name, flag: t.flag_url }
+
+    const buildKo = (uid: string): KnockoutSide | null => {
+      const pick: Record<number, { name: string; flag: string | null } | null> = {}
+      for (const b of bracketRows) {
+        if (b.user_id === uid) pick[b.slot] = b.predicted_team_id ? koTeamById[b.predicted_team_id] ?? null : null
+      }
+      if (!KO_SLOTS.some((s) => pick[s])) return null
+      return {
+        sf1: [pick[97] ?? null, pick[98] ?? null], sf1Winner: pick[101] ?? null,
+        sf2: [pick[99] ?? null, pick[100] ?? null], sf2Winner: pick[102] ?? null,
+        finalists: [pick[101] ?? null, pick[102] ?? null], champion: pick[104] ?? null,
+        third: pick[103] ?? null,
+      }
+    }
+    koA = buildKo(idA)
+    koB = buildKo(idB)
   }
 
   return (
@@ -229,6 +367,9 @@ export default async function VergelijkPage({
       spelerB={spelerB}
       matches={matches}
       bonus={bonus}
+      groepsfase={groepsfase}
+      koA={koA}
+      koB={koB}
     />
   )
 }

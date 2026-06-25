@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { AvatarCircle } from '@/components/avatar-circle'
 
-// Statistieken waarop de stand kan worden ingezien (alleen Ennovate-poule).
+// Statistieken waarop de stand kan worden ingezien.
 // 'normaal' toont de standaard tussenstand (podium + volledige tabel); de overige
 // herrangschikken de deelnemers op die ene stat.
 type StatKey = 'correct' | 'exact' | 'joker' | 'dag' | 'bonus'
@@ -47,7 +47,7 @@ export function StandFilter({
 }) {
   const [stat, setStat] = useState<FilterKey>('normaal')
 
-  // Zonder filter (alle poules behalve Ennovate) gewoon de standaardstand tonen.
+  // Uitgeschakeld: gewoon de standaardstand tonen zonder filterknoppen.
   if (!enabled) return <>{children}</>
 
   const base =
