@@ -12,6 +12,8 @@ type Team = { id: string; name: string; flag_url: string; group_name: string }
 type AdvancementEntry = { team_id: string; predicted_position: number }
 type BracketPickEntry = { slot: number; predicted_team_id: string; points_awarded?: number | null }
 
+type SlotDistRow = { teamId: string; place: number; winner: number }
+
 type Props = {
   teams: Team[]
   advancement: AdvancementEntry[]
@@ -19,6 +21,7 @@ type Props = {
   locked: boolean
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
+  slotDist?: Record<number, SlotDistRow[]>
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -105,7 +108,7 @@ function getDownstreamSlots(changedSlot: number): number[] {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {} }: Props) {
+export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, slotDist = {} }: Props) {
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
   // Build advancement map: group -> pos -> teamId
@@ -226,6 +229,7 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               advancedTeams={advancedSet}
               stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
               pts={ptsPerSlot[matchDef.slot] ?? null}
+              dist={slotDist[matchDef.slot] ?? null}
             />
           </Fragment>
         )
@@ -264,6 +268,7 @@ function BracketMatchCard({
   advancedTeams,
   stageHasResults,
   pts,
+  dist,
 }: {
   match: ResolvedMatch
   teamMap: Record<string, Team>
@@ -275,12 +280,17 @@ function BracketMatchCard({
   advancedTeams: Set<string>
   stageHasResults: boolean
   pts: number | null
+  dist: SlotDistRow[] | null
 }) {
   const homeTeam = match.home ? teamMap[match.home] : null
   const awayTeam = match.away ? teamMap[match.away] : null
   const bothKnown = !!homeTeam && !!awayTeam
 
   const userPick = match.winner
+
+  // "Wie koos wat" standaard open; klapt 48u na de aftrap automatisch in
+  const collapsedByTime = !!kickoffAt && Date.now() > new Date(kickoffAt).getTime() + 48 * 60 * 60 * 1000
+  const [distOpen, setDistOpen] = useState(!collapsedByTime)
   // Correct = jouw pick staat in de teams die deze ronde halen (ongeacht slot)
   const isCorrect = stageHasResults && !!userPick && advancedTeams.has(userPick)
   const isWrong   = stageHasResults && !!userPick && !advancedTeams.has(userPick)
@@ -362,6 +372,53 @@ function BracketMatchCard({
           </div>
         )}
       </div>
+
+      {/* Wie koos wat — verdeling over je eigen league (inklapbaar, auto-dicht na 48u) */}
+      {dist && dist.length > 0 && (() => {
+        const played = actualWinnerId != null
+        const toneText: Record<string, string> = { gold: 'text-wk-gold', green: 'text-wk-green', red: 'text-wk-red', grey: 'text-wk-muted' }
+        const toneOf = (teamId: string) => {
+          if (userPick === teamId) return !played ? 'gold' : teamId === actualWinnerId ? 'green' : 'red'
+          if (played && teamId === actualWinnerId) return 'green'
+          return 'grey'
+        }
+        return (
+          <div className="border-t border-white/5">
+            <button
+              type="button"
+              onClick={() => setDistOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+            >
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Wie koos wat</span>
+              <span className={`text-[10px] text-wk-muted transition-transform ${distOpen ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+            {distOpen && (
+              <div className="px-4 pb-3.5">
+                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 sm:gap-x-5 gap-y-2">
+                  <span />
+                  <span className="font-mono text-[8px] text-wk-muted/70 tracking-[0.1em] uppercase text-right">Op deze plek</span>
+                  <span className="font-mono text-[8px] text-wk-muted/70 tracking-[0.1em] uppercase text-right">Als winnaar</span>
+                  {dist.map(({ teamId, place, winner }) => {
+                    const t = teamMap[teamId]
+                    if (!t) return null
+                    const tone = toneOf(teamId)
+                    return (
+                      <Fragment key={teamId}>
+                        <span className="flex items-center gap-2 min-w-0" title={t.name}>
+                          <Image src={t.flag_url} alt={t.name} width={22} height={14} className="w-[22px] h-3.5 rounded-sm object-cover shrink-0" />
+                          <span className={`hidden sm:inline text-[11px] truncate ${toneText[tone]}`}>{t.name}</span>
+                        </span>
+                        <span className={`font-mono text-xs font-bold text-right ${toneText[tone]}`}>{place}x</span>
+                        <span className={`font-mono text-xs font-bold text-right ${toneText[tone]}`}>{winner}x</span>
+                      </Fragment>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }

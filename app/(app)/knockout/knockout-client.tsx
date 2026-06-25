@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition } from 'react'
 import Image from 'next/image'
 import { saveKnockoutPrediction } from '@/app/actions/knockout'
 import { formatInAmsterdam } from '@/lib/format'
@@ -23,11 +23,21 @@ type AllTeam = { id: string; name: string; flag_url: string; group_name: string 
 type AdvancementEntry = { team_id: string; predicted_position: number }
 type BracketPickEntry = { slot: number; predicted_team_id: string }
 
+// "Wie koos wat" per live KO-wedstrijd: per (actueel) team hoe vaak gekozen om
+// dit duel te bereiken en hoe vaak als winnaar — over de eigen league.
+export type KoMatchDist = {
+  slot: number
+  myWinnerId: string | null
+  teams: { teamId: string; place: number; winner: number }[]
+}
+
 type Props = {
   // Live knockout matches (post-group stage)
   matches: Match[]
   liveTeams: LiveTeam[]
   livePredictions: LivePrediction[]
+  // "Wie koos wat" per bracket-slot (over de eigen league)
+  slotDist?: Record<number, { teamId: string; place: number; winner: number }[]>
   // Bracket prediction (pre-tournament)
   allTeams: AllTeam[]
   advancement: AdvancementEntry[]
@@ -58,6 +68,7 @@ export default function KnockoutClient({
   matches,
   liveTeams,
   livePredictions,
+  slotDist = {},
   allTeams,
   advancement,
   bracketPicks,
@@ -80,6 +91,7 @@ export default function KnockoutClient({
         locked={bracketLocked}
         actualWinners={actualWinners}
         advancedFromStage={advancedFromStage}
+        slotDist={slotDist}
       />
 
       {/* Puntentelling — onderaan, men kent de regels inmiddels */}
@@ -94,10 +106,12 @@ function LiveSection({
   matches,
   teams,
   predictions,
+  koDist,
 }: {
   matches: Match[]
   teams: LiveTeam[]
   predictions: LivePrediction[]
+  koDist: Record<string, KoMatchDist>
 }) {
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
   const predMap = Object.fromEntries(predictions.map((p) => [p.match_id, p]))
@@ -183,6 +197,7 @@ function LiveSection({
             homeTeam={match.home_team_id ? teamMap[match.home_team_id] : null}
             awayTeam={match.away_team_id ? teamMap[match.away_team_id] : null}
             prediction={predMap[match.id] ?? null}
+            dist={koDist[match.id] ?? null}
           />
         ))}
       </div>
@@ -195,11 +210,13 @@ function LiveMatchCard({
   homeTeam,
   awayTeam,
   prediction,
+  dist,
 }: {
   match: Match
   homeTeam: LiveTeam | null
   awayTeam: LiveTeam | null
   prediction: LivePrediction | null
+  dist: KoMatchDist | null
 }) {
   const [isPending, startTransition] = useTransition()
   const [localWinnerId, setLocalWinnerId] = useState(prediction?.predicted_winner_id ?? null)
@@ -208,6 +225,10 @@ function LiveMatchCard({
   const kickoff = new Date(match.kickoff_at)
   const closed  = kickoff <= new Date()
   const pts     = prediction?.points_awarded
+
+  // "Wie koos wat" is standaard open; klapt automatisch in 48u na de aftrap.
+  const collapsedByTime = Date.now() > kickoff.getTime() + 48 * 60 * 60 * 1000
+  const [distOpen, setDistOpen] = useState(!collapsedByTime)
 
   function pick(teamId: string) {
     if (closed || isPending) return
@@ -285,6 +306,56 @@ function LiveMatchCard({
           </p>
         )}
       </div>
+
+      {/* Wie koos wat — verdeling over je eigen league (inklapbaar, auto-dicht na 48u) */}
+      {dist && !teamsUnknown && (() => {
+        const teamById = (id: string) => (homeTeam?.id === id ? homeTeam : awayTeam?.id === id ? awayTeam : null)
+        const played = match.result_entered
+        const actualWinnerId = played && homeTeam && awayTeam
+          ? (match.home_score! > match.away_score! ? homeTeam.id : awayTeam.id)
+          : null
+        const toneText: Record<string, string> = { gold: 'text-wk-gold', green: 'text-wk-green', red: 'text-wk-red', grey: 'text-wk-muted' }
+        const toneOf = (teamId: string) => {
+          if (dist.myWinnerId === teamId) return !played ? 'gold' : teamId === actualWinnerId ? 'green' : 'red'
+          if (played && teamId === actualWinnerId) return 'green'
+          return 'grey'
+        }
+        return (
+          <div className="border-t border-white/5">
+            <button
+              type="button"
+              onClick={() => setDistOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-5 py-2.5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+            >
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Wie koos wat</span>
+              <span className={`text-[10px] text-wk-muted transition-transform ${distOpen ? 'rotate-180' : ''}`}>▾</span>
+            </button>
+            {distOpen && (
+              <div className="px-5 pb-3.5">
+                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 sm:gap-x-5 gap-y-2">
+                  <span />
+                  <span className="font-mono text-[8px] text-wk-muted/70 tracking-[0.1em] uppercase text-right">Op deze plek</span>
+                  <span className="font-mono text-[8px] text-wk-muted/70 tracking-[0.1em] uppercase text-right">Als winnaar</span>
+                  {dist.teams.map(({ teamId, place, winner }) => {
+                    const t = teamById(teamId)
+                    if (!t) return null
+                    const tone = toneOf(teamId)
+                    return (
+                      <Fragment key={teamId}>
+                        <span className="flex items-center" title={t.name}>
+                          <Image src={t.flag_url} alt={t.name} width={24} height={16} className="w-6 h-4 rounded-sm object-cover" />
+                        </span>
+                        <span className={`font-mono text-xs font-bold text-right ${toneText[tone]}`}>{place}x</span>
+                        <span className={`font-mono text-xs font-bold text-right ${toneText[tone]}`}>{winner}x</span>
+                      </Fragment>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {toast && (
         <div className={`px-5 py-2 font-mono text-[10px] font-semibold text-white tracking-[0.12em] uppercase ${toast.ok ? 'bg-wk-green' : 'bg-wk-red'}`}>

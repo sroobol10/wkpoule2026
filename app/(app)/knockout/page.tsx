@@ -1,8 +1,35 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getActivePlayerIds } from '@/lib/active-players'
+import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
 import KnockoutClient from './knockout-client'
 
 const LIVE_STAGES = ['r32', 'r16', 'qf', 'sf', 'final']
+
+// Server-versie van de bracket-resolutie (zelfde logica als computeBracket in de
+// client): los per deelnemer de deelnemers + winnaar van elk slot op.
+function resolveMemberBracket(
+  advMap: Record<string, Record<number, string>>,
+  thirdAssignment: Record<number, string>,
+  picks: Record<number, string>,
+): Record<number, { home: string | null; away: string | null; winner: string | null; loser: string | null }> {
+  const resolved: Record<number, { home: string | null; away: string | null; winner: string | null; loser: string | null }> = {}
+  const resolveSeed = (seed: string): string | null => {
+    if (seed.startsWith('W')) return resolved[parseInt(seed.slice(1))]?.winner ?? null
+    if (seed.startsWith('L')) return resolved[parseInt(seed.slice(1))]?.loser ?? null
+    if (seed.startsWith('3_')) { const g = thirdAssignment[parseInt(seed.slice(2))]; return g ? (advMap[g]?.[3] ?? null) : null }
+    const pos = parseInt(seed[0]); const group = seed[1]
+    return advMap[group]?.[pos] ?? null
+  }
+  for (const m of BRACKET) {
+    const home = resolveSeed(m.homeSeed)
+    const away = resolveSeed(m.awaySeed)
+    const winner = picks[m.slot] ?? null
+    const loser = winner ? (winner === home ? away : home) : null
+    resolved[m.slot] = { home, away, winner, loser }
+  }
+  return resolved
+}
 
 export default async function KnockoutPage() {
   const supabase = await createClient()
@@ -108,11 +135,98 @@ export default async function KnockoutPage() {
     third_place: thirdWinner ? [thirdWinner] : [],
   }
 
+  // ── "Wie koos wat" per live KO-wedstrijd (over je eigen league) ─────────────
+  // Per deelnemer resolven we de volledige bracket en tellen we, per actueel team
+  // in elk live duel: hoe vaak gekozen op deze plek (bereikt dit duel) en hoe vaak
+  // als winnaar van dit duel.
+  const activeIds = await getActivePlayerIds(supabase)
+  const { data: myMemberships } = await supabase
+    .from('poule_members')
+    .select('poules(id, is_general)')
+    .eq('user_id', user.id)
+  type PouleRef = { id: string; is_general: boolean }
+  const privePouleIds = (myMemberships ?? [])
+    .map((m) => m.poules as PouleRef | null)
+    .filter((p): p is PouleRef => !!p && !p.is_general)
+    .map((p) => p.id)
+  let memberIds = activeIds
+  if (privePouleIds.length > 0) {
+    const { data: lm } = await supabase.from('poule_members').select('user_id').in('poule_id', privePouleIds)
+    const set = new Set((lm ?? []).map((m) => m.user_id))
+    memberIds = new Set([...activeIds].filter((id) => set.has(id)))
+  }
+
+  const groupByTeam: Record<string, string> = {}
+  for (const t of allTeams ?? []) if (t.group_name) groupByTeam[t.id] = t.group_name
+
+  // Alle bracket-keuzes + groepsvoorspellingen van de league-leden (gepagineerd)
+  async function fetchAll<T>(make: (from: number, to: number) => PromiseLike<{ data: T[] | null }>): Promise<T[]> {
+    const out: T[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data } = await make(from, from + 999)
+      const rows = data ?? []
+      out.push(...rows)
+      if (rows.length < 1000) break
+    }
+    return out
+  }
+  const memberArr = [...memberIds]
+  const [allBracket, allAdv] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetchAll<{ user_id: string; slot: number; predicted_team_id: string }>((f, t) => (supabase as any)
+      .from('bracket_predictions').select('user_id, slot, predicted_team_id').in('user_id', memberArr).range(f, t)),
+    fetchAll<{ user_id: string; team_id: string; predicted_position: number }>((f, t) => supabase
+      .from('group_advancement').select('user_id, team_id, predicted_position').in('user_id', memberArr).range(f, t)),
+  ])
+
+  // Groepeer per deelnemer
+  const picksByUser: Record<string, Record<number, string>> = {}
+  for (const b of allBracket) (picksByUser[b.user_id] ??= {})[b.slot] = b.predicted_team_id
+  const advByUser: Record<string, { advMap: Record<string, Record<number, string>>; thirdGroups: Set<string> }> = {}
+  for (const a of allAdv) {
+    const g = groupByTeam[a.team_id]
+    if (!g) continue
+    const u = (advByUser[a.user_id] ??= { advMap: {}, thirdGroups: new Set() })
+    ;(u.advMap[g] ??= {})[a.predicted_position] = a.team_id
+    if (a.predicted_position === 3) u.thirdGroups.add(g)
+  }
+
+  // Tel per slot/team: hoe vaak op deze plek (deelnemer) en als winnaar.
+  const placeBySlot: Record<number, Record<string, number>> = {}
+  const winnerBySlot: Record<number, Record<string, number>> = {}
+  for (const uid of memberArr) {
+    const picks = picksByUser[uid] ?? {}
+    const adv = advByUser[uid]
+    if (!adv && Object.keys(picks).length === 0) continue
+    const advMap = adv?.advMap ?? {}
+    const thirdAssignment = assignThirdPlaceSlots([...(adv?.thirdGroups ?? [])].sort())
+    const resolved = resolveMemberBracket(advMap, thirdAssignment, picks)
+    for (const b of BRACKET) {
+      const r = resolved[b.slot]
+      if (!r) continue
+      for (const t of [r.home, r.away]) if (t) (placeBySlot[b.slot] ??= {})[t] = ((placeBySlot[b.slot]?.[t]) ?? 0) + 1
+      if (r.winner) (winnerBySlot[b.slot] ??= {})[r.winner] = ((winnerBySlot[b.slot]?.[r.winner]) ?? 0) + 1
+    }
+  }
+
+  // Per slot een gesorteerde lijst (hoogste winnaar-telling eerst)
+  const koSlotDist: Record<number, { teamId: string; place: number; winner: number }[]> = {}
+  for (const b of BRACKET) {
+    const placeM = placeBySlot[b.slot] ?? {}
+    const winM = winnerBySlot[b.slot] ?? {}
+    const ids = new Set([...Object.keys(placeM), ...Object.keys(winM)])
+    const rows = [...ids]
+      .map((teamId) => ({ teamId, place: placeM[teamId] ?? 0, winner: winM[teamId] ?? 0 }))
+      .sort((a, c) => c.winner - a.winner || c.place - a.place)
+    if (rows.length) koSlotDist[b.slot] = rows
+  }
+
   return (
     <KnockoutClient
       matches={matches ?? []}
       liveTeams={liveTeams ?? []}
       livePredictions={livePredictions ?? []}
+      slotDist={koSlotDist}
       allTeams={allTeams ?? []}
       advancement={advancement ?? []}
       bracketPicks={bracketPicks ?? []}

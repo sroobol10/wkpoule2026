@@ -23,7 +23,7 @@ export type BonusQuestionStat = {
   correct_answer_set: boolean
   total_answers: number
   participation_pct: number
-  top_answers: { answer: string; count: number; pct: number; is_correct: boolean; is_mine: boolean }[]
+  top_answers: { answer: string; count: number; pct: number; points: number | null; is_correct: boolean; is_mine: boolean }[]
 }
 
 export type JokerStat = {
@@ -136,7 +136,10 @@ export default function StatsClient({
   const preBonusStats = bonusQuestionStats
     .filter((q) => q.type === 'pre_tournament')
     .sort((a, b) => preBonusIndex(a.question) - preBonusIndex(b.question))
-  const dailyBonusStats = bonusQuestionStats.filter((q) => q.type === 'daily')
+  // Dagelijkse bonusvragen: meest recente bovenaan (omgekeerd op unlock_date)
+  const dailyBonusStats = bonusQuestionStats
+    .filter((q) => q.type === 'daily')
+    .sort((a, b) => (b.unlock_date ?? '').localeCompare(a.unlock_date ?? ''))
 
   return (
     <div className="space-y-8">
@@ -436,28 +439,53 @@ const dropFirstName = (name: string) => {
   return parts.length > 1 ? parts.slice(1).join(' ') : name
 }
 
+// Slug voor de aparte detailpagina (/statistiek/[key]) — alleen voor deze stats
+function statDetailKey(question: string): string | null {
+  const q = question.toLowerCase()
+  if (q.includes('topscorer')) return 'topscorer'
+  if (q.includes('beste speler')) return 'beste-speler'
+  if (q.includes('gedoseer')) return 'gedoseerde-groepsfase'
+  if (q.includes('goalgettergigant')) return 'goalgettergigant'
+  if (q.includes('desastreuze')) return 'desastreuze-defensie'
+  if (q.includes('kaartenkoning')) return 'kaartenkoning'
+  return null
+}
+
 function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamFlags: Record<string, string> }) {
   const q = stat.question.toLowerCase()
   const playerBased = q.includes('topscorer') || q.includes('beste speler')
   const countryBased = q.includes('goalgettergigant') || q.includes('desastreuze') || q.includes('kaartenkoning')
+  const detailKey = statDetailKey(stat.question)
   const mobileLabel = (answer: string) => {
     if (playerBased) return dropFirstName(answer)
     if (countryBased) return COUNTRY_ABBR_MOBILE[answer] ?? answer
     return answer
   }
+  const Header = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-wk-text leading-snug">{stat.question}</p>
+        {detailKey && <span className="font-mono text-[10px] text-wk-gold tracking-[0.14em] uppercase shrink-0 mt-0.5">Wie koos wat →</span>}
+      </div>
+      <p className="font-mono text-[10px] text-wk-muted tracking-[0.1em] mt-0.5">
+        {stat.total_answers} {stat.total_answers === 1 ? 'antwoord' : 'antwoorden'}
+      </p>
+    </>
+  )
   return (
     <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-white/5">
-        <p className="text-sm font-semibold text-wk-text leading-snug">{stat.question}</p>
-        <p className="font-mono text-[10px] text-wk-muted tracking-[0.1em] mt-0.5">
-          {stat.total_answers} {stat.total_answers === 1 ? 'antwoord' : 'antwoorden'}
-        </p>
-      </div>
+      {detailKey ? (
+        <Link href={`/statistiek/${detailKey}`} className="block px-5 py-3.5 border-b border-white/5 hover:bg-white/[0.03] transition-colors">
+          {Header}
+        </Link>
+      ) : (
+        <div className="px-5 py-3.5 border-b border-white/5">{Header}</div>
+      )}
 
       {stat.top_answers.length > 0 ? (
         /* Grid met gedeelde naamkolom (auto) zodat alle balken op dezelfde x starten */
         <div className="px-5 py-3 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 sm:gap-x-3 gap-y-2">
-          {stat.top_answers.map(({ answer, count, pct, is_correct, is_mine }) => {
+          {stat.top_answers.map(({ answer, count, pct, points, is_correct, is_mine }) => {
             const flag = answerFlag(stat.question, answer, teamFlags)
             // Kleurregels:
             // - correct antwoord → groen (met ✓)
@@ -485,14 +513,13 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
                     <span className="sm:hidden">{mobileLabel(answer)}</span>
                     <span className="hidden sm:inline">{answer}</span>
                     {is_correct && <span className="ml-1 text-wk-green">✓</span>}
-                    {is_mine && <span className="ml-1 opacity-70">·&nbsp;jij</span>}
                   </span>
                 </div>
                 <div className="min-w-[28px] h-1.5 bg-white/10 rounded-full overflow-hidden">
                   <AnimatedBar pct={pct} color={barColor} />
                 </div>
                 <span className="font-mono text-[9px] text-wk-muted text-right whitespace-nowrap">
-                  {count}× ({pct}%)
+                  {count}×{countryBased ? ` (${points ?? 0} pt)` : playerBased ? '' : ` (${pct}%)`}
                 </span>
               </Fragment>
             )

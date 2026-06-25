@@ -296,6 +296,34 @@ export default async function StatistiekenPage({
     answersByQuestion[a.question_id].push(a.answer)
   }
 
+  // Live landenpunten per categorie (zelfde berekening als awardCountryBonus in de
+  // admin): goals voor (goalgettergigant), tegen (desastreuze defensie) en kaarten
+  // (kaartenkoning: geel = 1, rood = 2). Voor weergave naast de landenvragen.
+  const [{ data: scoreMatches }, { data: cardRows }, { data: teamIdNames }] = await Promise.all([
+    supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score').eq('result_entered', true),
+    supabase.from('match_cards').select('team_id, yellow_cards, red_cards'),
+    supabase.from('teams').select('id, name'),
+  ])
+  const nameById: Record<string, string> = {}
+  for (const t of teamIdNames ?? []) nameById[t.id] = t.name
+  const goalsForByName: Record<string, number> = {}
+  const goalsAgainstByName: Record<string, number> = {}
+  const cardsByName: Record<string, number> = {}
+  for (const m of scoreMatches ?? []) {
+    if (m.home_team_id && m.home_score != null) {
+      const n = nameById[m.home_team_id]
+      if (n) { goalsForByName[n] = (goalsForByName[n] ?? 0) + m.home_score; goalsAgainstByName[n] = (goalsAgainstByName[n] ?? 0) + (m.away_score ?? 0) }
+    }
+    if (m.away_team_id && m.away_score != null) {
+      const n = nameById[m.away_team_id]
+      if (n) { goalsForByName[n] = (goalsForByName[n] ?? 0) + m.away_score; goalsAgainstByName[n] = (goalsAgainstByName[n] ?? 0) + (m.home_score ?? 0) }
+    }
+  }
+  for (const c of (cardRows ?? []) as { team_id: string; yellow_cards: number; red_cards: number }[]) {
+    const n = nameById[c.team_id]
+    if (n) cardsByName[n] = (cardsByName[n] ?? 0) + (c.yellow_cards ?? 0) + (c.red_cards ?? 0) * 2
+  }
+
   const bonusQuestionStats: BonusQuestionStat[] = []
   for (const q of bonusQuestions ?? []) {
     const closed = q.type === 'pre_tournament'
@@ -313,9 +341,22 @@ export default async function StatistiekenPage({
     const total = answers.length
     const correctLower = q.correct_answer?.toLowerCase() ?? null
     const myAnswerLower = myAnswerByQuestion[q.id]?.toLowerCase() ?? null
-    // Alle antwoorden, oplopend gesorteerd (numeriek waar mogelijk)
+
+    // Topscorer / Beste speler / de drie landenvragen: sorteren op aantal keer
+    // gekozen (hoog→laag). Landenvragen tonen bovendien hun huidige puntentaantal.
+    const ql = q.question.toLowerCase()
+    const byCount = ['topscorer', 'beste speler', 'goalgettergigant', 'desastreuze', 'kaartenkoning'].some((k) => ql.includes(k))
+    const pointsMap: Record<string, number> | null = ql.includes('goalgettergigant')
+      ? goalsForByName
+      : ql.includes('desastreuze')
+        ? goalsAgainstByName
+        : ql.includes('kaartenkoning')
+          ? cardsByName
+          : null
+
     const topAnswers = Object.entries(countMap)
-      .sort(([a], [b]) => {
+      .sort(([a, ca], [b, cb]) => {
+        if (byCount) return cb - ca || a.localeCompare(b, 'nl', { sensitivity: 'base' })
         const na = parseFloat(a)
         const nb = parseFloat(b)
         if (!isNaN(na) && !isNaN(nb)) return na - nb
@@ -325,6 +366,7 @@ export default async function StatistiekenPage({
         answer,
         count,
         pct: total > 0 ? Math.round((count / total) * 100) : 0,
+        points: pointsMap ? (pointsMap[answer] ?? 0) : null,
         is_correct: correctLower !== null && answer.toLowerCase() === correctLower,
         is_mine: myAnswerLower !== null && answer.toLowerCase() === myAnswerLower,
       }))

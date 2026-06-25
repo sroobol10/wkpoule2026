@@ -98,7 +98,6 @@ export async function PouleStand({
   // Bij ex aequo wordt de som van de betreffende prijzen gelijk verdeeld.
   const isSchmitt = poule.name.toLowerCase().includes('schmitt')
   // Ennovate toont de legenda ónder de stand; de overige poules erboven (onder de titel)
-  const isEnnovate = poule.id === ENNOVATE_POULE_ID || poule.name.toLowerCase().includes('ennovate')
   const prijsByIndex: (string | null)[] = new Array(ranked.length).fill(null)
   if (isSchmitt) {
     let i = 0
@@ -274,8 +273,6 @@ export async function PouleStand({
           <p className="font-mono text-xs text-wk-muted mt-1 tracking-[0.12em]">
             {ranked.length} {ranked.length === 1 ? 'deelnemer' : 'deelnemers'}
           </p>
-          {/* Legenda onder de titel (desktop) — niet bij Ennovate, die staat onder de stand */}
-          {!isEnnovate && <KlassementLegenda className="hidden md:grid mt-4" />}
         </div>
       )}
 
@@ -498,8 +495,8 @@ export async function PouleStand({
 
       </StandFilter>
 
-      {/* Legenda onder de stand — mobiel altijd, op desktop alleen bij Ennovate */}
-      <KlassementLegenda className={isEnnovate ? '' : 'md:hidden'} />
+      {/* Legenda onder de stand — voor iedereen, mobiel én desktop */}
+      <KlassementLegenda />
 
       </LeaderboardTabs>
     </div>

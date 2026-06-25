@@ -1666,7 +1666,8 @@ function GroupEindstandPanel({
         {t.flag_url && (
           <Image src={t.flag_url} alt={t.name} width={20} height={14} className="rounded-sm object-cover w-5 h-[14px] shrink-0" />
         )}
-        <span className="text-xs font-semibold text-wk-text truncate">{t.name}</span>
+        {/* Mobiel: alleen de vlag; vanaf sm ook de landnaam */}
+        <span className="hidden sm:inline text-xs font-semibold text-wk-text truncate">{t.name}</span>
       </span>
     );
   };
@@ -1679,13 +1680,14 @@ function GroupEindstandPanel({
       <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
         <div className="px-5 py-3 border-b border-white/5">
           <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
-            Eindstand groep {group}
+            Eindstand
           </span>
         </div>
         <div className="grid grid-cols-[1.5rem_1fr_1fr_2.5rem] items-center gap-3 px-5 py-2 border-b border-white/5">
-          {["#", "Prognose", "Werkelijk", "Pnt"].map((h) => (
-            <span key={h} className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase">{h}</span>
-          ))}
+          <span className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase text-center">#</span>
+          <span className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase">Prognose</span>
+          <span className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase">Werkelijk</span>
+          <span className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase text-center">Pnt</span>
         </div>
         <div className="divide-y divide-white/5">
           {[0, 1, 2, 3].map((i) => {
@@ -1695,10 +1697,10 @@ function GroupEindstandPanel({
             const correct = predId != null && predId === actualId;
             return (
               <div key={pos} className="grid grid-cols-[1.5rem_1fr_1fr_2.5rem] items-center gap-3 px-5 py-2.5">
-                <span className={`font-mono text-xs text-center ${pos <= 2 ? "text-wk-green font-bold" : "text-wk-muted"}`}>{pos}</span>
+                <span className="font-mono text-xs text-center text-wk-muted">{pos}</span>
                 <FlagName teamId={predId} />
                 <FlagName teamId={actualId} />
-                <span className={`font-mono text-[11px] font-bold text-right ${correct ? "text-wk-green" : "text-wk-muted/50"}`}>
+                <span className={`font-mono text-[11px] font-bold text-center ${correct ? "text-wk-green" : "text-wk-muted/50"}`}>
                   {correct ? 5 : 0}
                 </span>
               </div>
@@ -1707,13 +1709,12 @@ function GroupEindstandPanel({
         </div>
       </div>
 
-      {/* Wie koos wat — verdeling van de voorspelde eindposities in je league */}
+      {/* Wie koos wat — verdeling van de voorspelde eindposities in je league.
+          Kleuren conform de groepswedstrijden: eigen keuze groen bij goed, rood bij
+          fout; de juiste keuze altijd groen; de rest grijs. */}
       <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
-        <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+        <div className="px-5 py-3 border-b border-white/5">
           <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Wie koos wat</span>
-          {totalVoters > 0 && (
-            <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest uppercase">{totalVoters} deelnemers</span>
-          )}
         </div>
         {totalVoters === 0 ? (
           <p className="px-5 py-4 font-mono text-[10px] text-wk-muted tracking-[0.12em]">
@@ -1724,32 +1725,36 @@ function GroupEindstandPanel({
             {[0, 1, 2, 3].map((i) => {
               const pos = i + 1;
               const actualId = actualOrder[i];
+              const ownId = predOrder[i];
+              const ownCorrect = ownId != null && ownId === actualId;
               const picks = dist?.positions[i] ?? [];
               return (
                 <div key={pos} className="px-5 py-3">
-                  <p className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase mb-2">Plek {pos}</p>
+                  <p className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase mb-2">#{pos}</p>
                   <div className="space-y-1.5">
                     {picks.map(({ teamId, count }) => {
                       const t = teamMap[teamId];
                       if (!t) return null;
                       const pct = Math.round((count / totalVoters) * 100);
+                      const isOwn = teamId === ownId;
                       const isActual = teamId === actualId;
+                      const tone = isOwn ? (ownCorrect ? "green" : "red") : isActual ? "green" : "grey";
+                      const textCls = tone === "green" ? "text-wk-green font-semibold" : tone === "red" ? "text-wk-red font-semibold" : "text-wk-soft";
+                      const barCls = tone === "green" ? "bg-wk-green" : tone === "red" ? "bg-wk-red/70" : "bg-white/15";
                       return (
                         <div key={teamId} className="flex items-center gap-2">
                           {t.flag_url && (
                             <Image src={t.flag_url} alt={t.name} width={18} height={12} className="rounded-sm object-cover w-[18px] h-3 shrink-0" />
                           )}
-                          <span className={`text-[11px] w-24 shrink-0 truncate ${isActual ? "text-wk-green font-semibold" : "text-wk-soft"}`}>
+                          {/* Mobiel: alleen de vlag; vanaf sm de landnaam */}
+                          <span className={`hidden sm:inline-block text-[11px] w-24 shrink-0 truncate ${textCls}`}>
                             {t.name}
                           </span>
                           <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${isActual ? "bg-wk-green" : "bg-wk-red/60"}`}
-                              style={{ width: `${pct}%` }}
-                            />
+                            <div className={`h-full rounded-full ${barCls}`} style={{ width: `${pct}%` }} />
                           </div>
-                          <span className="font-mono text-[10px] text-wk-muted w-10 text-right shrink-0">
-                            {count}/{totalVoters}
+                          <span className="font-mono text-[10px] text-wk-muted w-9 text-right shrink-0">
+                            {count}x
                           </span>
                         </div>
                       );

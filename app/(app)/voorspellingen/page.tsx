@@ -137,6 +137,18 @@ export default async function VoorspellingenPage() {
     userGroupPts[p.user_id][group] = (userGroupPts[p.user_id][group] ?? 0) + (p.points_awarded ?? 0)
   }
 
+  // Tel de groepsstand-punten (eindstand per groep) bij de per-groep totalen op,
+  // zodat het mini-klassement per groep de volledige groepspunten toont.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: standingsScores } = await (supabase as any)
+    .from('group_standings_scores')
+    .select('user_id, group_name, points')
+  for (const s of (standingsScores ?? []) as { user_id: string; group_name: string; points: number }[]) {
+    if (!allUserIds.has(s.user_id)) continue
+    if (!userGroupPts[s.user_id]) userGroupPts[s.user_id] = {}
+    userGroupPts[s.user_id][s.group_name] = (userGroupPts[s.user_id][s.group_name] ?? 0) + (s.points ?? 0)
+  }
+
   // ── Uitslagverdeling per wedstrijd ────────────────────────────────────────
   // Geteld over de actieve leden van je eigen league(s); activeIds is eerder
   // in deze functie al opgehaald voor de mini-klassementen
