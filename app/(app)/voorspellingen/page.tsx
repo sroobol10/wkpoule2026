@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getActivePlayerIds } from '@/lib/active-players'
-import PredictionsClient, { type MatchDist } from './predictions-client'
+import { sortGroupStandings, type TeamStat } from '@/lib/group-standings'
+import PredictionsClient, { type MatchDist, type GroupPickDist } from './predictions-client'
 
 export default async function VoorspellingenPage() {
   const supabase = await createClient()
@@ -200,6 +201,65 @@ export default async function VoorspellingenPage() {
     return { pouleId: poule.pouleId, byGroup }
   })
 
+  // ── Verdeling voorspelde eindstand per groep ──────────────────────────────
+  // Per groep, per positie (1-4): welke landen voorspelden de league-leden daar,
+  // en hoe vaak. Gebruikt voor de "Wie koos wat"-tabel zodra een groep is
+  // afgerond. Geteld over dezelfde actieve league-leden als de uitslagverdeling.
+  const teamNameById: Record<string, string> = {}
+  for (const t of teams ?? []) teamNameById[t.id] = t.name
+
+  type GMatch = { home: string; away: string; group: string }
+  const groupMatchById: Record<string, GMatch> = {}
+  for (const m of matches ?? []) {
+    const ht = m.home_team as { id: string; group_name: string } | null
+    const at = m.away_team as { id: string; group_name: string } | null
+    if (ht && at) groupMatchById[m.id] = { home: ht.id, away: at.id, group: ht.group_name }
+  }
+
+  // userId → group → voorspelde uitslagen van die groep
+  type UserGroupPred = { home: string; away: string; ph: number; pa: number }
+  const predsByUserGroup: Record<string, Record<string, UserGroupPred[]>> = {}
+  for (const p of allPreds) {
+    if (!distMemberIds.has(p.user_id)) continue
+    const gm = groupMatchById[p.match_id]
+    if (!gm) continue
+    ;(((predsByUserGroup[p.user_id] ??= {})[gm.group] ??= [])).push({
+      home: gm.home, away: gm.away, ph: p.predicted_home, pa: p.predicted_away,
+    })
+  }
+
+  const groupPickDist: Record<string, GroupPickDist> = {}
+  for (const group of GROUPS_LIST) {
+    const dist: Record<string, number>[] = [{}, {}, {}, {}]
+    let voters = 0
+    for (const byGroup of Object.values(predsByUserGroup)) {
+      const preds = byGroup[group]
+      if (!preds || preds.length < 6) continue
+      const st: Record<string, TeamStat> = {}
+      const h2h: { homeTeamId: string; awayTeamId: string; homeGoals: number; awayGoals: number }[] = []
+      for (const pr of preds) {
+        st[pr.home] ??= { points: 0, gd: 0, gf: 0 }
+        st[pr.away] ??= { points: 0, gd: 0, gf: 0 }
+        h2h.push({ homeTeamId: pr.home, awayTeamId: pr.away, homeGoals: pr.ph, awayGoals: pr.pa })
+        st[pr.home].gf += pr.ph; st[pr.home].gd += pr.ph - pr.pa
+        st[pr.away].gf += pr.pa; st[pr.away].gd += pr.pa - pr.ph
+        if (pr.ph > pr.pa) st[pr.home].points += 3
+        else if (pr.ph < pr.pa) st[pr.away].points += 3
+        else { st[pr.home].points += 1; st[pr.away].points += 1 }
+      }
+      const sorted = sortGroupStandings(Object.entries(st) as [string, TeamStat][], h2h, teamNameById)
+      if (sorted.length < 4) continue
+      voters++
+      sorted.slice(0, 4).forEach(([teamId], i) => { dist[i][teamId] = (dist[i][teamId] ?? 0) + 1 })
+    }
+    groupPickDist[group] = {
+      totalVoters: voters,
+      positions: dist.map((d) =>
+        Object.entries(d).map(([teamId, count]) => ({ teamId, count })).sort((a, b) => b.count - a.count)
+      ),
+    }
+  }
+
   return (
     <PredictionsClient
       matches={matches ?? []}
@@ -211,6 +271,7 @@ export default async function VoorspellingenPage() {
       pouleGroupStandings={pouleGroupStandings}
       distByMatch={distByMatch}
       jokerCountByMatch={jokerCountByMatch}
+      groupPickDist={groupPickDist}
       currentUserId={user.id}
     />
   )

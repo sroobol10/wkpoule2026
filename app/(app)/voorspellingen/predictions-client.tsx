@@ -59,6 +59,13 @@ export type MatchDist = {
   scores: { h: number; a: number; count: number }[];
 };
 
+// Verdeling voorspelde eindstand per groep: per positie (index 0 = plek 1) de
+// landen die de league-leden daar voorspelden, gesorteerd op aantal.
+export type GroupPickDist = {
+  totalVoters: number;
+  positions: { teamId: string; count: number }[][];
+};
+
 type Props = Readonly<{
   matches: Match[];
   predMap: Record<string, Prediction>;
@@ -69,6 +76,7 @@ type Props = Readonly<{
   pouleGroupStandings: PouleGroupStanding[];
   distByMatch: Record<string, MatchDist>;
   jokerCountByMatch: Record<string, number>;
+  groupPickDist: Record<string, GroupPickDist>;
   currentUserId: string;
 }>;
 
@@ -91,6 +99,7 @@ export default function PredictionsClient({
   pouleGroupStandings,
   distByMatch,
   jokerCountByMatch,
+  groupPickDist,
   currentUserId,
 }: Props) {
   const router = useRouter();
@@ -367,8 +376,19 @@ export default function PredictionsClient({
   const advancementPicks = computeAdvancementPicks();
 
   const hasActualResults = groupMatches.some((m) => m.result_entered);
+  // Eindstand is definitief zodra alle 6 groepswedstrijden een uitslag hebben
+  const eindstandKnown =
+    groupMatches.length === 6 && groupMatches.every((m) => m.result_entered);
 
-  const standingsPanel = (
+  const standingsPanel = eindstandKnown ? (
+    // Afgeronde groep: prognose + werkelijk samengevoegd, plus "wie koos wat"
+    <GroupEindstandPanel
+      group={activeGroup}
+      groupMatches={groupMatches}
+      scores={scores}
+      dist={groupPickDist[activeGroup]}
+    />
+  ) : (
     <div className="space-y-3">
       {/* Huidige stand — alleen tonen als er al uitslagen zijn */}
       {hasActualResults && (
@@ -1568,6 +1588,178 @@ function GroupStandingsInline({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Eindstand (prognose + werkelijk samengevoegd) + wie koos wat ─────────────
+// Wordt getoond zodra een groep volledig is gespeeld. Vervangt de aparte
+// "huidige stand"- en "jouw prognose"-tabellen.
+
+// Bepaal de eindrangschikking van een groep op basis van een score-getter.
+function standingOrder(
+  groupMatches: Match[],
+  getScore: (m: Match) => { h: number; a: number } | null,
+  teamNames: Record<string, string>,
+): string[] {
+  const st: Record<string, TeamStat> = {};
+  const h2h: { homeTeamId: string; awayTeamId: string; homeGoals: number; awayGoals: number }[] = [];
+  for (const m of groupMatches) {
+    if (m.home_team) st[m.home_team.id] ??= { points: 0, gd: 0, gf: 0 };
+    if (m.away_team) st[m.away_team.id] ??= { points: 0, gd: 0, gf: 0 };
+  }
+  for (const m of groupMatches) {
+    if (!m.home_team || !m.away_team) continue;
+    const sc = getScore(m);
+    if (!sc) continue;
+    const { h, a } = sc;
+    st[m.home_team.id].gf += h; st[m.home_team.id].gd += h - a;
+    st[m.away_team.id].gf += a; st[m.away_team.id].gd += a - h;
+    if (h > a) st[m.home_team.id].points += 3;
+    else if (h < a) st[m.away_team.id].points += 3;
+    else { st[m.home_team.id].points += 1; st[m.away_team.id].points += 1; }
+    h2h.push({ homeTeamId: m.home_team.id, awayTeamId: m.away_team.id, homeGoals: h, awayGoals: a });
+  }
+  return sortGroupStandings(Object.entries(st) as [string, TeamStat][], h2h, teamNames).map(([id]) => id);
+}
+
+function GroupEindstandPanel({
+  group,
+  groupMatches,
+  scores,
+  dist,
+}: {
+  group: string;
+  groupMatches: Match[];
+  scores: Record<string, { home: string; away: string }>;
+  dist?: GroupPickDist;
+}) {
+  const teamMap: Record<string, Team> = {};
+  const teamNames: Record<string, string> = {};
+  for (const m of groupMatches) {
+    if (m.home_team) { teamMap[m.home_team.id] = m.home_team; teamNames[m.home_team.id] = m.home_team.name; }
+    if (m.away_team) { teamMap[m.away_team.id] = m.away_team; teamNames[m.away_team.id] = m.away_team.name; }
+  }
+
+  // Werkelijke eindstand
+  const actualOrder = standingOrder(
+    groupMatches,
+    (m) => (m.result_entered && m.home_score != null && m.away_score != null ? { h: m.home_score, a: m.away_score } : null),
+    teamNames,
+  );
+  // Eigen prognose
+  const predOrder = standingOrder(
+    groupMatches,
+    (m) => {
+      const s = scores[m.id];
+      return s && s.home !== "" && s.away !== "" ? { h: Number(s.home), a: Number(s.away) } : null;
+    },
+    teamNames,
+  );
+
+  const FlagName = ({ teamId }: { teamId?: string }) => {
+    const t = teamId ? teamMap[teamId] : null;
+    if (!t) return <span className="text-wk-muted/50">—</span>;
+    return (
+      <span className="flex items-center gap-2 min-w-0">
+        {t.flag_url && (
+          <Image src={t.flag_url} alt={t.name} width={20} height={14} className="rounded-sm object-cover w-5 h-[14px] shrink-0" />
+        )}
+        <span className="text-xs font-semibold text-wk-text truncate">{t.name}</span>
+      </span>
+    );
+  };
+
+  const totalVoters = dist?.totalVoters ?? 0;
+
+  return (
+    <div className="space-y-3">
+      {/* Samengevoegde eindstand */}
+      <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+        <div className="px-5 py-3 border-b border-white/5">
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">
+            Eindstand groep {group}
+          </span>
+        </div>
+        <div className="grid grid-cols-[1.5rem_1fr_1fr_2.5rem] items-center gap-3 px-5 py-2 border-b border-white/5">
+          {["#", "Prognose", "Werkelijk", "Pnt"].map((h) => (
+            <span key={h} className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase">{h}</span>
+          ))}
+        </div>
+        <div className="divide-y divide-white/5">
+          {[0, 1, 2, 3].map((i) => {
+            const pos = i + 1;
+            const predId = predOrder[i];
+            const actualId = actualOrder[i];
+            const correct = predId != null && predId === actualId;
+            return (
+              <div key={pos} className="grid grid-cols-[1.5rem_1fr_1fr_2.5rem] items-center gap-3 px-5 py-2.5">
+                <span className={`font-mono text-xs text-center ${pos <= 2 ? "text-wk-green font-bold" : "text-wk-muted"}`}>{pos}</span>
+                <FlagName teamId={predId} />
+                <FlagName teamId={actualId} />
+                <span className={`font-mono text-[11px] font-bold text-right ${correct ? "text-wk-green" : "text-wk-muted/50"}`}>
+                  {correct ? 5 : 0}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Wie koos wat — verdeling van de voorspelde eindposities in je league */}
+      <div className="rounded-xl border border-white/10 bg-wk-surface overflow-hidden">
+        <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+          <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Wie koos wat</span>
+          {totalVoters > 0 && (
+            <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest uppercase">{totalVoters} deelnemers</span>
+          )}
+        </div>
+        {totalVoters === 0 ? (
+          <p className="px-5 py-4 font-mono text-[10px] text-wk-muted tracking-[0.12em]">
+            Nog geen voorspellingen in je league.
+          </p>
+        ) : (
+          <div className="divide-y divide-white/5">
+            {[0, 1, 2, 3].map((i) => {
+              const pos = i + 1;
+              const actualId = actualOrder[i];
+              const picks = dist?.positions[i] ?? [];
+              return (
+                <div key={pos} className="px-5 py-3">
+                  <p className="font-mono text-[9px] text-wk-muted/70 tracking-[0.12em] uppercase mb-2">Plek {pos}</p>
+                  <div className="space-y-1.5">
+                    {picks.map(({ teamId, count }) => {
+                      const t = teamMap[teamId];
+                      if (!t) return null;
+                      const pct = Math.round((count / totalVoters) * 100);
+                      const isActual = teamId === actualId;
+                      return (
+                        <div key={teamId} className="flex items-center gap-2">
+                          {t.flag_url && (
+                            <Image src={t.flag_url} alt={t.name} width={18} height={12} className="rounded-sm object-cover w-[18px] h-3 shrink-0" />
+                          )}
+                          <span className={`text-[11px] w-24 shrink-0 truncate ${isActual ? "text-wk-green font-semibold" : "text-wk-soft"}`}>
+                            {t.name}
+                          </span>
+                          <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${isActual ? "bg-wk-green" : "bg-wk-red/60"}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="font-mono text-[10px] text-wk-muted w-10 text-right shrink-0">
+                            {count}/{totalVoters}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
