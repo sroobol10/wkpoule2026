@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { KO_POINTS } from '@/lib/constants'
 import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
+import { sortGroupStandings, type TeamStat } from '@/lib/group-standings'
 
 type AdminResult = { ok: true } | { ok: false; error: string }
 
@@ -134,7 +135,7 @@ async function scoreBracketAdvancement(
 // Fout resultaat + één doelpunttotaal klopt: 1 pt
 // Fout:                                      0 pt
 // KO winner: zie KO_POINTS (5/15/25/50/100 per ronde)
-// Group advancement: 3 pt per correct eindpositie
+// Group advancement: 5 pt per correct eindpositie
 
 function calcMatchPoints(actualHome: number, actualAway: number, predHome: number, predAway: number): number {
   if (actualHome === predHome && actualAway === predAway) return 10
@@ -181,13 +182,6 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     .eq('type', 'pre_tournament')
   const preQuestionIds = new Set((preQRows ?? []).map((q) => q.id))
 
-  // Eindstand-punten tellen pas mee als de VOLLEDIGE groepsfase gespeeld is (alle 72 matches)
-  const { count: totalGroupMatches } = await supabase
-    .from('matches').select('id', { count: 'exact', head: true }).eq('stage', 'group')
-  const { count: playedGroupMatches } = await supabase
-    .from('matches').select('id', { count: 'exact', head: true }).eq('stage', 'group').eq('result_entered', true)
-  const allGroupMatchesPlayed = (totalGroupMatches ?? 0) > 0 && totalGroupMatches === playedGroupMatches
-
   // ── Bulk-fetch alle scoringsdata voor álle betrokken gebruikers in één keer ──
   // Voorheen deden we per gebruiker 6 queries + per-poule upserts (sequentieel),
   // wat bij ~65 deelnemers honderden round-trips opleverde (~30s). Nu halen we
@@ -205,8 +199,9 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
       .in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
     fetchAllAdmin<{ user_id: string; points_awarded: number | null }>((from, to) => supabase.from('knockout_predictions')
       .select('user_id, points_awarded').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
-    fetchAllAdmin<{ user_id: string; points_awarded: number | null }>((from, to) => supabase.from('group_advancement')
-      .select('user_id, points_awarded').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fetchAllAdmin<{ user_id: string; points: number | null }>((from, to) => (supabase as any).from('group_standings_scores')
+      .select('user_id, points').in('user_id', userIds).range(from, to)),
     fetchAllAdmin<{ user_id: string; points_awarded: number | null; question_id: string }>((from, to) => supabase.from('bonus_answers')
       .select('user_id, points_awarded, question_id').in('user_id', userIds).not('points_awarded', 'is', null).range(from, to)),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -261,9 +256,10 @@ async function recalcPouleScores(supabase: Awaited<ReturnType<typeof createClien
     const uBracket = bracketByUser.get(userId) ?? []
 
     const groupMatchPts     = uPreds.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-    const groupStandingsPts = allGroupMatchesPlayed
-      ? uAdv.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
-      : 0
+    // Eindstand-punten tellen mee zodra een groep gescoord is — group_advancement
+    // krijgt alleen points_awarded via scoreGroupAdvancement, en dat gebeurt pas
+    // als die groep volledig (6/6) gespeeld is. Dus deze waarden zijn al definitief.
+    const groupStandingsPts = uAdv.reduce((s, r) => s + (r.points ?? 0), 0)
     const knockoutPts       = uKo.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
                             + uBracket.reduce((s, r) => s + (r.points_awarded ?? 0), 0)
     const bonusPrePts       = uBonus.filter((b) => preQuestionIds.has(b.question_id))
@@ -594,11 +590,12 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
     .in('match_id', matchIds)
   if (predErr) return { ok: false, error: `Voorspellingen: ${predErr.message}` }
 
-  // Ook groepsstand-punten resetten (zodat ze niet doorsijpelen bij herberekening)
-  const { error: advErr } = await supabase
-    .from('group_advancement')
-    .update({ points_awarded: null })
-    .not('id', 'is', null)
+  // Ook eindstand-punten resetten (zodat ze niet doorsijpelen bij herberekening)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: advErr } = await (supabase as any)
+    .from('group_standings_scores')
+    .delete()
+    .not('user_id', 'is', null)
   if (advErr) return { ok: false, error: `Eindstanden: ${advErr.message}` }
 
   // Klassement nullen (admin heeft nu ALL-policy op poule_scores)
@@ -616,22 +613,24 @@ export async function clearAllGroupResults(): Promise<AdminResult> {
   return { ok: true }
 }
 
-// ─── Score group advancement for a completed group ─────────────────────────────
+// ─── Score eindstand van een afgeronde groep ───────────────────────────────────
 // Roep aan nadat alle 6 groepswedstrijden een resultaat hebben.
-// Berekent de werkelijke eindstand en kent 3 pt toe per correct voorspelde positie.
+// Vergelijkt per gebruiker zijn voorspelde eindstand (afgeleid uit zijn
+// voorspelde uitslagen) met de werkelijke eindstand en kent 5 pt toe per correct
+// voorspelde positie (alle 4 plekken). Resultaat in group_standings_scores.
 export async function scoreGroupAdvancement(group: string): Promise<AdminResult> {
   const { supabase } = await assertAdmin()
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
   const { data: groupMatches } = await supabase
     .from('matches')
-    .select('id, home_score, away_score, home_team:teams!home_team_id(id, group_name), away_team:teams!away_team_id(id, group_name)')
+    .select('id, home_score, away_score, home_team:teams!home_team_id(id, name, group_name), away_team:teams!away_team_id(id, name, group_name)')
     .eq('stage', 'group')
     .eq('result_entered', true)
 
   if (!groupMatches) return { ok: false, error: 'Ophalen mislukt.' }
 
-  type TeamRef = { id: string; group_name: string }
+  type TeamRef = { id: string; name: string; group_name: string }
   const gm = groupMatches.filter((m) => (m.home_team as TeamRef | null)?.group_name === group)
   if (gm.length === 0) return { ok: false, error: `Geen resultaten voor groep ${group}.` }
 
@@ -641,14 +640,18 @@ export async function scoreGroupAdvancement(group: string): Promise<AdminResult>
   }
 
   // Werkelijke eindstand
-  const st: Record<string, { points: number; gd: number; gf: number }> = {}
+  const st: Record<string, TeamStat> = {}
+  const teamNames: Record<string, string> = {}
+  const h2hMatches: { homeTeamId: string; awayTeamId: string; homeGoals: number; awayGoals: number }[] = []
   for (const m of gm) {
     const ht = m.home_team as TeamRef | null
     const at = m.away_team as TeamRef | null
     if (!ht || !at) continue
+    teamNames[ht.id] = ht.name; teamNames[at.id] = at.name
     st[ht.id] ??= { points: 0, gd: 0, gf: 0 }
     st[at.id] ??= { points: 0, gd: 0, gf: 0 }
     const h = m.home_score!, a = m.away_score!
+    h2hMatches.push({ homeTeamId: ht.id, awayTeamId: at.id, homeGoals: h, awayGoals: a })
     st[ht.id].gf += h; st[ht.id].gd += h - a
     st[at.id].gf += a; st[at.id].gd += a - h
     if (h > a) st[ht.id].points += 3
@@ -656,30 +659,76 @@ export async function scoreGroupAdvancement(group: string): Promise<AdminResult>
     else { st[ht.id].points += 1; st[at.id].points += 1 }
   }
 
-  const sorted = Object.entries(st)
-    .sort(([, x], [, y]) => y.points - x.points || y.gd - x.gd || y.gf - x.gf)
+  // Zelfde FIFA-tiebreak als de client gebruikt bij het opslaan van de voorspelde
+  // posities (H2H → H2H-saldo → H2H-doelpunten → totaal saldo → doelpunten →
+  // FIFA-ranking). Een simpele sort op punten/saldo/doelpunten wijkt bij gelijke
+  // standen af van de voorspelling, waardoor terecht voorspelde posities 0 pt
+  // zouden krijgen.
+  const sorted = sortGroupStandings(Object.entries(st) as [string, TeamStat][], h2hMatches, teamNames)
   const actualPosition: Record<string, number> = {}
   sorted.forEach(([teamId], i) => { actualPosition[teamId] = i + 1 })
 
-  // Picks ophalen voor teams in deze groep
-  const { data: picks } = await supabase
-    .from('group_advancement')
-    .select('id, user_id, team_id, predicted_position')
-    .in('team_id', Object.keys(st))
-
-  if (!picks || picks.length === 0) return { ok: true }
-
-  const correctIds: string[] = []
-  const wrongIds: string[] = []
-  for (const pick of picks) {
-    ;((actualPosition[pick.team_id] ?? 99) === pick.predicted_position ? correctIds : wrongIds).push(pick.id)
+  // Voorspelde eindstand per gebruiker afleiden uit zijn voorspelde uitslagen en
+  // alle 4 posities vergelijken met de werkelijke eindstand (5 pt per correcte
+  // positie). Losgekoppeld van group_advancement (dat alleen de doorgangers
+  // bevat t.b.v. de bracket) zodat ook positie 3 en 4 meetellen.
+  const matchTeams: Record<string, { home: string; away: string }> = {}
+  for (const m of gm) {
+    const ht = m.home_team as TeamRef | null
+    const at = m.away_team as TeamRef | null
+    if (ht && at) matchTeams[m.id] = { home: ht.id, away: at.id }
   }
-  await Promise.all([
-    correctIds.length ? supabase.from('group_advancement').update({ points_awarded: 5 }).in('id', correctIds) : Promise.resolve(),
-    wrongIds.length ? supabase.from('group_advancement').update({ points_awarded: 0 }).in('id', wrongIds) : Promise.resolve(),
-  ])
+  const matchIds = gm.map((m) => m.id)
 
-  await recalcPouleScores(supabase, [...new Set(picks.map((p) => p.user_id))])
+  const { data: preds } = await supabase
+    .from('predictions')
+    .select('user_id, match_id, predicted_home, predicted_away')
+    .in('match_id', matchIds)
+
+  if (!preds || preds.length === 0) return { ok: true }
+
+  const predsByUser = new Map<string, typeof preds>()
+  for (const p of preds) {
+    const arr = predsByUser.get(p.user_id) ?? []
+    arr.push(p)
+    predsByUser.set(p.user_id, arr)
+  }
+
+  const rows: { user_id: string; group_name: string; points: number }[] = []
+  for (const [userId, ps] of predsByUser) {
+    // Alleen scoren als de gebruiker alle 6 wedstrijden van de groep voorspelde
+    if (ps.length < 6) {
+      rows.push({ user_id: userId, group_name: group, points: 0 })
+      continue
+    }
+    const pst: Record<string, TeamStat> = {}
+    const pH2H: { homeTeamId: string; awayTeamId: string; homeGoals: number; awayGoals: number }[] = []
+    for (const p of ps) {
+      const t = matchTeams[p.match_id]
+      if (!t) continue
+      pst[t.home] ??= { points: 0, gd: 0, gf: 0 }
+      pst[t.away] ??= { points: 0, gd: 0, gf: 0 }
+      const h = p.predicted_home, a = p.predicted_away
+      pH2H.push({ homeTeamId: t.home, awayTeamId: t.away, homeGoals: h, awayGoals: a })
+      pst[t.home].gf += h; pst[t.home].gd += h - a
+      pst[t.away].gf += a; pst[t.away].gd += a - h
+      if (h > a) pst[t.home].points += 3
+      else if (h < a) pst[t.away].points += 3
+      else { pst[t.home].points += 1; pst[t.away].points += 1 }
+    }
+    const pSorted = sortGroupStandings(Object.entries(pst) as [string, TeamStat][], pH2H, teamNames)
+    let correct = 0
+    pSorted.forEach(([teamId], i) => { if (actualPosition[teamId] === i + 1) correct++ })
+    rows.push({ user_id: userId, group_name: group, points: correct * 5 })
+  }
+
+  const CHUNK = 200
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('group_standings_scores').upsert(rows.slice(i, i + CHUNK), { onConflict: 'user_id,group_name' })
+  }
+
+  await recalcPouleScores(supabase, [...predsByUser.keys()])
 
   revalidatePath('/admin')
   revalidatePath('/poules')

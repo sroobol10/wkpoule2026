@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
 import { AvatarCircle } from '@/components/avatar-circle'
 import { getActivePlayerIds } from '@/lib/active-players'
+import { computeAliveTeamIds } from '@/lib/alive-teams'
 import { Podium } from './[id]/podium'
 import { Bergetappe } from './[id]/bergetappe'
 import { LeaderboardTabs } from './[id]/leaderboard-tabs'
@@ -134,17 +135,24 @@ export async function PouleStand({
   const champTeamById: Record<string, { name: string; flag_url: string }> = {}
   for (const t of champTeams ?? []) champTeamById[t.id] = t
 
-  // Landen die nog actief zijn (= teams met een nog niet gespeelde wedstrijd).
-  // Bepaalt of het kampioensvlaggetje in kleur of grijstinten staat.
-  const { data: unplayedMatches } = await supabase
-    .from('matches')
-    .select('home_team_id, away_team_id')
-    .eq('result_entered', false)
-  const activeTeamIds = new Set<string>()
-  for (const m of unplayedMatches ?? []) {
-    if (m.home_team_id) activeTeamIds.add(m.home_team_id)
-    if (m.away_team_id) activeTeamIds.add(m.away_team_id)
-  }
+  // Landen die nog actief zijn (= niet uitgeschakeld). Bepaalt of het
+  // kampioensvlaggetje in kleur of grijstinten staat. Een team is pas
+  // uitgeschakeld als het in de afgeronde groepsfase niet doorgaat of een
+  // KO-wedstrijd verliest — NIET zodra zijn laatste geplande wedstrijd is
+  // ingevoerd (anders kleurt een doorgegaan team grijs zolang de KO-loting
+  // nog niet is toegewezen).
+  const [{ data: groupMatchesForAlive }, { data: koMatchesForAlive }] = await Promise.all([
+    supabase
+      .from('matches')
+      .select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!home_team_id(id, name, group_name), away_team:teams!away_team_id(id, name, group_name)')
+      .eq('stage', 'group'),
+    supabase
+      .from('matches')
+      .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+      .neq('stage', 'group'),
+  ])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeTeamIds = computeAliveTeamIds((groupMatchesForAlive ?? []) as any, (koMatchesForAlive ?? []) as any)
   const champFor = (uid: string) => {
     const teamId = champByUser[uid]
     const team = teamId ? champTeamById[teamId] : null
