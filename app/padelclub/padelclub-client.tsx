@@ -41,9 +41,14 @@ export type DayQuestion = {
 const PLAYER_COLORS = ['#F4B92E', '#2D6BE5', '#2EA84B', '#E63946'] // goud, blauw, groen, rood
 
 // "Links Rechts" (Snollebollekes): figuren die per beat dwars overvliegen.
-const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png']
-// bus.png oogt klein t.o.v. de rest (veel transparante rand) → standaard groter renderen.
+const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png', 'ashi.png', 'kim2.png']
+// Schaal per figuur: bus.png groter (veel transparante rand), ashi.png is een
+// kleine afbeelding → kleiner renderen.
 const FLYER_SCALE: Record<string, number> = { 'bus.png': 1.7 }
+// Oversteek-duur per figuur (seconden); standaard ~2.9s. ashi.png langzamer
+// zodat je 'm goed ziet.
+const FLYER_DURATION: Record<string, number> = { 'ashi.png': 4.8 }
+const DEFAULT_FLYER_DURATION = 2.9
 // Beat-momenten (seconden in /linksrechts.mp3) + richting per beat.
 const LR_BEAT_TIMES = [0, 3, 6, 9]
 const LR_BEAT_DIRS: ('left' | 'right')[] = ['left', 'right', 'left', 'right']
@@ -113,12 +118,14 @@ export default function PadelclubClient({
   dayLabel,
   dayMatches,
   dayQuestion,
+  heroImage,
   currentUserId,
 }: {
   players: PadelPlayer[]
   dayLabel: string
   dayMatches: DayMatch[]
   dayQuestion: DayQuestion
+  heroImage: string
   currentUserId: string
 }) {
   const router = useRouter()
@@ -128,7 +135,7 @@ export default function PadelclubClient({
   // figuur dwars over het scherm. Rick vliegt altijd tégen de flow in. Synct met
   // /linksrechts.mp3 en de hele pagina krijgt confetti (ballen + padelrackets).
   const [shakeDir, setShakeDir] = useState<'left' | 'right' | null>(null)
-  const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number; wide: boolean } | null>(null)
+  const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number; wide: boolean; duration: number } | null>(null)
   const runningRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -165,6 +172,7 @@ export default function PadelclubClient({
       top,
       size: Math.round(base * (FLYER_SCALE[src] ?? 1)),
       wide,
+      duration: FLYER_DURATION[src] ?? DEFAULT_FLYER_DURATION,
     })
   }
 
@@ -292,8 +300,9 @@ export default function PadelclubClient({
             maxWidth: fly.wide ? '85vw' : '72vw',
             maxHeight: fly.wide ? '90vh' : '50vh',
             willChange: 'transform',
-            // 2.9s < de 3s run, zodat de figuur z'n oversteek áf maakt vóór de volgende
-            animation: `${fly.toRight ? 'cross-right' : 'cross-left'} 2.9s linear both`,
+            // Duur per figuur (standaard ~2.9s < de 3s run); langzamere figuren maken
+            // hun oversteek niet helemaal af voordat de volgende beat ze vervangt.
+            animation: `${fly.toRight ? 'cross-right' : 'cross-left'} ${fly.duration}s linear both`,
           }}
         />
       )}
@@ -324,27 +333,21 @@ export default function PadelclubClient({
       </div>
 
       <div className="relative max-w-3xl mx-auto px-4 py-10 sm:py-14 space-y-10">
-        {/* ── Hero header (2:1) ─────────────────────────────────────────── */}
+        {/* ── Hero header (2:1) — random afbeelding, geen overlay/tekst ──── */}
         <header className="animate-fade-up">
           <div className="relative aspect-[2/1] -mx-4 sm:mx-0 sm:rounded-2xl overflow-hidden border-y sm:border border-white/10">
-            <Image src="/padel.jpeg" alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover sm:animate-ken-burns" />
-            <div className="absolute inset-0 bg-gradient-to-t from-wk-bg via-wk-bg/55 to-wk-bg/10" />
-            <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6 text-center">
+            <Image src={heroImage} alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover animate-hero-in" />
+            {/* 🎾 blijft de Links Rechts-trigger — gecentreerd in de hero */}
+            <div className="absolute inset-0 flex items-center justify-center">
               <button
                 type="button"
                 onClick={doLinksRechts}
                 aria-label="Links Rechts!"
                 title="Links Rechts!"
-                className="inline-block animate-podium-float text-3xl sm:text-5xl mb-1 drop-shadow-lg cursor-pointer select-none transition-transform hover:scale-125 active:scale-95"
+                className="animate-podium-float text-4xl sm:text-5xl drop-shadow-lg cursor-pointer select-none transition-transform hover:scale-125 active:scale-95"
               >
                 🎾
               </button>
-              <h1 className="font-display text-4xl sm:text-6xl uppercase leading-none bg-gradient-to-r from-wk-gold via-wk-green to-wk-blue bg-clip-text text-transparent drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]">
-                Padel Club
-              </h1>
-              <p className="font-mono text-[10px] sm:text-xs text-wk-soft tracking-[0.3em] uppercase mt-2 drop-shadow">
-                De onderlinge strijd · onder ons
-              </p>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-center gap-1.5">
