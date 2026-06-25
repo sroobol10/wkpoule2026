@@ -42,6 +42,8 @@ const PLAYER_COLORS = ['#F4B92E', '#2D6BE5', '#2EA84B', '#E63946'] // goud, blau
 
 // "Links Rechts" (Snollebollekes): figuren die per beat dwars overvliegen.
 const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png']
+// bus.png oogt klein t.o.v. de rest (veel transparante rand) → standaard groter renderen.
+const FLYER_SCALE: Record<string, number> = { 'bus.png': 1.7 }
 // Beat-momenten (seconden in /linksrechts.mp3) + richting per beat.
 const LR_BEAT_TIMES = [0, 3, 6, 9]
 const LR_BEAT_DIRS: ('left' | 'right')[] = ['left', 'right', 'left', 'right']
@@ -126,8 +128,7 @@ export default function PadelclubClient({
   // figuur dwars over het scherm. Rick vliegt altijd tégen de flow in. Synct met
   // /linksrechts.mp3 en de hele pagina krijgt confetti (ballen + padelrackets).
   const [shakeDir, setShakeDir] = useState<'left' | 'right' | null>(null)
-  const [playing, setPlaying] = useState(false)
-  const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number } | null>(null)
+  const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number; wide: boolean } | null>(null)
   const runningRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -152,12 +153,18 @@ export default function PadelclubClient({
     // Normaal vliegt de figuur mét de flow; Rick precies andersom.
     const flowToRight = dir === 'right'
     const isRick = src === 'rick.png'
+    // Desktop heeft geen perf-issues → volle random hoogte/grootte (net wat gaver).
+    // Mobiel houdt een veilige band + kleinere maat zodat de figuur in beeld blijft.
+    const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches
+    const top = wide ? 8 + Math.floor(Math.random() * 50) : 14 + Math.floor(Math.random() * 24)
+    const base = wide ? 280 + Math.floor(Math.random() * 320) : 220 + Math.floor(Math.random() * 200)
     setFly({
       key: i,
       src,
       toRight: isRick ? !flowToRight : flowToRight,
-      top: 14 + Math.floor(Math.random() * 24),   // 14–38%: blijft mobiel in beeld
-      size: 220 + Math.floor(Math.random() * 200), // 220–420px
+      top,
+      size: Math.round(base * (FLYER_SCALE[src] ?? 1)),
+      wide,
     })
   }
 
@@ -167,15 +174,13 @@ export default function PadelclubClient({
     timersRef.current = []
     setShakeDir(null)
     setFly(null)
-    setPlaying(false)
     runningRef.current = false
   }
 
   const doLinksRechts = () => {
-    if (runningRef.current) return
+    if (runningRef.current || !audioRef.current) return
     runningRef.current = true
-    setPlaying(true)
-    const audio = audioRef.current ?? (audioRef.current = new Audio('/linksrechts.mp3'))
+    const audio = audioRef.current
     audio.currentTime = 0
     let nextBeat = 0
     // Beats worden getriggerd op basis van de wérkelijke afspeelpositie (currentTime),
@@ -198,20 +203,6 @@ export default function PadelclubClient({
         timersRef.current.push(setTimeout(stopLinksRechts, LR_END_TIME * 1000))
       })
   }
-
-  // Scheidsrechter-ballen rollen langzaam van boven naar beneden (≥10 stuks).
-  // Gelijkmatig over de breedte verdeeld (i/length) + wat jitter, zodat ze niet
-  // aan één kant clusteren. Wordt pas client-side getoond, dus Math.random is veilig.
-  const BALL_COUNT = 8
-  const balls = useMemo(
-    () => Array.from({ length: BALL_COUNT }, (_, i) => ({
-      left: Math.min(92, Math.max(0, Math.round((i / BALL_COUNT) * 92 + (Math.random() - 0.5) * 12))),
-      delay: +(Math.random() * 5).toFixed(2),
-      duration: +(7 + Math.random() * 6).toFixed(2), // 7–13s, lekker langzaam
-      size: 32 + Math.round(Math.random() * 56),       // 32–88px
-    })),
-    [],
-  )
 
   const colorById = useMemo(
     () => Object.fromEntries(players.map((p, i) => [p.id, PLAYER_COLORS[i % PLAYER_COLORS.length]])),
@@ -259,12 +250,12 @@ export default function PadelclubClient({
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      {/* Speelse spotlights in de spelerskleuren — statisch (geen pulse) zodat de
-          grote blur-vlakken niet elke frame herschilderen op mobiel */}
+      {/* Speelse spotlights in de spelerskleuren — alleen op desktop; de grote
+          blur-vlakken zijn op mobiel (vooral iOS Safari) duur om te schilderen */}
       {players.map((p, i) => (
         <div
           key={p.id}
-          className="pointer-events-none absolute w-[420px] h-[420px] rounded-full blur-3xl opacity-[0.13]"
+          className="pointer-events-none absolute w-[420px] h-[420px] rounded-full blur-3xl opacity-[0.13] hidden sm:block"
           style={{
             background: `radial-gradient(closest-side, ${colorById[p.id]}, transparent)`,
             top: i < 2 ? '-6rem' : 'auto',
@@ -287,26 +278,6 @@ export default function PadelclubClient({
         </svg>
       </button>
 
-      {/* Scheidsrechter-ballen rollen langzaam van boven naar beneden */}
-      {playing && (
-        <div className="pointer-events-none fixed inset-0 z-30 overflow-hidden" aria-hidden>
-          {balls.map((b, i) => (
-            <Image
-              key={i}
-              src="/referee.png" alt="" width={88} height={88} aria-hidden loading="eager"
-              className="absolute top-0 rounded-full drop-shadow-xl"
-              style={{
-                left: `${b.left}%`,
-                width: `${b.size}px`,
-                height: `${b.size}px`,
-                willChange: 'transform',
-                animation: `confetti-fall ${b.duration}s linear ${b.delay}s infinite both`,
-              }}
-            />
-          ))}
-        </div>
-      )}
-
       {/* Random figuur vliegt per run dwars over het scherm (Rick tégen de flow in).
           maxHeight begrenst de figuur zodat hij ook op een korte mobiele viewport
           volledig in beeld blijft. */}
@@ -318,8 +289,8 @@ export default function PadelclubClient({
           style={{
             top: `${fly.top}%`,
             width: `${fly.size}px`,
-            maxWidth: '72vw',
-            maxHeight: '50vh',
+            maxWidth: fly.wide ? '85vw' : '72vw',
+            maxHeight: fly.wide ? '90vh' : '50vh',
             willChange: 'transform',
             // 2.9s < de 3s run, zodat de figuur z'n oversteek áf maakt vóór de volgende
             animation: `${fly.toRight ? 'cross-right' : 'cross-left'} 2.9s linear both`,
@@ -356,7 +327,7 @@ export default function PadelclubClient({
         {/* ── Hero header (2:1) ─────────────────────────────────────────── */}
         <header className="animate-fade-up">
           <div className="relative aspect-[2/1] -mx-4 sm:mx-0 sm:rounded-2xl overflow-hidden border-y sm:border border-white/10">
-            <Image src="/padel.jpeg" alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover animate-ken-burns" />
+            <Image src="/padel.jpeg" alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover sm:animate-ken-burns" />
             <div className="absolute inset-0 bg-gradient-to-t from-wk-bg via-wk-bg/55 to-wk-bg/10" />
             <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6 text-center">
               <button
