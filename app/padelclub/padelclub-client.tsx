@@ -136,6 +136,7 @@ export default function PadelclubClient({
   // /linksrechts.mp3 en de hele pagina krijgt confetti (ballen + padelrackets).
   const [shakeDir, setShakeDir] = useState<'left' | 'right' | null>(null)
   const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number; wide: boolean; duration: number } | null>(null)
+  const [playing, setPlaying] = useState(false)
   const runningRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -182,12 +183,14 @@ export default function PadelclubClient({
     timersRef.current = []
     setShakeDir(null)
     setFly(null)
+    setPlaying(false)
     runningRef.current = false
   }
 
   const doLinksRechts = () => {
     if (runningRef.current || !audioRef.current) return
     runningRef.current = true
+    setPlaying(true)
     const audio = audioRef.current
     audio.currentTime = 0
     let nextBeat = 0
@@ -218,6 +221,18 @@ export default function PadelclubClient({
   )
 
   const ranked = useMemo(() => [...players].sort((a, b) => b.totalPts - a.totalPts), [players])
+
+  // Scheidsrechter-ballen die tijdens "Links Rechts" naar beneden rollen — alleen
+  // op desktop (mobiel laten we ze weg voor de performance). Gelijkmatig verdeeld.
+  const balls = useMemo(
+    () => Array.from({ length: 12 }, (_, i) => ({
+      left: Math.min(94, Math.max(0, Math.round((i / 12) * 94 + (Math.random() - 0.5) * 10))),
+      delay: +(Math.random() * 4).toFixed(2),
+      duration: +(7 + Math.random() * 5).toFixed(2),
+      size: 34 + Math.round(Math.random() * 52),
+    })),
+    [],
+  )
 
   // Punten van vandaag = som van de dag-wedstrijdpunten + de dag-bonusvraag
   const dayPoints = useMemo(() => {
@@ -273,6 +288,26 @@ export default function PadelclubClient({
           }}
         />
       ))}
+
+      {/* Scheidsrechter-ballen rollen tijdens "Links Rechts" naar beneden — desktop only */}
+      {playing && (
+        <div className="pointer-events-none fixed inset-0 z-30 overflow-hidden hidden sm:block" aria-hidden>
+          {balls.map((b, i) => (
+            <Image
+              key={i}
+              src="/referee.png" alt="" width={88} height={88} aria-hidden
+              className="absolute top-0 rounded-full drop-shadow-xl"
+              style={{
+                left: `${b.left}%`,
+                width: `${b.size}px`,
+                height: `${b.size}px`,
+                willChange: 'transform',
+                animation: `confetti-fall ${b.duration}s linear ${b.delay}s infinite both`,
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Kruisje rechtsboven */}
       <button
