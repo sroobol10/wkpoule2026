@@ -4,7 +4,7 @@ import { Fragment, useState, useTransition } from 'react'
 import Image from 'next/image'
 import { saveKnockoutPrediction } from '@/app/actions/knockout'
 import { formatInAmsterdam } from '@/lib/format'
-import BracketClient from './bracket-client'
+import BracketClient, { type SlotDist } from './bracket-client'
 
 type Match = {
   id: string
@@ -37,7 +37,7 @@ type Props = {
   liveTeams: LiveTeam[]
   livePredictions: LivePrediction[]
   // "Wie koos wat" per bracket-slot (over de eigen league)
-  slotDist?: Record<number, { teamId: string; place: number; winner: number }[]>
+  slotDist?: Record<number, SlotDist>
   // Bracket prediction (pre-tournament)
   allTeams: AllTeam[]
   advancement: AdvancementEntry[]

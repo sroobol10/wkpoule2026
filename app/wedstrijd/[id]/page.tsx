@@ -17,9 +17,8 @@ type Supporter = {
   id: string
   username: string
   avatarUrl: string | null
-  predictedHome: number
-  predictedAway: number
-  exact: boolean
+  predLabel: string   // groep: "2–1"; knockout: leeg (het kamp toont de keuze)
+  exact: boolean      // groep: exacte score; knockout: juiste winnaar
 }
 
 export default async function WedstrijdPage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
@@ -32,17 +31,21 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
     .from('matches')
     .select(`
       id, kickoff_at, stage, match_number, venue, home_score, away_score, result_entered,
-      home_team:teams!matches_home_team_id_fkey(name, flag_url),
-      away_team:teams!matches_away_team_id_fkey(name, flag_url)
+      home_team:teams!matches_home_team_id_fkey(id, name, flag_url),
+      away_team:teams!matches_away_team_id_fkey(id, name, flag_url)
     `)
     .eq('id', id)
     .single()
 
   if (!match) notFound()
 
-  type Team = { name: string; flag_url: string | null }
-  const homeTeam = (match.home_team as Team | null) ?? { name: 'N.t.b.', flag_url: null }
-  const awayTeam = (match.away_team as Team | null) ?? { name: 'N.t.b.', flag_url: null }
+  type Team = { id: string; name: string; flag_url: string | null }
+  const homeTeam = (match.home_team as Team | null) ?? { id: '', name: 'N.t.b.', flag_url: null }
+  const awayTeam = (match.away_team as Team | null) ?? { id: '', name: 'N.t.b.', flag_url: null }
+  const isKnockout = match.stage !== 'group'
+  const actualWinnerId = match.result_entered
+    ? ((match.home_score ?? 0) > (match.away_score ?? 0) ? homeTeam.id : awayTeam.id)
+    : null
 
   // Vanaf de toernooistart zijn alle voorspellingen zichtbaar (zelfde regel als
   // de deelnemerspagina's); daarvoor blijven ze geheim.
@@ -77,27 +80,46 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
     memberIds = new Set([...activeIds].filter((uid) => leagueSet.has(uid)))
   }
 
+  type Profile = { id: string; username: string; avatar_url: string | null }
   if (revealed) {
-    const { data: predictions } = await supabase
-      .from('predictions')
-      .select('predicted_home, predicted_away, profiles(id, username, avatar_url)')
-      .eq('match_id', id)
-
-    type Profile = { id: string; username: string; avatar_url: string | null }
-    for (const p of predictions ?? []) {
-      const profile = p.profiles as Profile | null
-      if (!profile || !memberIds.has(profile.id)) continue
-      const supporter: Supporter = {
-        id: profile.id,
-        username: profile.username,
-        avatarUrl: profile.avatar_url,
-        predictedHome: p.predicted_home,
-        predictedAway: p.predicted_away,
-        exact: match.result_entered && p.predicted_home === match.home_score && p.predicted_away === match.away_score,
+    if (isKnockout) {
+      // Knockout: voorspelde winnaar (knockout_predictions) → kamp thuis/uit (geen gelijkspel)
+      const { data: koPreds } = await supabase
+        .from('knockout_predictions')
+        .select('predicted_winner_id, profiles(id, username, avatar_url)')
+        .eq('match_id', id)
+      for (const p of koPreds ?? []) {
+        const profile = p.profiles as Profile | null
+        if (!profile || !memberIds.has(profile.id)) continue
+        const supporter: Supporter = {
+          id: profile.id,
+          username: profile.username,
+          avatarUrl: profile.avatar_url,
+          predLabel: '',
+          exact: match.result_entered && p.predicted_winner_id === actualWinnerId,
+        }
+        if (p.predicted_winner_id === homeTeam.id) homeCamp.push(supporter)
+        else if (p.predicted_winner_id === awayTeam.id) awayCamp.push(supporter)
       }
-      if (p.predicted_home > p.predicted_away) homeCamp.push(supporter)
-      else if (p.predicted_home < p.predicted_away) awayCamp.push(supporter)
-      else drawCamp.push(supporter)
+    } else {
+      const { data: predictions } = await supabase
+        .from('predictions')
+        .select('predicted_home, predicted_away, profiles(id, username, avatar_url)')
+        .eq('match_id', id)
+      for (const p of predictions ?? []) {
+        const profile = p.profiles as Profile | null
+        if (!profile || !memberIds.has(profile.id)) continue
+        const supporter: Supporter = {
+          id: profile.id,
+          username: profile.username,
+          avatarUrl: profile.avatar_url,
+          predLabel: `${p.predicted_home}–${p.predicted_away}`,
+          exact: match.result_entered && p.predicted_home === match.home_score && p.predicted_away === match.away_score,
+        }
+        if (p.predicted_home > p.predicted_away) homeCamp.push(supporter)
+        else if (p.predicted_home < p.predicted_away) awayCamp.push(supporter)
+        else drawCamp.push(supporter)
+      }
     }
     const byWinnerThenName = (a: Supporter, b: Supporter) =>
       Number(b.exact) - Number(a.exact) || a.username.localeCompare(b.username)
@@ -106,7 +128,7 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
     awayCamp.sort(byWinnerThenName)
   } else {
     const { data: predRows } = await supabase
-      .from('predictions')
+      .from(isKnockout ? 'knockout_predictions' : 'predictions')
       .select('user_id')
       .eq('match_id', id)
     hiddenCount = (predRows ?? []).filter((p) => memberIds.has(p.user_id)).length
@@ -130,7 +152,8 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
 
   const camps = [
     { key: 'home' as const, label: `${homeTeam.name} wint`, color: HOME_COLOR, supporters: homeCamp },
-    { key: 'draw' as const, label: 'Gelijkspel', color: DRAW_COLOR, supporters: drawCamp },
+    // Geen gelijkspel-kamp in de knockout
+    ...(isKnockout ? [] : [{ key: 'draw' as const, label: 'Gelijkspel', color: DRAW_COLOR, supporters: drawCamp }]),
     { key: 'away' as const, label: `${awayTeam.name} wint`, color: AWAY_COLOR, supporters: awayCamp },
   ]
 
@@ -223,11 +246,11 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
             {match.result_entered && (
               <div className="animate-podium-pop bg-wk-gold/5 border border-wk-gold/30 rounded-xl px-5 py-5 text-center" style={{ animationDelay: '0.35s' }}>
                 <p className="font-mono text-[10px] text-wk-gold tracking-[0.2em] uppercase mb-3">
-                  🏆 Winnaars van deze wedstrijd · exacte score
+                  🏆 Winnaars van deze wedstrijd · {isKnockout ? 'juiste winnaar' : 'exacte score'}
                 </p>
                 {winners.length === 0 ? (
                   <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">
-                    Niemand had de exacte score voorspeld.
+                    {isKnockout ? 'Niemand had de juiste winnaar voorspeld.' : 'Niemand had de exacte score voorspeld.'}
                   </p>
                 ) : (
                   <div className="flex flex-wrap justify-center gap-2">
@@ -276,7 +299,7 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
                       {supporters.length === 0 ? (
                         <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em]">Niemand.</p>
                       ) : (
-                        supporters.map(({ id: uid, username, avatarUrl, predictedHome, predictedAway, exact }, i) => {
+                        supporters.map(({ id: uid, username, avatarUrl, predLabel, exact }, i) => {
                           const isCurrentUser = uid === user.id
                           return (
                             <Link
@@ -291,9 +314,12 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
                               <span className={`text-xs truncate max-w-24 ${isCurrentUser ? 'font-bold text-wk-gold' : 'text-wk-soft'}`}>
                                 {username}
                               </span>
-                              <span className={`font-mono text-[10px] font-bold shrink-0 ${exact ? 'text-wk-gold' : 'text-wk-muted'}`}>
-                                {predictedHome}–{predictedAway}
-                              </span>
+                              {predLabel && (
+                                <span className={`font-mono text-[10px] font-bold shrink-0 ${exact ? 'text-wk-gold' : 'text-wk-muted'}`}>
+                                  {predLabel}
+                                </span>
+                              )}
+                              {isKnockout && exact && <span className="text-[10px] shrink-0">✓</span>}
                             </Link>
                           )
                         })

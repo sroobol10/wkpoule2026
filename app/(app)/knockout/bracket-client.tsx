@@ -12,7 +12,15 @@ type Team = { id: string; name: string; flag_url: string; group_name: string }
 type AdvancementEntry = { team_id: string; predicted_position: number }
 type BracketPickEntry = { slot: number; predicted_team_id: string; points_awarded?: number | null }
 
-type SlotDistRow = { teamId: string; place: number; winner: number }
+// "Wie koos wat" per slot: verdeling op de thuis-seed en op de uit-seed.
+export type SlotDist = {
+  homeSeed: string
+  awaySeed: string
+  home: { teamId: string; count: number }[]
+  away: { teamId: string; count: number }[]
+  actualHome: string | null
+  actualAway: string | null
+}
 
 type Props = {
   teams: Team[]
@@ -21,7 +29,7 @@ type Props = {
   locked: boolean
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
-  slotDist?: Record<number, SlotDistRow[]>
+  slotDist?: Record<number, SlotDist>
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -280,7 +288,7 @@ function BracketMatchCard({
   advancedTeams: Set<string>
   stageHasResults: boolean
   pts: number | null
-  dist: SlotDistRow[] | null
+  dist: SlotDist | null
 }) {
   const homeTeam = match.home ? teamMap[match.home] : null
   const awayTeam = match.away ? teamMap[match.away] : null
@@ -374,51 +382,81 @@ function BracketMatchCard({
       </div>
 
       {/* Wie koos wat — verdeling over je eigen league (inklapbaar, auto-dicht na 48u) */}
-      {dist && dist.length > 0 && (() => {
-        const played = actualWinnerId != null
-        const toneText: Record<string, string> = { gold: 'text-wk-gold', green: 'text-wk-green', red: 'text-wk-red', grey: 'text-wk-muted' }
-        const toneOf = (teamId: string) => {
-          if (userPick === teamId) return !played ? 'gold' : teamId === actualWinnerId ? 'green' : 'red'
-          if (played && teamId === actualWinnerId) return 'green'
-          return 'grey'
-        }
-        return (
-          <div className="border-t border-white/5">
-            <button
-              type="button"
-              onClick={() => setDistOpen((o) => !o)}
-              className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors cursor-pointer"
-            >
-              <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Wie koos wat</span>
-              <span className={`text-[10px] text-wk-muted transition-transform ${distOpen ? 'rotate-180' : ''}`}>▾</span>
-            </button>
-            {distOpen && (
-              <div className="px-4 pb-3.5">
-                <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 sm:gap-x-5 gap-y-2">
-                  <span />
-                  <span className="font-mono text-[8px] text-wk-muted/70 tracking-[0.1em] uppercase text-right">Op deze plek</span>
-                  <span className="font-mono text-[8px] text-wk-muted/70 tracking-[0.1em] uppercase text-right">Als winnaar</span>
-                  {dist.map(({ teamId, place, winner }) => {
-                    const t = teamMap[teamId]
-                    if (!t) return null
-                    const tone = toneOf(teamId)
-                    return (
-                      <Fragment key={teamId}>
-                        <span className="flex items-center gap-2 min-w-0" title={t.name}>
-                          <Image src={t.flag_url} alt={t.name} width={22} height={14} className="w-[22px] h-3.5 rounded-sm object-cover shrink-0" />
-                          <span className={`hidden sm:inline text-[11px] truncate ${toneText[tone]}`}>{t.name}</span>
-                        </span>
-                        <span className={`font-mono text-xs font-bold text-right ${toneText[tone]}`}>{place}x</span>
-                        <span className={`font-mono text-xs font-bold text-right ${toneText[tone]}`}>{winner}x</span>
-                      </Fragment>
-                    )
-                  })}
-                </div>
+      {dist && (dist.home.length > 0 || dist.away.length > 0) && (
+        <div className="border-t border-white/5">
+          <button
+            type="button"
+            onClick={() => setDistOpen((o) => !o)}
+            className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/[0.02] transition-colors cursor-pointer"
+          >
+            <span className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase">Wie koos wat</span>
+            <span className={`text-[10px] text-wk-muted transition-transform ${distOpen ? 'rotate-180' : ''}`}>▾</span>
+          </button>
+          {distOpen && (
+            <div className="px-4 pb-3.5 grid grid-cols-2 gap-x-3 sm:gap-x-6">
+              <SeedDist label="Thuis" seed={dist.homeSeed} rows={dist.home} ownId={match.home} actualId={dist.actualHome} teamMap={teamMap} />
+              <SeedDist label="Uit" seed={dist.awaySeed} rows={dist.away} ownId={match.away} actualId={dist.actualAway} teamMap={teamMap} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Korte, leesbare seed-omschrijving (1C → "1e groep C", 3_74 → "beste nr. 3", W97 → "winnaar wd. 97")
+function seedLabel(seed: string): string {
+  if (/^[123][A-L]$/.test(seed)) return `${seed[0]}e · groep ${seed[1]}`
+  if (seed.startsWith('3_')) return 'beste nr. 3'
+  if (seed.startsWith('W')) return `winnaar wd. ${seed.slice(1)}`
+  if (seed.startsWith('L')) return `verliezer wd. ${seed.slice(1)}`
+  return seed
+}
+
+// Eén kolom: verdeling van teams op deze seed (thuis óf uit). Kleuren volgens de
+// groepsfase-conventie: eigen keuze geel zolang niet bekend, groen bij goed, rood
+// bij fout (juiste keuze groen), de rest grijs.
+function SeedDist({
+  label, seed, rows, ownId, actualId, teamMap,
+}: {
+  label: string
+  seed: string
+  rows: { teamId: string; count: number }[]
+  ownId: string | null
+  actualId: string | null
+  teamMap: Record<string, Team>
+}) {
+  const max = Math.max(1, ...rows.map((r) => r.count))
+  const played = actualId != null
+  const toneText: Record<string, string> = { gold: 'text-wk-gold', green: 'text-wk-green', red: 'text-wk-red', grey: 'text-wk-soft' }
+  const toneBar: Record<string, string> = { gold: 'bg-wk-gold', green: 'bg-wk-green', red: 'bg-wk-red/70', grey: 'bg-white/15' }
+  const toneOf = (teamId: string) => {
+    if (ownId === teamId) return !played ? 'gold' : teamId === actualId ? 'green' : 'red'
+    if (played && teamId === actualId) return 'green'
+    return 'grey'
+  }
+  return (
+    <div className="min-w-0">
+      <p className="font-mono text-[8px] text-wk-muted/70 tracking-[0.12em] uppercase mb-2">
+        {label} · <span className="text-wk-muted">{seedLabel(seed)}</span>
+      </p>
+      <div className="space-y-1.5">
+        {rows.map(({ teamId, count }) => {
+          const t = teamMap[teamId]
+          if (!t) return null
+          const tone = toneOf(teamId)
+          return (
+            <div key={teamId} className="flex items-center gap-1.5" title={t.name}>
+              <Image src={t.flag_url} alt={t.name} width={18} height={12} className="w-[18px] h-3 rounded-sm object-cover shrink-0" />
+              <span className={`hidden sm:inline text-[11px] w-16 shrink-0 truncate ${toneText[tone]}`}>{t.name}</span>
+              <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                <div className={`h-full rounded-full ${toneBar[tone]}`} style={{ width: `${(count / max) * 100}%` }} />
               </div>
-            )}
-          </div>
-        )
-      })()}
+              <span className="font-mono text-[10px] text-wk-muted w-7 text-right shrink-0">{count}x</span>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

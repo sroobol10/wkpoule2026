@@ -1666,8 +1666,7 @@ function GroupEindstandPanel({
         {t.flag_url && (
           <Image src={t.flag_url} alt={t.name} width={20} height={14} className="rounded-sm object-cover w-5 h-[14px] shrink-0" />
         )}
-        {/* Mobiel: alleen de vlag; vanaf sm ook de landnaam */}
-        <span className="hidden sm:inline text-xs font-semibold text-wk-text truncate">{t.name}</span>
+        <span className="text-xs font-semibold text-wk-text truncate">{t.name}</span>
       </span>
     );
   };

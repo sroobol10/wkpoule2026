@@ -191,9 +191,10 @@ export default async function KnockoutPage() {
     if (a.predicted_position === 3) u.thirdGroups.add(g)
   }
 
-  // Tel per slot/team: hoe vaak op deze plek (deelnemer) en als winnaar.
-  const placeBySlot: Record<number, Record<string, number>> = {}
-  const winnerBySlot: Record<number, Record<string, number>> = {}
+  // Tel per slot, gesplitst per seed: hoe vaak elk team op de thuis-plek en op de
+  // uit-plek werd voorspeld (= bereikt dit duel via die seed).
+  const homeBySlot: Record<number, Record<string, number>> = {}
+  const awayBySlot: Record<number, Record<string, number>> = {}
   for (const uid of memberArr) {
     const picks = picksByUser[uid] ?? {}
     const adv = advByUser[uid]
@@ -204,21 +205,41 @@ export default async function KnockoutPage() {
     for (const b of BRACKET) {
       const r = resolved[b.slot]
       if (!r) continue
-      for (const t of [r.home, r.away]) if (t) (placeBySlot[b.slot] ??= {})[t] = ((placeBySlot[b.slot]?.[t]) ?? 0) + 1
-      if (r.winner) (winnerBySlot[b.slot] ??= {})[r.winner] = ((winnerBySlot[b.slot]?.[r.winner]) ?? 0) + 1
+      if (r.home) (homeBySlot[b.slot] ??= {})[r.home] = ((homeBySlot[b.slot]?.[r.home]) ?? 0) + 1
+      if (r.away) (awayBySlot[b.slot] ??= {})[r.away] = ((awayBySlot[b.slot]?.[r.away]) ?? 0) + 1
     }
   }
 
-  // Per slot een gesorteerde lijst (hoogste winnaar-telling eerst)
-  const koSlotDist: Record<number, { teamId: string; place: number; winner: number }[]> = {}
+  // Werkelijke teams per seed (uit de live KO-wedstrijden) voor de kleuren
+  const actualHomeBySlot: Record<number, string | null> = {}
+  const actualAwayBySlot: Record<number, string | null> = {}
+  for (const m of matches ?? []) {
+    if (m.match_number == null) continue
+    actualHomeBySlot[m.match_number] = m.home_team_id
+    actualAwayBySlot[m.match_number] = m.away_team_id
+  }
+
+  const sortRows = (m: Record<string, number>) =>
+    Object.entries(m).map(([teamId, count]) => ({ teamId, count })).sort((a, c) => c.count - a.count)
+
+  const koSlotDist: Record<number, {
+    homeSeed: string; awaySeed: string
+    home: { teamId: string; count: number }[]
+    away: { teamId: string; count: number }[]
+    actualHome: string | null; actualAway: string | null
+  }> = {}
   for (const b of BRACKET) {
-    const placeM = placeBySlot[b.slot] ?? {}
-    const winM = winnerBySlot[b.slot] ?? {}
-    const ids = new Set([...Object.keys(placeM), ...Object.keys(winM)])
-    const rows = [...ids]
-      .map((teamId) => ({ teamId, place: placeM[teamId] ?? 0, winner: winM[teamId] ?? 0 }))
-      .sort((a, c) => c.winner - a.winner || c.place - a.place)
-    if (rows.length) koSlotDist[b.slot] = rows
+    const home = sortRows(homeBySlot[b.slot] ?? {})
+    const away = sortRows(awayBySlot[b.slot] ?? {})
+    if (!home.length && !away.length) continue
+    koSlotDist[b.slot] = {
+      homeSeed: b.homeSeed,
+      awaySeed: b.awaySeed,
+      home,
+      away,
+      actualHome: actualHomeBySlot[b.slot] ?? null,
+      actualAway: actualAwayBySlot[b.slot] ?? null,
+    }
   }
 
   return (
