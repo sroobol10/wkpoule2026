@@ -131,6 +131,12 @@
   100% { transform: translateY(115vh) rotate(720deg); opacity: 1; }
 }
 
+/* Zeldzaam: mascotte valt van bovenin het scherm naar beneden, eruit */
+@keyframes mascot-fall {
+  0%   { transform: translateY(0)     rotate(0deg);   }
+  100% { transform: translateY(135vh) rotate(160deg); }
+}
+
 /* Wiebelende mascottes (links.png / rechts.png) */
 @keyframes rock-left {
   0%, 100% { transform: rotate(-40deg); }

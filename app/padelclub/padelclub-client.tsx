@@ -44,7 +44,7 @@ const PLAYER_COLORS = ['#F4B92E', '#2D6BE5', '#2EA84B', '#E63946'] // goud, blau
 const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png', 'ashi.png', 'kim2.png', 'trein.png', 'dejuul.png', 'girlref.png']
 // Schaal per figuur: bus.png groter (veel transparante rand), ashi.png is een
 // kleine afbeelding → kleiner renderen.
-const FLYER_SCALE: Record<string, number> = { 'bus.png': 1.7 }
+const FLYER_SCALE: Record<string, number> = { 'bus.png': 1.7, 'girlref.png': 1.7 }
 // Oversteek-duur per figuur (seconden); standaard ~2.9s. ashi.png langzamer
 // zodat je 'm goed ziet.
 const FLYER_DURATION: Record<string, number> = { 'ashi.png': 4.8 }
@@ -88,16 +88,47 @@ function GrowBar({ pct, color, delay }: { pct: number; color: string; delay: num
 
 const firstName = (p: PadelPlayer) => (p.fullName?.split(' ')[0]) || p.username
 
-// Dagscore-kaartje (avatar + getelde punten van vandaag), leider in goud
+// Avatar met spelerskleur-ring die op tik een korte bounce + ✨ geeft (puur fun).
+function TapAvatar({
+  username, avatarUrl, size, ringColor, ringClass = 'ring-1', title,
+}: {
+  username: string; avatarUrl: string | null; size: number; ringColor?: string; ringClass?: string; title?: string
+}) {
+  const [pop, setPop] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tap = () => {
+    setPop(true)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setPop(false), 380)
+  }
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  return (
+    <span
+      onClick={tap}
+      title={title}
+      className={`relative inline-flex shrink-0 rounded-full cursor-pointer ${ringClass} ${pop ? 'animate-pop' : ''}`}
+      style={ringColor ? { ['--tw-ring-color' as string]: ringColor } : undefined}
+    >
+      <AvatarCircle username={username} avatarUrl={avatarUrl} size={size} />
+      {pop && <span className="pointer-events-none absolute -top-1.5 -right-1.5 text-sm animate-pop">✨</span>}
+    </span>
+  )
+}
+
+// Dagscore-kaartje (avatar + getelde punten van vandaag); de dagleider krijgt een
+// kroon, gouden glans en een podium-pop bij binnenkomst.
 function DayScoreCard({ p, color, pts, isLead, delay }: { p: PadelPlayer; color: string; pts: number; isLead: boolean; delay: number }) {
   const count = useCountUp(pts, delay)
+  const lead = isLead && pts > 0
   return (
     <div
-      className={`flex flex-col items-center rounded-xl border py-3 px-1 ${isLead ? 'border-wk-gold/50 bg-wk-gold/[0.06]' : 'border-white/10 bg-wk-surface'}`}
+      className={`relative flex flex-col items-center rounded-xl border py-3 px-1 ${lead ? 'border-wk-gold/60 bg-wk-gold/[0.08] animate-podium-pop' : 'border-white/10 bg-wk-surface'}`}
+      style={lead ? { animationDelay: `${delay}ms`, boxShadow: '0 0 22px rgba(244,185,46,0.22)' } : undefined}
     >
-      <span className="rounded-full ring-2 ring-offset-1 ring-offset-wk-bg" style={{ ['--tw-ring-color' as string]: color }} title={firstName(p)}>
-        <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={34} />
-      </span>
+      {lead && (
+        <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 text-lg animate-podium-float drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">👑</span>
+      )}
+      <TapAvatar username={p.username} avatarUrl={p.avatarUrl} size={34} ringColor={color} ringClass="ring-2 ring-offset-1 ring-offset-wk-bg" title={firstName(p)} />
       <span className="font-fun font-semibold text-3xl leading-none mt-3" style={{ color }}>{count}</span>
       <span className="font-mono text-[8px] text-wk-muted tracking-[0.12em] uppercase mt-0.5">pt vandaag</span>
     </div>
@@ -106,11 +137,7 @@ function DayScoreCard({ p, color, pts, isLead, delay }: { p: PadelPlayer; color:
 
 // Compacte avatar met spelerskleur-ring — gebruikt bij scores i.p.v. de naam
 function PlayerAvatar({ p, color, size = 24 }: { p: PadelPlayer; color: string; size?: number }) {
-  return (
-    <span className="rounded-full ring-1 shrink-0 inline-flex" style={{ ['--tw-ring-color' as string]: color }} title={firstName(p)}>
-      <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={size} />
-    </span>
-  )
+  return <TapAvatar username={p.username} avatarUrl={p.avatarUrl} size={size} ringColor={color} ringClass="ring-1" title={firstName(p)} />
 }
 
 export default function PadelclubClient({
@@ -119,6 +146,7 @@ export default function PadelclubClient({
   dayMatches,
   dayQuestion,
   heroImage,
+  heroImages,
   currentUserId,
 }: {
   players: PadelPlayer[]
@@ -126,17 +154,39 @@ export default function PadelclubClient({
   dayMatches: DayMatch[]
   dayQuestion: DayQuestion
   heroImage: string
+  heroImages: string[]
   currentUserId: string
 }) {
   const router = useRouter()
+
+  // Hero roteert na elke muziek-aanvraag (Links Rechts). De swap + fade-in is
+  // licht (alleen een image + de bestaande ken-burns die toch al draait), dus we
+  // doen 'm op mobiel én desktop.
+  const [heroSrc, setHeroSrc] = useState(heroImage)
+  const rotateHero = () => {
+    if (heroImages.length < 2) return
+    let next = heroSrc
+    while (next === heroSrc) next = heroImages[Math.floor(Math.random() * heroImages.length)]
+    setHeroSrc(next)
+  }
 
   // 🎾 in de hero → "Links Rechts" (Snollebollekes): 4 runs van 3s (links, rechts,
   // links, rechts). Per run komt links.png/rechts.png in beeld én vliegt een random
   // figuur dwars over het scherm. Rick vliegt altijd tégen de flow in. Synct met
   // /linksrechts.mp3 en de hele pagina krijgt confetti (ballen + padelrackets).
   const [shakeDir, setShakeDir] = useState<'left' | 'right' | null>(null)
+  // Zeldzaam (5% per kant): de mascotte valt naar beneden van het scherm i.p.v. wiebelen
+  const [fallLeft, setFallLeft] = useState(false)
+  const [fallRight, setFallRight] = useState(false)
   const [fly, setFly] = useState<{ key: number; src: string; toRight: boolean; top: number; size: number; wide: boolean; duration: number } | null>(null)
   const [playing, setPlaying] = useState(false)
+  // Confetti-welkom bij binnenkomst (alleen client → geen hydration-mismatch)
+  const [intro, setIntro] = useState(false)
+  useEffect(() => {
+    setIntro(true)
+    const t = setTimeout(() => setIntro(false), 5000)
+    return () => clearTimeout(t)
+  }, [])
   const runningRef = useRef(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -157,6 +207,9 @@ export default function PadelclubClient({
   const triggerBeat = (i: number) => {
     const dir = LR_BEAT_DIRS[i]
     setShakeDir(dir)
+    // 5% kans dat de actieve mascotte naar beneden valt i.p.v. te wiebelen
+    if (dir === 'left') setFallLeft(Math.random() < 0.05)
+    else setFallRight(Math.random() < 0.05)
     const src = FLYERS[Math.floor(Math.random() * FLYERS.length)]
     // Normaal vliegt de figuur mét de flow; Rick precies andersom.
     const flowToRight = dir === 'right'
@@ -183,6 +236,8 @@ export default function PadelclubClient({
     timersRef.current = []
     setShakeDir(null)
     setFly(null)
+    setFallLeft(false)
+    setFallRight(false)
     setPlaying(false)
     runningRef.current = false
   }
@@ -191,6 +246,7 @@ export default function PadelclubClient({
     if (runningRef.current || !audioRef.current) return
     runningRef.current = true
     setPlaying(true)
+    rotateHero()
     const audio = audioRef.current
     audio.currentTime = 0
     let nextBeat = 0
@@ -221,6 +277,17 @@ export default function PadelclubClient({
   )
 
   const ranked = useMemo(() => [...players].sort((a, b) => b.totalPts - a.totalPts), [players])
+  // Ben jij de koploper? → dichtere welkomstconfetti
+  const iLead = ranked[0]?.id === currentUserId && (ranked[0]?.totalPts ?? 0) > 0
+  const introBalls = useMemo(
+    () => Array.from({ length: iLead ? 24 : 14 }, (_, i) => ({
+      left: Math.round(Math.random() * 96),
+      delay: +(Math.random() * 1.5).toFixed(2),
+      duration: +(5 + Math.random() * 4).toFixed(2),
+      size: 30 + Math.round(Math.random() * 56),
+    })),
+    [iLead],
+  )
 
   // Scheidsrechter-ballen die tijdens "Links Rechts" naar beneden rollen — alleen
   // op desktop (mobiel laten we ze weg voor de performance). Gelijkmatig verdeeld.
@@ -289,6 +356,26 @@ export default function PadelclubClient({
         />
       ))}
 
+      {/* Welkomstconfetti bij binnenkomst — eenmalige val, desktop only */}
+      {intro && (
+        <div className="pointer-events-none fixed inset-0 z-30 overflow-hidden hidden sm:block" aria-hidden>
+          {introBalls.map((b, i) => (
+            <Image
+              key={i}
+              src="/referee.png" alt="" width={88} height={88} aria-hidden
+              className="absolute top-0 rounded-full drop-shadow-xl"
+              style={{
+                left: `${b.left}%`,
+                width: `${b.size}px`,
+                height: `${b.size}px`,
+                willChange: 'transform',
+                animation: `confetti-fall ${b.duration}s linear ${b.delay}s 1 both`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Scheidsrechter-ballen rollen tijdens "Links Rechts" naar beneden — desktop only */}
       {playing && (
         <div className="pointer-events-none fixed inset-0 z-30 overflow-hidden hidden sm:block" aria-hidden>
@@ -345,8 +432,10 @@ export default function PadelclubClient({
       {/* Links/Rechts mascottes — schuiven van de zijkant in (buitenste laag) en
           wiebelen heen en weer (binnenste laag, zodat transforms niet botsen) */}
       <div
-        className="pointer-events-none fixed top-2 sm:top-4 left-2 sm:left-8 z-40 transition-transform duration-700 ease-out"
-        style={{ transform: shakeDir === 'left' ? 'translateX(0)' : 'translateX(120vw)' }}
+        className={`pointer-events-none fixed top-2 sm:top-4 left-2 sm:left-8 z-40 ${fallLeft ? '' : 'transition-transform duration-700 ease-out'}`}
+        style={fallLeft
+          ? { animation: 'mascot-fall 1.8s cubic-bezier(0.45,0,0.9,1) forwards' }
+          : { transform: shakeDir === 'left' ? 'translateX(0)' : 'translateX(120vw)' }}
         aria-hidden
       >
         <Image
@@ -356,8 +445,10 @@ export default function PadelclubClient({
         />
       </div>
       <div
-        className="pointer-events-none fixed top-2 sm:top-4 right-2 sm:right-8 z-40 transition-transform duration-700 ease-out"
-        style={{ transform: shakeDir === 'right' ? 'translateX(0)' : 'translateX(-120vw)' }}
+        className={`pointer-events-none fixed top-2 sm:top-4 right-2 sm:right-8 z-40 ${fallRight ? '' : 'transition-transform duration-700 ease-out'}`}
+        style={fallRight
+          ? { animation: 'mascot-fall 1.8s cubic-bezier(0.45,0,0.9,1) forwards' }
+          : { transform: shakeDir === 'right' ? 'translateX(0)' : 'translateX(-120vw)' }}
         aria-hidden
       >
         <Image
@@ -371,7 +462,7 @@ export default function PadelclubClient({
         {/* ── Hero header (2:1) — random afbeelding, geen overlay/tekst ──── */}
         <header className="animate-fade-up">
           <div className="relative aspect-[2/1] -mx-4 sm:mx-0 sm:rounded-2xl overflow-hidden border-y sm:border border-white/10">
-            <Image src={heroImage} alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover animate-hero-in" />
+            <Image key={heroSrc} src={heroSrc} alt="Padel Club" fill priority sizes="(max-width: 640px) 100vw, 768px" className="object-cover animate-hero-in" />
             {/* 🎾 blijft de Links Rechts-trigger — gecentreerd in de hero */}
             <div className="absolute inset-0 flex items-center justify-center">
               <button
@@ -404,9 +495,7 @@ export default function PadelclubClient({
           <div className="flex flex-wrap gap-3">
             {players.map((p) => (
               <div key={p.id} className="flex items-center gap-1.5">
-                <span className="rounded-full ring-2 ring-offset-1 ring-offset-wk-bg" style={{ ['--tw-ring-color' as string]: colorById[p.id] }}>
-                  <AvatarCircle username={p.username} avatarUrl={p.avatarUrl} size={22} />
-                </span>
+                <TapAvatar username={p.username} avatarUrl={p.avatarUrl} size={22} ringColor={colorById[p.id]} ringClass="ring-2 ring-offset-1 ring-offset-wk-bg" title={firstName(p)} />
                 <span className="text-xs font-semibold" style={{ color: colorById[p.id] }}>{firstName(p)}</span>
               </div>
             ))}
@@ -536,6 +625,7 @@ function RankRow({
   const count = useCountUp(player.totalPts, delay)
   const pct = topPts > 0 ? (player.totalPts / topPts) * 100 : 0
   const medal = ['🥇', '🥈', '🥉'][rank - 1] ?? null
+  const isLeader = rank === 1 && player.totalPts > 0
   return (
     <div className={`relative flex items-center gap-3 px-4 py-3.5 border-b border-white/5 last:border-b-0 ${isCurrent ? 'bg-white/[0.03]' : ''}`}>
       {/* achtergrondbalk = aandeel t.o.v. koploper */}
@@ -543,8 +633,13 @@ function RankRow({
       <span className="relative w-7 text-center shrink-0">
         {medal ? <span className="text-lg">{medal}</span> : <span className="font-mono text-sm text-wk-muted">{rank}</span>}
       </span>
-      <span className="relative rounded-full ring-2 ring-offset-2 ring-offset-wk-surface shrink-0" style={{ ['--tw-ring-color' as string]: color }}>
-        <AvatarCircle username={player.username} avatarUrl={player.avatarUrl} size={rank === 1 ? 44 : 36} />
+      <span className="relative">
+        {isLeader && <span className="absolute -top-3 left-1/2 -translate-x-1/2 z-10 text-base animate-podium-float drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">👑</span>}
+        <TapAvatar
+          username={player.username} avatarUrl={player.avatarUrl} size={rank === 1 ? 44 : 36}
+          ringColor={color} ringClass="ring-2 ring-offset-2 ring-offset-wk-surface"
+          title={firstName(player)}
+        />
       </span>
       <div className="relative flex-1 min-w-0">
         <p className="text-base font-bold truncate" style={{ color }}>{firstName(player)}</p>

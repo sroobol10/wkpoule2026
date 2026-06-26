@@ -199,7 +199,7 @@ export default async function PadelclubPage() {
     }
   }
 
-  // Random hero-afbeelding per bezoek
+  // Random hero-afbeelding per bezoek + de volledige lijst voor rotatie client-side
   const HERO_IMAGES = ['/padel.jpeg', ...Array.from({ length: 9 }, (_, i) => `/padelclub${i + 2}.jpeg`)]
   const heroImage = HERO_IMAGES[Math.floor(Math.random() * HERO_IMAGES.length)]
 
@@ -210,6 +210,7 @@ export default async function PadelclubPage() {
       dayMatches={dayMatches}
       dayQuestion={dayQuestion}
       heroImage={heroImage}
+      heroImages={HERO_IMAGES}
       currentUserId={user.id}
     />
   )
