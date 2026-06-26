@@ -41,7 +41,7 @@ export type DayQuestion = {
 const PLAYER_COLORS = ['#F4B92E', '#2D6BE5', '#2EA84B', '#E63946'] // goud, blauw, groen, rood
 
 // "Links Rechts" (Snollebollekes): figuren die per beat dwars overvliegen.
-const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png', 'ashi.png', 'kim2.png', 'trein.png', 'dejuul.png']
+const FLYERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png', 'ashi.png', 'kim2.png', 'trein.png', 'dejuul.png', 'girlref.png']
 // Schaal per figuur: bus.png groter (veel transparante rand), ashi.png is een
 // kleine afbeelding → kleiner renderen.
 const FLYER_SCALE: Record<string, number> = { 'bus.png': 1.7 }
