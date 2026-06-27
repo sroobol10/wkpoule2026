@@ -177,6 +177,26 @@
   50%      { transform: rotate(22deg); }
 }
 
+/* Vuur-boosters: bobbende vlambolletjes + pulserende vurige gloed */
+@keyframes booster-bob {
+  0%, 100% { transform: translateY(0)    rotate(-5deg); }
+  50%      { transform: translateY(-5px) rotate(5deg);  }
+}
+@keyframes boost-flare {
+  from { opacity: 0.5; }
+  to   { opacity: 1;   }
+}
+
+/* Rick (als keeper) loopt na 5 goals het scherm uit, naar zijn eigen kant */
+@keyframes rick-exit-left {
+  0%   { transform: translateX(0)     rotate(0deg);  opacity: 1; }
+  100% { transform: translateX(-180%) rotate(-12deg); opacity: 0; }
+}
+@keyframes rick-exit-right {
+  0%   { transform: translateX(0)    rotate(0deg);  opacity: 1; }
+  100% { transform: translateX(180%) rotate(12deg); opacity: 0; }
+}
+
 @keyframes podium-glow {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   50%      { box-shadow: 0 0 24px 2px color-mix(in srgb, var(--color-wk-gold) 30%, transparent); }
