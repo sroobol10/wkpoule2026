@@ -182,6 +182,9 @@ export default function PadelclubClient({
   const [playing, setPlaying] = useState(false)
   // Confetti-welkom bij binnenkomst (alleen client → geen hydration-mismatch)
   const [intro, setIntro] = useState(false)
+  // Vertrek-animatie naar de spellen: bord valt, muziek stopt, pagina fade-out
+  const [leaving, setLeaving] = useState(false)
+  const [fadeOut, setFadeOut] = useState(false)
   useEffect(() => {
     setIntro(true)
     const t = setTimeout(() => setIntro(false), 5000)
@@ -317,9 +320,22 @@ export default function PadelclubClient({
   }, [players, dayMatches, dayQuestion])
   const dayLead = Math.max(0, ...players.map((p) => dayPoints[p.id]))
 
-  const close = () => {
-    if (typeof window !== 'undefined' && window.history.length > 1) router.back()
-    else router.push('/poules')
+  const close = () => router.push('/poules')
+
+  // Klik op links.png → bord valt, muziek stopt, pagina fade-out (3s) → spellen
+  const goToGame = () => {
+    if (leaving) return
+    setLeaving(true)
+    // lopende Links Rechts + muziek stoppen
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+    timersRef.current.forEach(clearTimeout); timersRef.current = []
+    runningRef.current = false
+    audioRef.current?.pause()
+    // bord laten vallen
+    setShakeDir(null); setFly(null); setFallRight(false); setFallLeft(true)
+    // fade-out starten (volgende frame, zodat de transition pakt) en daarna navigeren
+    requestAnimationFrame(() => setFadeOut(true))
+    timersRef.current.push(setTimeout(() => router.push('/padelclub/spel'), 3000))
   }
 
   const fmtDate = (iso: string) =>
@@ -340,6 +356,13 @@ export default function PadelclubClient({
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      {/* Fade-out naar zwart bij het naar de spellen navigeren (3s) */}
+      {leaving && (
+        <div
+          className="fixed inset-0 z-[80] bg-black pointer-events-none transition-opacity ease-in"
+          style={{ transitionDuration: '3000ms', opacity: fadeOut ? 1 : 0 }}
+        />
+      )}
       {/* Speelse spotlights in de spelerskleuren — alleen op desktop; de grote
           blur-vlakken zijn op mobiel (vooral iOS Safari) duur om te schilderen */}
       {players.map((p, i) => (
@@ -436,7 +459,7 @@ export default function PadelclubClient({
         role="button"
         aria-label="Spellen"
         title="Spellen"
-        onClick={() => router.push('/padelclub/spel')}
+        onClick={goToGame}
         className={`fixed top-2 sm:top-4 left-2 sm:left-8 z-40 cursor-pointer ${fallLeft ? '' : 'transition-transform duration-700 ease-out'}`}
         style={fallLeft
           ? { animation: 'mascot-fall 1.8s cubic-bezier(0.45,0,0.9,1) forwards' }

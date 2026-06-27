@@ -26,7 +26,9 @@ const DIVE_W = [0.13, 0.19, 0.36, 0.19, 0.13]
 const GREEN_HW = 0.06
 const YELLOW_HW = 0.17
 const ORANGE_HW = 0.32
-const ZONE_PROB: Record<string, number> = { green: 0.95, yellow: 0.65, orange: 0.30, red: 0 }
+const ZONE_PROB: Record<string, number> = { green: 0.99, yellow: 0.67, orange: 0.33, red: 0 }
+// Tijdens een booster zijn de kansen hoger (en de balk hoger + 50% sneller)
+const ZONE_PROB_BOOST: Record<string, number> = { green: 1, yellow: 0.80, orange: 0.55, red: 0.35 }
 const PB = { x0: 46, x1: W - 46, y: H - 26, h: 14 }
 const zoneOf = (power: number): 'green' | 'yellow' | 'orange' | 'red' => {
   const d = Math.abs(power - 0.5)
@@ -37,7 +39,11 @@ const zoneOf = (power: number): 'green' | 'yellow' | 'orange' | 'red' => {
 }
 
 const FIGS = '/spelers'
-const KEEPER = 'lukaku.png'   // vaste keeper
+const KEEPER = 'lukaku.png'   // startkeeper (komt elke 2e wave terug)
+// Pool voor de willekeurige keeper (de "even" waves zijn Lukaku, "oneven" random)
+const KEEPER_POOL = ['rick.png', 'bus.png', 'ho.png', 'kim.png', 'vince.png', 'dejuul.png', 'trein.png', 'ashi.png', 'pimp.png']
+const BOOST_EVERY = 5
+const nextKeeper = (wave: number) => wave % 2 === 0 ? KEEPER : KEEPER_POOL[Math.floor(Math.random() * KEEPER_POOL.length)]
 
 const COL = { grass1: '#16321f', grass2: '#0f2417', line: '#F5F2EB', text: '#F5F2EB', gold: '#F4B92E' }
 
@@ -51,7 +57,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     else router.push('/padelclub/spel')
   }
 
-  const [phase, setPhase] = useState<'idle' | 'aim' | 'power' | 'shoot' | 'over'>('idle')
+  const [phase, setPhase] = useState<'idle' | 'power' | 'shoot' | 'over'>('idle')
   const [score, setScore] = useState(0)
   const [board, setBoard] = useState<LeaderEntry[]>(leaderboard)
   const [result, setResult] = useState<{ score: number; record: boolean } | null>(null)
@@ -59,6 +65,14 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const [keeperFall, setKeeperFall] = useState(0)
   const [panenka, setPanenka] = useState(0)
   const [goalFx, setGoalFx] = useState(0)
+  const [streakFx, setStreakFx] = useState(0)
+  // Keeper-waves + power-booster
+  const [keeperSrc, setKeeperSrc] = useState(KEEPER)
+  const [boostReady, setBoostReady] = useState(false)
+  const waveRef = useRef(0)
+  const sinceBoost = useRef(0)
+  const boostActive = useRef(false)   // huidige power-schot is een booster
+  const boostSnd = useRef<HTMLAudioElement | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const keeperImg = useRef<HTMLImageElement | null>(null)
@@ -67,26 +81,22 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const boardRef = useRef(board); boardRef.current = board
   const raf = useRef<number | null>(null)
   const last = useRef(0)
-  const reticle = useRef({ pos: 0, dir: 1 })
   const pwr = useRef({ pos: 0, dir: 1 })
-  const aimLock = useRef(2)
-  const shot = useRef({ start: 0, lock: 2, keeperZone: 2, scored: false, over: false, panenka: false })
+  const shot = useRef({ start: 0, lock: 2, keeperZone: 2, scored: false, over: false, panenka: false, booster: false })
   const particles = useRef<{ x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number }[]>([])
 
   const ZONE_COLOR: Record<string, string> = { green: '#2EA84B', yellow: '#F4B92E', orange: '#E8862E', red: '#E63946' }
-  const spawnSplash = (power: number) => {
-    const mx = PB.x0 + (PB.x1 - PB.x0) * power
-    const my = PB.y + PB.h / 2
-    const color = ZONE_COLOR[zoneOf(power)]
-    for (let i = 0; i < 16; i++) {
+  const burst = (x: number, y: number, color: string, n: number) => {
+    for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2
-      const sp = 70 + Math.random() * 180
-      const life = 0.45 + Math.random() * 0.3
-      particles.current.push({ x: mx, y: my, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 140, life, max: life, color, size: 2 + Math.random() * 2.6 })
+      const sp = 70 + Math.random() * 190
+      const life = 0.45 + Math.random() * 0.35
+      particles.current.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 150, life, max: life, color, size: 2 + Math.random() * 2.6 })
     }
   }
+  const spawnSplash = (power: number) => burst(PB.x0 + (PB.x1 - PB.x0) * power, PB.y + PB.h / 2, ZONE_COLOR[zoneOf(power)], 16)
 
-  const drawScene = useCallback((ballX: number, ballY: number, keeperX: number, reticleX: number | null, power: number | null = null, keeperRot = 0, keeperDy = 0) => {
+  const drawScene = useCallback((ballX: number, ballY: number, keeperX: number, reticleX: number | null, power: number | null = null, keeperRot = 0, keeperDy = 0, keeperScale = 1, powerBoost = false) => {
     const cv = canvasRef.current; if (!cv) return
     const ctx = cv.getContext('2d'); if (!ctx) return
     // gras met diepte
@@ -135,6 +145,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     ctx.save()
     ctx.translate(keeperX, GOAL_LINE)
     ctx.rotate(keeperRot)
+    ctx.scale(keeperScale, keeperScale)
     if (img && img.complete && img.naturalWidth > 0) {
       const kw = kh * (img.naturalWidth / img.naturalHeight)
       ctx.drawImage(img, -kw / 2, -kh + keeperDy, kw, kh)
@@ -156,38 +167,48 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     ctx.font = '26px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     ctx.fillText('⚽', ballX, ballY)
 
-    // power-balk: gecentreerd groen → geel → oranje → rood (symmetrisch)
+    // power-balk: gecentreerd groen → geel → oranje → rood (symmetrisch).
+    // Bij een booster: hoger + gouden gloed.
     if (power != null) {
       const bw = PB.x1 - PB.x0
+      const bh = powerBoost ? 26 : PB.h
+      const by = PB.y + PB.h - bh   // onderkant blijft op dezelfde plek
       const seg = (from: number, to: number, color: string) =>
-        { ctx.fillStyle = color; ctx.fillRect(PB.x0 + bw * (0.5 + from), PB.y, bw * (to - from), PB.h) }
-      // schaduw onder de balk
+        { ctx.fillStyle = color; ctx.fillRect(PB.x0 + bw * (0.5 + from), by, bw * (to - from), bh) }
+      // schaduw / gloed onder de balk
       ctx.save()
-      ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2
-      ctx.fillStyle = '#0e1118'; ctx.beginPath(); ctx.roundRect(PB.x0, PB.y, bw, PB.h, 7); ctx.fill()
+      ctx.shadowColor = powerBoost ? 'rgba(244,185,46,0.7)' : 'rgba(0,0,0,0.45)'
+      ctx.shadowBlur = powerBoost ? 16 : 8; ctx.shadowOffsetY = powerBoost ? 0 : 2
+      ctx.fillStyle = '#0e1118'; ctx.beginPath(); ctx.roundRect(PB.x0, by, bw, bh, 8); ctx.fill()
       ctx.restore()
       // gekleurde zones
       ctx.save()
-      ctx.beginPath(); ctx.roundRect(PB.x0, PB.y, bw, PB.h, 7); ctx.clip()
+      ctx.beginPath(); ctx.roundRect(PB.x0, by, bw, bh, 8); ctx.clip()
       seg(-0.5, 0.5, '#E63946')                 // rood (alles)
       seg(-ORANGE_HW, ORANGE_HW, '#E8862E')     // oranje
       seg(-YELLOW_HW, YELLOW_HW, '#F4B92E')      // geel
       seg(-GREEN_HW, GREEN_HW, '#2EA84B')        // groen (klein, midden)
       // glans bovenin
-      const sh = ctx.createLinearGradient(0, PB.y, 0, PB.y + PB.h)
-      sh.addColorStop(0, 'rgba(255,255,255,0.28)'); sh.addColorStop(0.5, 'rgba(255,255,255,0)')
-      ctx.fillStyle = sh; ctx.fillRect(PB.x0, PB.y, bw, PB.h)
+      const sh = ctx.createLinearGradient(0, by, 0, by + bh)
+      sh.addColorStop(0, 'rgba(255,255,255,0.3)'); sh.addColorStop(0.5, 'rgba(255,255,255,0)')
+      ctx.fillStyle = sh; ctx.fillRect(PB.x0, by, bw, bh)
       ctx.restore()
-      // randje
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1
-      ctx.beginPath(); ctx.roundRect(PB.x0 + 0.5, PB.y + 0.5, bw - 1, PB.h - 1, 7); ctx.stroke()
+      // randje (goud bij booster)
+      ctx.strokeStyle = powerBoost ? 'rgba(244,185,46,0.9)' : 'rgba(255,255,255,0.18)'
+      ctx.lineWidth = powerBoost ? 2 : 1
+      ctx.beginPath(); ctx.roundRect(PB.x0 + 0.5, by + 0.5, bw - 1, bh - 1, 8); ctx.stroke()
+      // ⚡-label bij booster
+      if (powerBoost) {
+        ctx.fillStyle = COL.gold; ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+        ctx.fillText('⚡ BOOSTER', W / 2, by - 4)
+      }
       // marker: witte naald met pijlpunt + gloed
       const mx = PB.x0 + bw * power
       ctx.save()
       ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 5
       ctx.fillStyle = '#FFFFFF'
-      ctx.beginPath(); ctx.roundRect(mx - 1.6, PB.y - 6, 3.2, PB.h + 12, 1.5); ctx.fill()
-      ctx.beginPath(); ctx.moveTo(mx - 5, PB.y - 9); ctx.lineTo(mx + 5, PB.y - 9); ctx.lineTo(mx, PB.y - 2); ctx.closePath(); ctx.fill()
+      ctx.beginPath(); ctx.roundRect(mx - 1.8, by - 6, 3.6, bh + 12, 1.6); ctx.fill()
+      ctx.beginPath(); ctx.moveTo(mx - 5, by - 9); ctx.lineTo(mx + 5, by - 9); ctx.lineTo(mx, by - 2); ctx.closePath(); ctx.fill()
       ctx.restore()
     }
 
@@ -229,25 +250,17 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
       particles.current = particles.current.filter((pt) => pt.life > 0)
     }
     const p = phaseRef.current
-    // Beide balken gaan 5% sneller per goal (moeilijkheidsgraad)
+    // De power-balk gaat elke goal 5% sneller (oplopende moeilijkheid)
     const ramp = Math.pow(1.05, scoreRef.current)
-    if (p === 'aim') {
-      const speed = Math.min(6, 2.1 * ramp)
-      let pos = reticle.current.pos + reticle.current.dir * speed * dt
-      let dir = reticle.current.dir
-      if (pos > ZONES - 1) { pos = ZONES - 1; dir = -1 }
-      if (pos < 0) { pos = 0; dir = 1 }
-      reticle.current = { pos, dir }
-      drawScene(SPOT.x, SPOT.y, zx(2), zx(pos))
-      raf.current = requestAnimationFrame(loop)
-    } else if (p === 'power') {
-      const speed = Math.min(2.6, 1.1 * ramp)
+    if (p === 'power') {
+      // Booster: 50% sneller (eenmalig deze beurt)
+      const speed = Math.min(3.4, 1.25 * ramp) * (boostActive.current ? 1.5 : 1)
       let pos = pwr.current.pos + pwr.current.dir * speed * dt
       let dir = pwr.current.dir
       if (pos > 1) { pos = 1; dir = -1 }
       if (pos < 0) { pos = 0; dir = 1 }
       pwr.current = { pos, dir }
-      drawScene(SPOT.x, SPOT.y, zx(2), zx(aimLock.current), pos)
+      drawScene(SPOT.x, SPOT.y, zx(2), null, pos, 0, 0, 1, boostActive.current)
       raf.current = requestAnimationFrame(loop)
     } else if (p === 'shoot') {
       const k = Math.min(1, (t - shot.current.start) / SHOOT_MS)
@@ -257,18 +270,37 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
       const endY = shot.current.over ? GOAL_TOP - 52 : TARGET_Y
       const arc = shot.current.over ? -Math.sin(k * Math.PI) * 60 : shot.current.panenka ? -Math.sin(k * Math.PI) * 46 : 0
       const by = SPOT.y + (endY - SPOT.y) * ease + arc
-      // keeper duikt: schuift naar zijn zone + leunt + zakt iets door
-      const kprog = Math.min(1, k * 1.3)
-      const kx = zx(2) + (zx(shot.current.keeperZone) - zx(2)) * kprog
-      const kdir = Math.sign(zx(shot.current.keeperZone) - zx(2))
-      drawScene(bx, by, kx, null, null, kdir * 0.5 * kprog, 16 * kprog)
+      if (shot.current.booster) {
+        // keeper vliegt achterover de goal in: spint, omhoog/achter, krimpt
+        drawScene(bx, by, zx(2), null, null, k * 2.4, -k * 30, 1 - k * 0.55)
+      } else {
+        // keeper duikt: schuift naar zijn zone + leunt + zakt iets door
+        const kprog = Math.min(1, k * 1.3)
+        const kx = zx(2) + (zx(shot.current.keeperZone) - zx(2)) * kprog
+        const kdir = Math.sign(zx(shot.current.keeperZone) - zx(2))
+        drawScene(bx, by, kx, null, null, kdir * 0.5 * kprog, 16 * kprog)
+      }
       if (k >= 1) {
-        if (!shot.current.scored) { endGame(); return }
+        if (!shot.current.scored) { boostActive.current = false; endGame(); return }
         scoreRef.current += 1; setScore(scoreRef.current)
-        setGoalFx((g) => g + 1)
-        if (shot.current.panenka) setPanenka((pp) => pp + 1)
-        if (scoreRef.current % 7 === 0) setKeeperFall((pp) => pp + 1)
-        phaseRef.current = 'aim'; setPhase('aim')
+        setGoalFx((gf) => gf + 1)
+        burst(zx(shot.current.lock), TARGET_Y, '#F4B92E', shot.current.booster ? 34 : 22)
+        if (shot.current.booster) {
+          // keeper geveld → volgende keeper (Lukaku ↔ random), booster verbruikt
+          boostActive.current = false
+          waveRef.current += 1
+          setKeeperSrc(nextKeeper(waveRef.current))
+          sinceBoost.current = 0
+          setBoostReady(false)
+        } else {
+          sinceBoost.current += 1
+          if (sinceBoost.current >= BOOST_EVERY) setBoostReady(true)
+          if (shot.current.panenka) setPanenka((pp) => pp + 1)
+          if (scoreRef.current % 7 === 0) setKeeperFall((pp) => pp + 1)
+          if (scoreRef.current % 5 === 0) setStreakFx(scoreRef.current)
+        }
+        pwr.current = { pos: 0, dir: 1 }
+        phaseRef.current = 'power'; setPhase('power')
       }
       raf.current = requestAnimationFrame(loop)
     }
@@ -277,51 +309,66 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const start = useCallback(() => {
     if (raf.current != null) cancelAnimationFrame(raf.current)
     scoreRef.current = 0; setScore(0); setResult(null)
-    reticle.current = { pos: 0, dir: 1 }
+    waveRef.current = 0; sinceBoost.current = 0; boostActive.current = false; setBoostReady(false); setKeeperSrc(KEEPER)
     pwr.current = { pos: 0, dir: 1 }
-    phaseRef.current = 'aim'; setPhase('aim')
+    phaseRef.current = 'power'; setPhase('power')
     last.current = performance.now()
     raf.current = requestAnimationFrame(loop)
   }, [loop])
 
-  // Eén tik: in 'aim' legt de richting vast → power-balk; in 'power' legt de kracht
-  // vast → schot. Te zacht (links) = keeper grijpt; te hard (rechts) = over.
+  // Power-booster (om de 5 goals): maakt de power-balk hoger + 50% sneller met hogere
+  // kansen. Je timet 'm zelf; raak je 'm goed, dan vélt de keeper achterover.
+  const useBooster = useCallback(() => {
+    if (phaseRef.current !== 'power' || !boostReady) return
+    boostActive.current = true
+    setBoostReady(false)
+    pwr.current = { pos: 0, dir: 1 }
+  }, [boostReady])
+
+  // Eén tik legt de kracht vast → schot. Alles draait om hoe goed je 't groen raakt:
+  // groen ≈ 99% goal, daarbuiten kleiner, rood = over. De hoek is willekeurig.
   const tap = useCallback(() => {
-    if (phaseRef.current === 'aim') {
-      aimLock.current = Math.round(reticle.current.pos)
-      pwr.current = { pos: 0, dir: 1 }
-      phaseRef.current = 'power'; setPhase('power')
-    } else if (phaseRef.current === 'power') {
-      spawnSplash(pwr.current.pos)
-      const lock = aimLock.current
-      const zone = zoneOf(pwr.current.pos)
-      const dive = pickDive()
-      const over = zone === 'red'                       // rood → altijd over (mis)
-      const read = lock === dive                         // keeper raadt je hoek → redding
-      const scored = !over && !read && Math.random() < ZONE_PROB[zone]
-      // keeper duikt naar de bal als hij 'm pakt, anders de verkeerde kant op
-      const keeperZone = scored ? dive : lock
-      const panenka = scored && lock === 2 && dive !== 2
-      shot.current = { start: performance.now(), lock, keeperZone, scored, over, panenka }
-      phaseRef.current = 'shoot'; setPhase('shoot')
-    }
+    if (phaseRef.current !== 'power') return
+    spawnSplash(pwr.current.pos)
+    const boosted = boostActive.current
+    const zone = zoneOf(pwr.current.pos)
+    const prob = (boosted ? ZONE_PROB_BOOST : ZONE_PROB)[zone]
+    const over = !boosted && zone === 'red'   // bij booster is rood géén zekere over (35%)
+    const scored = Math.random() < prob
+    const lock = Math.floor(Math.random() * ZONES)   // willekeurige hoek voor de bal
+    let keeperZone = lock                              // mis/redding: keeper bij de bal
+    if (scored) { do { keeperZone = pickDive() } while (keeperZone === lock) }  // goal: keeper de andere kant op
+    const panenka = scored && !boosted && lock === 2
+    shot.current = { start: performance.now(), lock, keeperZone, scored, over, panenka, booster: boosted }
+    phaseRef.current = 'shoot'; setPhase('shoot')
   }, [])
 
-  // keeper laden
+  // keeper laden (wisselt per wave)
   useEffect(() => {
     const img = new window.Image()
-    img.onload = () => { keeperImg.current = img; if (phaseRef.current === 'idle') { setupCanvas(); drawScene(SPOT.x, SPOT.y, zx(2), null) } }
-    img.src = `${FIGS}/${KEEPER}`
-  }, [setupCanvas, drawScene])
+    img.onload = () => { keeperImg.current = img; if (phaseRef.current === 'idle' || phaseRef.current === 'power') drawScene(SPOT.x, SPOT.y, zx(2), null) }
+    img.src = `${FIGS}/${keeperSrc}`
+  }, [keeperSrc, drawScene])
 
   // Panenka- en goal-flash weer verbergen
   useEffect(() => { if (!panenka) return; const t = setTimeout(() => setPanenka(0), 1100); return () => clearTimeout(t) }, [panenka])
   useEffect(() => { if (!goalFx) return; const t = setTimeout(() => setGoalFx(0), 900); return () => clearTimeout(t) }, [goalFx])
+  // Geluid wanneer de booster beschikbaar komt
+  useEffect(() => {
+    const a = new Audio('/bonus-reached.wav'); a.preload = 'auto'; boostSnd.current = a
+    return () => { a.pause() }
+  }, [])
+  useEffect(() => {
+    if (!boostReady || !boostSnd.current) return
+    boostSnd.current.currentTime = 0
+    void boostSnd.current.play().catch(() => {})
+  }, [boostReady])
+  useEffect(() => { if (!streakFx) return; const t = setTimeout(() => setStreakFx(0), 1100); return () => clearTimeout(t) }, [streakFx])
 
   useEffect(() => {
     setupCanvas(); drawScene(SPOT.x, SPOT.y, zx(2), null)
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space') { e.preventDefault(); if (phaseRef.current === 'aim' || phaseRef.current === 'power') tap(); else if (phaseRef.current === 'idle') start() }
+      if (e.code === 'Space') { e.preventDefault(); if (phaseRef.current === 'power') tap(); else if (phaseRef.current === 'idle') start() }
     }
     window.addEventListener('keydown', onKey)
     return () => { window.removeEventListener('keydown', onKey); if (raf.current != null) cancelAnimationFrame(raf.current) }
@@ -352,11 +399,18 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
           {keeperFall > 0 && (
             <div key={`kf${keeperFall}`} className="pointer-events-none absolute inset-x-0 top-[7%] flex justify-center z-20" aria-hidden>
               <Image
-                src={`${FIGS}/${KEEPER}`} alt="" width={120} height={120}
+                src={`${FIGS}/${keeperSrc}`} alt="" width={120} height={120}
                 onAnimationEnd={() => setKeeperFall(0)}
                 className="w-20 h-auto drop-shadow-2xl"
                 style={{ animation: 'keeper-tumble 1.4s ease-in forwards' }}
               />
+            </div>
+          )}
+
+          {/* Mijlpaal-flits (elke 5 op rij) */}
+          {streakFx > 0 && (
+            <div key={`s${streakFx}`} className="pointer-events-none absolute inset-0 flex items-center justify-center z-30" aria-hidden>
+              <span className="animate-pop font-display text-5xl text-wk-gold drop-shadow-[0_2px_10px_rgba(244,185,46,0.6)]">🔥 {streakFx}!</span>
             </div>
           )}
 
@@ -379,7 +433,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-5 bg-wk-bg/40 backdrop-blur-[1px] rounded-2xl">
               <p className="text-5xl">⚽</p>
               <p className="text-sm text-wk-soft leading-relaxed">
-                Tik eerst voor de <b className="text-wk-gold">richting</b> (mik op de hoeken — daar duikt de keeper minder vaak), daarna voor de <b className="text-wk-green">kracht</b>: stop de balk in het <b className="text-wk-green">groen</b>. Te zacht = redding, te hard = over. Eén misser = klaar.
+                Stop de power-balk in het <b className="text-wk-green">groen</b> → bijna zeker raak. Hoe verder van groen, hoe kleiner de kans; <b className="text-wk-red">rood</b> is over. De balk gaat elke goal <b>sneller</b>. Eén misser = klaar.
               </p>
               <button onClick={(e) => { e.stopPropagation(); start() }} className="font-display text-lg uppercase tracking-wide px-8 py-3 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer">
                 Start
@@ -399,6 +453,17 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
             </div>
           )}
         </div>
+
+        {/* Power-booster (om de 5 goals beschikbaar) */}
+        {phase === 'power' && boostReady && (
+          <button
+            type="button"
+            onClick={useBooster}
+            className="w-full flex items-center justify-center gap-2 rounded-full border border-wk-gold/60 bg-gradient-to-r from-wk-gold/25 to-wk-green/20 px-5 py-3 font-display text-lg uppercase tracking-wide text-wk-gold animate-pulse hover:brightness-110 active:scale-95 transition cursor-pointer"
+          >
+            ⚡ Power-booster — grotere balk, hogere kans!
+          </button>
+        )}
 
         <GameLeaderboard entries={board} currentUserId={currentUserId} />
       </div>
