@@ -431,12 +431,16 @@ export default function PadelclubClient({
 
       {/* Links/Rechts mascottes — schuiven van de zijkant in (buitenste laag) en
           wiebelen heen en weer (binnenste laag, zodat transforms niet botsen) */}
+      {/* links.png = geheime ingang naar de spellen (klik 'm als hij in beeld is) */}
       <div
-        className={`pointer-events-none fixed top-2 sm:top-4 left-2 sm:left-8 z-40 ${fallLeft ? '' : 'transition-transform duration-700 ease-out'}`}
+        role="button"
+        aria-label="Spellen"
+        title="Spellen"
+        onClick={() => router.push('/padelclub/spel')}
+        className={`fixed top-2 sm:top-4 left-2 sm:left-8 z-40 cursor-pointer ${fallLeft ? '' : 'transition-transform duration-700 ease-out'}`}
         style={fallLeft
           ? { animation: 'mascot-fall 1.8s cubic-bezier(0.45,0,0.9,1) forwards' }
           : { transform: shakeDir === 'left' ? 'translateX(0)' : 'translateX(120vw)' }}
-        aria-hidden
       >
         <Image
           src="/links.png" alt="" width={280} height={280}
