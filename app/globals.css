@@ -187,6 +187,35 @@
   to   { opacity: 1;   }
 }
 
+/* Booster-goal: keeper tolt steeds groter naar een bovenhoek het scherm uit */
+@keyframes keeper-spinout-left {
+  0%   { transform: translate(0, 0)         scale(1)   rotate(0deg);    opacity: 1; }
+  100% { transform: translate(-150%, -150%) scale(2.8) rotate(-720deg); opacity: 0; }
+}
+@keyframes keeper-spinout-right {
+  0%   { transform: translate(0, 0)        scale(1)   rotate(0deg);   opacity: 1; }
+  100% { transform: translate(150%, -150%) scale(2.8) rotate(720deg); opacity: 0; }
+}
+
+/* Rick wandelt langs het doel en weer terug (in → staan → uit) */
+@keyframes rick-walk-left {
+  0%   { transform: translateX(-170%); opacity: 0; }
+  16%  { transform: translateX(0);     opacity: 1; }
+  84%  { transform: translateX(0);     opacity: 1; }
+  100% { transform: translateX(-170%); opacity: 0; }
+}
+@keyframes rick-walk-right {
+  0%   { transform: translateX(170%); opacity: 0; }
+  16%  { transform: translateX(0);    opacity: 1; }
+  84%  { transform: translateX(0);    opacity: 1; }
+  100% { transform: translateX(170%); opacity: 0; }
+}
+/* Loop-wiebel terwijl Rick wandelt */
+@keyframes walk-bob {
+  0%, 100% { transform: translateY(0)    rotate(-4deg); }
+  50%      { transform: translateY(-5px) rotate(4deg);  }
+}
+
 /* Rick (als keeper) loopt na 5 goals het scherm uit, naar zijn eigen kant */
 @keyframes rick-exit-left {
   0%   { transform: translateX(0)     rotate(0deg);  opacity: 1; }

@@ -23,13 +23,15 @@ const SHOOT_MS = 460
 const DIVE_W = [0.13, 0.19, 0.36, 0.19, 0.13]
 // Power-balk: gecentreerd groen, daarbuiten geel → oranje → rood (symmetrisch).
 // Halve breedtes vanaf het midden (0.5). Groen is bewust klein.
-const GREEN_HW = 0.06
-const YELLOW_HW = 0.17
-const ORANGE_HW = 0.32
-const ZONE_PROB: Record<string, number> = { green: 0.99, yellow: 0.67, orange: 0.33, red: 0 }
+const GREEN_HW = 0.11
+const YELLOW_HW = 0.22
+const ORANGE_HW = 0.36
+// Groen = altijd raak (wat groen lijkt, is raak). Daarbuiten loopt de kans af; rood is altijd over.
+const ZONE_PROB: Record<string, number> = { green: 1, yellow: 0.82, orange: 0.42, red: 0 }
 // Tijdens een booster: groen én geel zijn gegarandeerd raak. Oranje/rood blijven een gok.
 const ZONE_PROB_BOOST: Record<string, number> = { green: 1, yellow: 1, orange: 0.55, red: 0.35 }
-const PB = { x0: 46, x1: W - 46, y: H - 26, h: 14 }
+// Power-balk staat bewust wat hoger zodat je duim op mobiel het zicht niet blokkeert.
+const PB = { x0: 46, x1: W - 46, y: H - 86, h: 14 }
 const zoneOf = (power: number): 'green' | 'yellow' | 'orange' | 'red' => {
   const d = Math.abs(power - 0.5)
   if (d < GREEN_HW) return 'green'
@@ -44,11 +46,10 @@ const KEEPER = 'lukaku.png'   // startkeeper (komt elke 2e wave terug)
 const KEEPER_POOL = ['rick.png', 'bus.png', 'ho.png', 'kim.png', 'vince.png', 'dejuul.png', 'trein.png', 'ashi.png', 'pimp.png']
 const START_BOOSTERS = 3
 const BOOST_EVERY = 5   // elke 5 goals krijg je er één bij
+// Rick is (voorlopig) géén keeper meer — hij wandelt enkel langs het doel (zie rickWalk).
+const KEEPER_REAL = KEEPER_POOL.filter((k) => k !== 'rick.png')
 // Na een booster-goal vliegt de keeper weg en komt er een willekeurige nieuwe (Lukaku is de eerste)
-const randomKeeper = () => KEEPER_POOL[Math.floor(Math.random() * KEEPER_POOL.length)]
-// "Normale" keeper (geen Rick) — voor wanneer Rick na 5 goals het veld uit loopt
-const NORMAL_POOL = KEEPER_POOL.filter((k) => k !== 'rick.png')
-const normalKeeper = () => NORMAL_POOL[Math.floor(Math.random() * NORMAL_POOL.length)]
+const randomKeeper = () => KEEPER_REAL[Math.floor(Math.random() * KEEPER_REAL.length)]
 const RICK_GOALS_MAX = 5   // na zoveel goals loopt Rick weg
 
 const COL = { grass1: '#16321f', grass2: '#0f2417', line: '#F5F2EB', text: '#F5F2EB', gold: '#F4B92E' }
@@ -74,6 +75,9 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const [streakFx, setStreakFx] = useState(0)
   // Keeper-waves + power-booster
   const [keeperSrc, setKeeperSrc] = useState(KEEPER)
+  // Booster-goal: de keeper tolt groeiend naar links- of rechtsboven het scherm uit
+  const [keeperFlyOff, setKeeperFlyOff] = useState<{ src: string; dir: 'left' | 'right'; k: number } | null>(null)
+  const keeperFlyK = useRef(0)
   const [boosters, setBoosters] = useState(START_BOOSTERS)   // voorraad vuur-boosters
   const [armed, setArmed] = useState(false)                  // booster gewapend voor dit schot
   const boostersRef = useRef(START_BOOSTERS)
@@ -81,17 +85,22 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const boostActive = useRef(false)   // huidige power-schot is een booster
   const boostSnd = useRef<HTMLAudioElement | null>(null)
   const playBoostSnd = () => { const a = boostSnd.current; if (a) { a.currentTime = 0; void a.play().catch(() => {}) } }
-  // Rick als keeper: hij staat náást het doel → alles is raak behalve rood. Na 5 goals loopt hij weg.
+  // Rick als keeper: hij dook elk schot willekeurig links/rechts/boven het doel op → alles raak behalve rood. Na 5 goals loopt hij weg.
   const [rickLeave, setRickLeave] = useState<{ dir: 'left' | 'right'; k: number } | null>(null)
   const rickRef = useRef(false)
   const rickSideLeft = useRef(true)
   const rickHomeX = useRef(zx(2))
+  const rickHomeY = useRef(GOAL_LINE)
   const rickGoals = useRef(0)
   const rickLeaveK = useRef(0)
+  // Rick wandelt elke 15s willekeurig links of rechts langs het doel — en weer terug.
+  const [rickWalk, setRickWalk] = useState<{ side: 'left' | 'right'; k: number } | null>(null)
+  const rickWalkK = useRef(0)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const keeperImg = useRef<HTMLImageElement | null>(null)
   const phaseRef = useRef(phase); phaseRef.current = phase
+  const keeperSrcRef = useRef(keeperSrc); keeperSrcRef.current = keeperSrc
   const scoreRef = useRef(0)
   const boardRef = useRef(board); boardRef.current = board
   const raf = useRef<number | null>(null)
@@ -111,7 +120,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   }
   const spawnSplash = (power: number) => burst(PB.x0 + (PB.x1 - PB.x0) * power, PB.y + PB.h / 2, ZONE_COLOR[zoneOf(power)], 16)
 
-  const drawScene = useCallback((ballX: number, ballY: number, keeperX: number, reticleX: number | null, power: number | null = null, keeperRot = 0, keeperDy = 0, keeperScale = 1, powerBoost = false) => {
+  const drawScene = useCallback((ballX: number, ballY: number, keeperX: number, reticleX: number | null, power: number | null = null, keeperRot = 0, keeperDy = 0, keeperScale = 1, powerBoost = false, keeperY = GOAL_LINE) => {
     const cv = canvasRef.current; if (!cv) return
     const ctx = cv.getContext('2d'); if (!ctx) return
     // gras met diepte
@@ -150,15 +159,17 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     ctx.beginPath(); ctx.moveTo(fL, fB); ctx.lineTo(fL, fT); ctx.lineTo(fR, fT); ctx.lineTo(fR, fB); ctx.stroke()
     ctx.lineCap = 'butt'
 
-    // keeper-schaduw
-    ctx.fillStyle = 'rgba(0,0,0,0.28)'
-    ctx.beginPath(); ctx.ellipse(keeperX, GOAL_LINE, 24, 6, 0, 0, Math.PI * 2); ctx.fill()
+    // keeper-schaduw (alleen op de grond — niet als hij bóven het doel zweeft)
+    if (keeperY >= GOAL_LINE - 1) {
+      ctx.fillStyle = 'rgba(0,0,0,0.28)'
+      ctx.beginPath(); ctx.ellipse(keeperX, GOAL_LINE, 24, 6, 0, 0, Math.PI * 2); ctx.fill()
+    }
 
     // keeper — kan 'duiken' (rotatie + iets omlaag) rond zijn voeten
     const img = keeperImg.current
     const kh = 76
     ctx.save()
-    ctx.translate(keeperX, GOAL_LINE)
+    ctx.translate(keeperX, keeperY)
     ctx.rotate(keeperRot)
     ctx.scale(keeperScale, keeperScale)
     if (img && img.complete && img.naturalWidth > 0) {
@@ -186,7 +197,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     // Bij een booster: hoger + gouden gloed.
     if (power != null) {
       const bw = PB.x1 - PB.x0
-      const bh = powerBoost ? 26 : PB.h
+      const bh = powerBoost ? 46 : PB.h   // booster: flink hogere balk
       const by = PB.y + PB.h - bh   // onderkant blijft op dezelfde plek
       const seg = (from: number, to: number, color: string) =>
         { ctx.fillStyle = color; ctx.fillRect(PB.x0 + bw * (0.5 + from), by, bw * (to - from), bh) }
@@ -247,6 +258,15 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     const ctx = cv.getContext('2d'); if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }, [])
 
+  // Rick posteert zich elk schot opnieuw: willekeurig links, rechts of bóven het doel.
+  const placeRick = useCallback(() => {
+    if (!rickRef.current) { rickHomeX.current = zx(2); rickHomeY.current = GOAL_LINE; return }
+    const r = Math.floor(Math.random() * 3)
+    if (r === 0) { rickHomeX.current = GX0 - 10; rickHomeY.current = GOAL_LINE; rickSideLeft.current = true }
+    else if (r === 1) { rickHomeX.current = GX1 + 10; rickHomeY.current = GOAL_LINE; rickSideLeft.current = false }
+    else { rickHomeX.current = W / 2; rickHomeY.current = GOAL_TOP - 18; rickSideLeft.current = Math.random() < 0.5 }
+  }, [])
+
   const endGame = useCallback(() => {
     phaseRef.current = 'over'; setPhase('over')
     if (raf.current != null) cancelAnimationFrame(raf.current)
@@ -275,7 +295,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
       if (pos > 1) { pos = 1; dir = -1 }
       if (pos < 0) { pos = 0; dir = 1 }
       pwr.current = { pos, dir }
-      drawScene(SPOT.x, SPOT.y, rickHomeX.current, null, pos, 0, 0, 1, boostActive.current)
+      drawScene(SPOT.x, SPOT.y, rickHomeX.current, null, pos, 0, 0, 1, boostActive.current, rickHomeY.current)
       raf.current = requestAnimationFrame(loop)
     } else if (p === 'shoot') {
       const k = Math.min(1, (t - shot.current.start) / SHOOT_MS)
@@ -285,12 +305,9 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
       const endY = shot.current.over ? GOAL_TOP - 52 : TARGET_Y
       const arc = shot.current.over ? -Math.sin(k * Math.PI) * 60 : shot.current.panenka ? -Math.sin(k * Math.PI) * 46 : 0
       const by = SPOT.y + (endY - SPOT.y) * ease + arc
-      if (shot.current.booster) {
-        // keeper vliegt achterover de goal in: spint, omhoog/achter, krimpt
-        drawScene(bx, by, rickHomeX.current, null, null, k * 2.4, -k * 30, 1 - k * 0.55)
-      } else if (rickRef.current) {
-        // Rick staat onbewogen naast het doel — hij duikt niet
-        drawScene(bx, by, rickHomeX.current, null, null, 0, 0)
+      if ((shot.current.booster && shot.current.scored) || rickRef.current) {
+        // keeper blijft op zijn plek staan (booster: tolt er straks via de overlay uit; Rick duikt nooit)
+        drawScene(bx, by, rickHomeX.current, null, null, 0, 0, 1, false, rickHomeY.current)
       } else {
         // keeper duikt: schuift naar zijn zone + leunt + zakt iets door
         const kprog = Math.min(1, k * 1.3)
@@ -304,18 +321,20 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
         setGoalFx((gf) => gf + 1)
         burst(zx(shot.current.lock), TARGET_Y, '#F4B92E', shot.current.booster ? 34 : 22)
         if (shot.current.booster) {
-          // keeper geveld → vliegt weg, willekeurige nieuwe keeper komt erin
+          // keeper geveld → tolt groeiend naar links/rechtsboven het scherm uit, nieuwe keeper erin
           boostActive.current = false; setArmed(false)
           waveRef.current += 1
+          setKeeperFlyOff({ src: keeperSrcRef.current, dir: Math.random() < 0.5 ? 'left' : 'right', k: ++keeperFlyK.current })
+          rickRef.current = false
           setKeeperSrc(randomKeeper())
         } else if (rickRef.current) {
-          // Goal langs Rick. Na 5 goals loopt hij het scherm uit → normale keeper terug.
+          // (Rick is voorlopig geen keeper; deze tak staat uit)
           rickGoals.current += 1
           if (rickGoals.current >= RICK_GOALS_MAX) {
             rickRef.current = false
             setRickLeave({ dir: rickSideLeft.current ? 'left' : 'right', k: ++rickLeaveK.current })
             waveRef.current += 1
-            setKeeperSrc(normalKeeper())
+            setKeeperSrc(randomKeeper())
           }
         } else {
           if (shot.current.panenka) setPanenka((pp) => pp + 1)
@@ -328,17 +347,18 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
           playBoostSnd()
         }
         pwr.current = { pos: 0, dir: 1 }
+        placeRick()   // Rick (indien keeper) dook elk schot ergens anders op
         phaseRef.current = 'power'; setPhase('power')
       }
       raf.current = requestAnimationFrame(loop)
     }
-  }, [drawScene, endGame])
+  }, [drawScene, endGame, placeRick])
 
   const start = useCallback(() => {
     if (raf.current != null) cancelAnimationFrame(raf.current)
     scoreRef.current = 0; setScore(0); setResult(null)
     waveRef.current = 0; boostActive.current = false; setArmed(false)
-    rickRef.current = false; rickGoals.current = 0; rickHomeX.current = zx(2); setRickLeave(null)
+    rickRef.current = false; rickGoals.current = 0; rickHomeX.current = zx(2); rickHomeY.current = GOAL_LINE; setRickLeave(null); setKeeperFlyOff(null)
     boostersRef.current = START_BOOSTERS; setBoosters(START_BOOSTERS); setKeeperSrc(KEEPER)
     pwr.current = { pos: 0, dir: 1 }
     phaseRef.current = 'power'; setPhase('power')
@@ -363,11 +383,12 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     spawnSplash(pwr.current.pos)
     const boosted = boostActive.current
     const zone = zoneOf(pwr.current.pos)
-    // Rick staat naast het doel: alles raak behalve rood (altijd mis). Booster overrulet wel.
-    const prob = rickRef.current && !boosted
-      ? (zone === 'red' ? 0 : 1)
+    // Rood is ALTIJD hoog over de lat (en dus mis) — ook met booster of tegen Rick.
+    const over = zone === 'red'
+    // Rick staat naast het doel: alles raak behalve rood. Booster overrulet wel (m.u.v. rood).
+    const prob = over ? 0
+      : rickRef.current && !boosted ? 1
       : (boosted ? ZONE_PROB_BOOST : ZONE_PROB)[zone]
-    const over = !boosted && zone === 'red'   // bij booster is rood géén zekere over (35%)
     const scored = Math.random() < prob
     const lock = Math.floor(Math.random() * ZONES)   // willekeurige hoek voor de bal
     let keeperZone = lock                              // mis/redding: keeper bij de bal
@@ -381,18 +402,12 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   useEffect(() => {
     const isRick = keeperSrc === 'rick.png'
     rickRef.current = isRick
-    if (isRick) {
-      rickGoals.current = 0
-      const left = Math.random() < 0.5
-      rickSideLeft.current = left
-      rickHomeX.current = left ? GX0 - 10 : GX1 + 10
-    } else {
-      rickHomeX.current = zx(2)
-    }
+    if (isRick) rickGoals.current = 0
+    placeRick()
     const img = new window.Image()
-    img.onload = () => { keeperImg.current = img; if (phaseRef.current === 'idle' || phaseRef.current === 'power') drawScene(SPOT.x, SPOT.y, rickHomeX.current, null) }
+    img.onload = () => { keeperImg.current = img; if (phaseRef.current === 'idle' || phaseRef.current === 'power') drawScene(SPOT.x, SPOT.y, rickHomeX.current, null, null, 0, 0, 1, false, rickHomeY.current) }
     img.src = `${FIGS}/${keeperSrc}`
-  }, [keeperSrc, drawScene])
+  }, [keeperSrc, drawScene, placeRick])
 
   // Panenka- en goal-flash weer verbergen
   useEffect(() => { if (!panenka) return; const t = setTimeout(() => setPanenka(0), 1100); return () => clearTimeout(t) }, [panenka])
@@ -401,6 +416,13 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   useEffect(() => {
     const a = new Audio('/bonus-reached.wav'); a.preload = 'auto'; boostSnd.current = a
     return () => { a.pause() }
+  }, [])
+  // Rick komt elke 15s willekeurig links of rechts langslopen
+  useEffect(() => {
+    const id = setInterval(() => {
+      setRickWalk({ side: Math.random() < 0.5 ? 'left' : 'right', k: ++rickWalkK.current })
+    }, 15000)
+    return () => clearInterval(id)
   }, [])
   useEffect(() => { if (!streakFx) return; const t = setTimeout(() => setStreakFx(0), 1100); return () => clearTimeout(t) }, [streakFx])
 
@@ -481,6 +503,41 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
                 onAnimationEnd={() => setKeeperFall(0)}
                 className="w-20 h-auto drop-shadow-2xl"
                 style={{ animation: 'keeper-tumble 1.4s ease-in forwards' }}
+              />
+            </div>
+          )}
+
+          {/* Rick wandelt langs het doel (links of rechts) en weer terug — elke 15s */}
+          {rickWalk && (
+            <div
+              key={`rw${rickWalk.k}`}
+              className="pointer-events-none absolute top-[19%] z-20"
+              style={{ [rickWalk.side === 'left' ? 'left' : 'right']: '2%' } as React.CSSProperties}
+              onAnimationEnd={() => setRickWalk(null)}
+              aria-hidden
+            >
+              <div style={{ animation: `rick-walk-${rickWalk.side} 4s ease-in-out forwards` }}>
+                <Image
+                  src={`${FIGS}/rick.png`} alt="" width={90} height={90}
+                  className="w-14 h-auto drop-shadow-xl"
+                  style={{ animation: 'walk-bob 0.42s ease-in-out infinite' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Booster-goal: keeper tolt groeiend naar links/rechtsboven het scherm uit */}
+          {keeperFlyOff && (
+            <div
+              key={`kfo${keeperFlyOff.k}`}
+              className="pointer-events-none absolute inset-x-0 top-[16%] flex justify-center z-30"
+              aria-hidden
+            >
+              <Image
+                src={`${FIGS}/${keeperFlyOff.src}`} alt="" width={150} height={150}
+                onAnimationEnd={() => setKeeperFlyOff(null)}
+                className="w-24 h-auto drop-shadow-2xl"
+                style={{ animation: `keeper-spinout-${keeperFlyOff.dir} 0.9s cubic-bezier(0.35,0,0.7,1) forwards` }}
               />
             </div>
           )}
