@@ -338,7 +338,7 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
           {phase === 'over' && result && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-6 bg-wk-bg/55 backdrop-blur-[1px] rounded-2xl">
               <p className="font-mono text-[10px] text-wk-muted tracking-[0.2em] uppercase">Game over</p>
-              <p className="font-fun font-semibold text-5xl text-wk-gold leading-none">{result.score}</p>
+              <p className="font-score text-5xl text-wk-gold leading-none">{result.score}</p>
               <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">punten</p>
               {result.record && <p className="font-mono text-xs text-wk-green tracking-[0.14em] uppercase">🏆 Nieuw record!</p>}
               <button onClick={(e) => { e.stopPropagation(); start() }} className="mt-1 font-display text-base uppercase tracking-wide px-7 py-2.5 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer">

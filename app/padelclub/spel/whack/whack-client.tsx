@@ -33,6 +33,9 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
   const [result, setResult] = useState<{ score: number; record: boolean } | null>(null)
   // Easter egg: tik je Rick, dan dendert een grote Rick over je scherm 💢
   const [rickFly, setRickFly] = useState(0)
+  // Zwevende +1 / −2 labels per vak
+  const [pops, setPops] = useState<{ id: number; idx: number; delta: number }[]>([])
+  const popRef = useRef(0)
 
   const phaseRef = useRef(phase); phaseRef.current = phase
   const scoreRef = useRef(0)
@@ -90,7 +93,8 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
       const rick = Math.random() < 0.22
       const src = rick ? RICK : GOOD[Math.floor(Math.random() * GOOD.length)]
       const key = ++keyRef.current
-      const scale = 0.55 + Math.random() * 0.45   // variabele zoom → minder voorspelbaar
+      // Vult altijd het vak; goede figuren tot 30% ingezoomd, Rick tot 100% voor extra variatie
+      const scale = 1 + Math.random() * (rick ? 1 : 0.3)
       const next = [...prev]
       next[idx] = { src, key, rick, scale }
       const elapsed = GAME_SECONDS * 1000 - (endAt.current - performance.now())
@@ -151,8 +155,13 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
     const h = holes[idx]
     if (!h || h.exploding) return
     playSfx(h.rick)
-    setScore((s) => Math.max(0, s + (h.rick ? -2 : 1)))
+    const delta = h.rick ? -2 : 1
+    setScore((s) => Math.max(0, s + delta))
     if (h.rick) setRickFly((k) => k + 1)
+    const pid = ++popRef.current
+    setPops((p) => [...p, { id: pid, idx, delta }])
+    const pt = setTimeout(() => setPops((p) => p.filter((x) => x.id !== pid)), 720)
+    timers.current.push(pt)
     // even laten 'ontploffen' voordat-ie verdwijnt
     setHoles((p) => p.map((x, i) => (i === idx ? { ...x!, exploding: true } : x)))
     const t = setTimeout(() => {
@@ -196,11 +205,11 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
           <div className="flex items-center justify-between bg-wk-surface border border-white/10 rounded-xl px-5 py-3">
             <div>
               <p className="font-mono text-[9px] text-wk-muted tracking-[0.16em] uppercase">Score</p>
-              <p className="font-fun font-semibold text-3xl leading-none text-wk-gold">{score}</p>
+              <p className="font-score text-3xl leading-none text-wk-gold">{score}</p>
             </div>
             <div className="text-right">
               <p className="font-mono text-[9px] text-wk-muted tracking-[0.16em] uppercase">Tijd</p>
-              <p className={`font-fun font-semibold text-3xl leading-none ${timeLeft <= 5 ? 'text-wk-red' : 'text-wk-text'}`}>{timeLeft}</p>
+              <p className={`font-score text-3xl leading-none ${timeLeft <= 5 ? 'text-wk-red' : 'text-wk-text'}`}>{timeLeft}</p>
             </div>
           </div>
         )}
@@ -214,6 +223,7 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
                 onClick={() => whack(i)}
                 disabled={phase !== 'playing'}
                 className="relative aspect-square bg-wk-bg2 overflow-hidden select-none active:scale-95 transition-transform flex items-center justify-center"
+                style={h?.exploding ? ({ animation: 'whack-shock 0.4s ease-out', ['--shock' as string]: h.rick ? 'var(--color-wk-red)' : 'var(--color-wk-green)' } as React.CSSProperties) : undefined}
               >
                 {h && (
                   <span
@@ -222,12 +232,21 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
                     style={{
                       width: `${Math.round(h.scale * 100)}%`,
                       height: `${Math.round(h.scale * 100)}%`,
-                      ...(h.exploding ? { animation: 'whack-pop 0.32s cubic-bezier(0.3,0,0.2,1) forwards' } : {}),
+                      ...(h.exploding ? { animation: 'whack-pop 0.4s cubic-bezier(0.3,0,0.2,1) forwards' } : {}),
                     }}
                   >
                     <Image src={`${FIGS}/${h.src}`} alt="" fill className="object-contain drop-shadow-lg" sizes="140px" />
                   </span>
                 )}
+                {pops.filter((p) => p.idx === i).map((p) => (
+                  <span
+                    key={p.id}
+                    className={`pointer-events-none absolute left-1/2 top-1/2 font-score text-3xl sm:text-4xl drop-shadow-[0_2px_0_rgba(0,0,0,0.5)] ${p.delta < 0 ? 'text-wk-red' : 'text-wk-green'}`}
+                    style={{ animation: 'whack-float 0.72s cubic-bezier(0.2,0.7,0.3,1) forwards' }}
+                  >
+                    {p.delta > 0 ? `+${p.delta}` : p.delta}
+                  </span>
+                ))}
               </button>
             ))}
           </div>
@@ -250,7 +269,7 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
         {phase === 'over' && result && (
           <div className="bg-wk-surface border border-wk-gold/40 rounded-2xl px-5 py-6 text-center space-y-3 animate-podium-pop" style={{ boxShadow: '0 0 24px rgba(244,185,46,0.18)' }}>
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.2em] uppercase">Klaar!</p>
-            <p className="font-fun font-semibold text-5xl text-wk-gold leading-none">{result.score}</p>
+            <p className="font-score text-5xl text-wk-gold leading-none">{result.score}</p>
             <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">punten</p>
             {result.record && <p className="font-mono text-xs text-wk-green tracking-[0.14em] uppercase">🏆 Nieuw persoonlijk record!</p>}
             <button onClick={start} className="font-display text-base uppercase tracking-wide px-7 py-2.5 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer">
