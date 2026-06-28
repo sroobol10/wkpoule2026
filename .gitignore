@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# bron-assets pixel-art (alleen lokaal; gekozen sprites staan in public/)
+/Legacy Collection/
+
 # lokale hulpscripts (niet committen)
 scripts/reset-password.ts
 scripts/diagnose-advancement.ts

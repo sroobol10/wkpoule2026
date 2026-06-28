@@ -14,6 +14,10 @@ export const PADEL_GAMES: { slug: string; title: string; emoji: string; tagline:
   { slug: 'whack', title: 'Whack-a-flyer', emoji: '🎯', tagline: 'Tik de figuren · ontwijk Rick · 30s', available: true },
   { slug: 'flappy', title: 'Flappy Padel', emoji: '🎾', tagline: 'Tik om te fladderen · ontwijk de netten', available: true },
   { slug: 'penalty', title: 'Strafschoppen', emoji: '⚽', tagline: 'Mik op de hoeken · klop de keeper · hoeveel op rij?', available: true },
+  { slug: 'space', title: 'Space Strikers', emoji: '🚀', tagline: 'Volg met je vinger · golven aliens · versla Reuze-Rick', available: true },
+  { slug: 'boss', title: 'Boss Rush', emoji: '🗡️', tagline: 'Overleef de arena · versla elke eindbaas', available: true },
+  { slug: 'runner', title: 'Sunny Sprint', emoji: '🐰', tagline: 'Tik om te springen · ontwijk Rick · pak munten', available: true },
+  { slug: 'gun', title: 'Alien Assault', emoji: '🔫', tagline: 'Ren, spring & schiet · versla de alien-tank', available: true },
 ]
 
 // Beste score per padelclub-lid voor één game, gesorteerd hoog→laag.
