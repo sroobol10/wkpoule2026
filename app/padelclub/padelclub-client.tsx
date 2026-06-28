@@ -28,7 +28,10 @@ export type DayMatch = {
   home: { name: string; flag: string | null } | null
   away: { name: string; flag: string | null } | null
   actual: string | null
-  preds: Record<string, { text: string | null; pts: number | null }>
+  isKo?: boolean
+  winnerName?: string | null
+  // KO: per speler de gekozen winnaar(s) onder de twee echte landen (1 of 2 vlaggen)
+  preds: Record<string, { text: string | null; pts: number | null; choices?: { name: string; flag: string | null }[] }>
 }
 
 export type DayQuestion = {
@@ -553,16 +556,16 @@ export default function PadelclubClient({
                 <div className="px-4 py-3 border-b border-white/5">
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1.5 flex-1 min-w-0 justify-end">
-                      <span className="text-xs font-semibold text-wk-soft truncate">{m.home?.name ?? '?'}</span>
+                      <span className={`text-xs font-semibold truncate ${m.winnerName === m.home?.name ? 'text-wk-gold' : 'text-wk-soft'}`}>{m.home?.name ?? '?'}</span>
                       {m.home?.flag && <Image src={m.home.flag} alt={m.home.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
                     </div>
                     <span className="font-fun font-semibold text-base text-wk-text shrink-0 px-1">{m.actual ?? 'vs'}</span>
                     <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       {m.away?.flag && <Image src={m.away.flag} alt={m.away.name} width={20} height={14} className="w-5 h-3.5 rounded-sm object-cover shrink-0" />}
-                      <span className="text-xs font-semibold text-wk-soft truncate">{m.away?.name ?? '?'}</span>
+                      <span className={`text-xs font-semibold truncate ${m.winnerName === m.away?.name ? 'text-wk-gold' : 'text-wk-soft'}`}>{m.away?.name ?? '?'}</span>
                     </div>
                   </div>
-                  <p className="mt-1.5 text-center font-mono text-[10px] text-wk-muted tracking-[0.12em]">{fmtTime(m.time)}</p>
+                  <p className="mt-1.5 text-center font-mono text-[10px] text-wk-muted tracking-[0.12em]">{fmtTime(m.time)}{m.isKo ? ' · knockout' : ''}</p>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-white/5">
                   {players.map((p) => {
@@ -577,7 +580,23 @@ export default function PadelclubClient({
                             <span className={`font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${good ? 'bg-wk-green/15 text-wk-green' : 'bg-wk-red/15 text-wk-red'}`}>{pr!.pts}</span>
                           )}
                         </div>
-                        <p className={`font-fun font-medium text-lg ${pr?.text ? 'text-wk-text' : 'text-wk-muted/40'}`}>{pr?.text ?? '—'}</p>
+                        {m.isKo ? (
+                          pr?.choices && pr.choices.length > 0 ? (
+                            <div className="flex items-center justify-center gap-1 flex-wrap min-h-[24px]">
+                              {pr.choices.map((c, ci) => (
+                                <span key={ci} className="inline-flex items-center gap-1">
+                                  {ci > 0 && <span className="font-mono text-[10px] text-wk-muted">&</span>}
+                                  {c.flag && <Image src={c.flag} alt={c.name} width={22} height={15} className="w-[22px] h-[15px] rounded-sm object-cover shrink-0" />}
+                                  {pr.choices!.length === 1 && <span className="text-xs font-semibold text-wk-text truncate">{c.name}</span>}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="font-fun font-medium text-lg text-wk-muted/40 min-h-[24px]">—</p>
+                          )
+                        ) : (
+                          <p className={`font-fun font-medium text-lg ${pr?.text ? 'text-wk-text' : 'text-wk-muted/40'}`}>{pr?.text ?? '—'}</p>
+                        )}
                       </div>
                     )
                   })}

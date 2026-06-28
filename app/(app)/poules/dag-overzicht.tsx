@@ -90,8 +90,21 @@ export async function DagOverzicht({ userId }: { userId: string }) {
   const koMap = Object.fromEntries(((koPreds ?? []) as KoPred[]).map((p) => [p.match_id, p]))
   const jokerIds = new Set(((jokers ?? []) as { match_id: string }[]).map((j) => j.match_id))
 
-  const played = matches.filter((m) => m.result_entered)
-  const upcoming = matches.filter((m) => !m.result_entered)
+  // Alle landen die deze deelnemer ooit als KO-winnaar koos (over alle KO-wedstrijden).
+  // Hiermee bepalen we welke KO-wedstrijden van vandaag we tonen en "mijn keuze".
+  const { data: allKoWinners } = await supabase
+    .from('knockout_predictions')
+    .select('predicted_winner_id')
+    .eq('user_id', userId)
+  const winSet = new Set(((allKoWinners ?? []) as { predicted_winner_id: string }[]).map((k) => k.predicted_winner_id))
+
+  // KO-wedstrijden alleen tonen als je minstens één van de twee landen als winnaar
+  // voorspelde. Groepsfase-wedstrijden tonen we zoals altijd.
+  const visible = matches.filter(
+    (m) => m.stage === 'group' || winSet.has(m.home_team?.id ?? '') || winSet.has(m.away_team?.id ?? ''),
+  )
+  const played = visible.filter((m) => m.result_entered)
+  const upcoming = visible.filter((m) => !m.result_entered)
 
   // ── Bonusvragen ───────────────────────────────────────────────────────────
   const [{ data: dailyQs }, { data: preQs }] = await Promise.all([
@@ -158,7 +171,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Behaalde punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {played.map((m) => (
-                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} ko={koMap[m.id]} joker={jokerIds.has(m.id)} />
+                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} ko={koMap[m.id]} joker={jokerIds.has(m.id)} winSet={winSet} />
                   ))}
                 </div>
               </SubSection>
@@ -167,7 +180,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Nog te behalen punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {upcoming.map((m) => (
-                    <UpcomingRow key={m.id} m={m} pred={predMap[m.id]} ko={koMap[m.id]} joker={jokerIds.has(m.id)} />
+                    <UpcomingRow key={m.id} m={m} pred={predMap[m.id]} ko={koMap[m.id]} joker={jokerIds.has(m.id)} winSet={winSet} />
                   ))}
                 </div>
               </SubSection>
@@ -252,17 +265,45 @@ function JokerTag() {
   )
 }
 
-// Voorspelling als tekst: groepsfase = score, KO = gekozen winnaar
-function predText(m: Match, pred?: Pred, ko?: KoPred): string | null {
-  if (m.stage === 'group') return pred ? `${pred.predicted_home}–${pred.predicted_away}` : null
-  if (!ko) return null
-  const t = ko.predicted_winner_id === m.home_team?.id ? m.home_team : ko.predicted_winner_id === m.away_team?.id ? m.away_team : null
-  return t?.name ?? null
+// Groepsfase-voorspelling als tekst (KO heeft een eigen weergave hieronder).
+function groupPredText(pred?: Pred): string | null {
+  return pred ? `${pred.predicted_home}–${pred.predicted_away}` : null
 }
 
-function PlayedRow({ m, pred, ko, joker }: { m: Match; pred?: Pred; ko?: KoPred; joker: boolean }) {
-  const pts = m.stage === 'group' ? (pred?.points_awarded ?? null) : (ko?.points_awarded ?? null)
-  const voorspeld = predText(m, pred, ko)
+// De landen (van de twee echte deelnemers) die je als KO-winnaar voorspelde.
+function myChoiceTeams(m: Match, winSet: Set<string>): NonNullable<TeamRef>[] {
+  const out: NonNullable<TeamRef>[] = []
+  if (m.home_team && winSet.has(m.home_team.id)) out.push(m.home_team)
+  if (m.away_team && winSet.has(m.away_team.id)) out.push(m.away_team)
+  return out
+}
+function koWinner(m: Match): TeamRef {
+  if (!m.result_entered || m.home_score == null || m.away_score == null) return null
+  return m.home_score > m.away_score ? m.home_team : m.away_team
+}
+
+function FlagImg({ team }: { team: NonNullable<TeamRef> }) {
+  if (!team.flag_url) return null
+  return <Image src={team.flag_url} alt={team.name} width={22} height={15} className="rounded-sm object-cover w-[22px] h-[15px] shrink-0" />
+}
+
+// "Mijn keuze": één land = vlag + naam; twee landen = beide vlaggen (🇨🇦 & 🇫🇷).
+function MyChoice({ teams }: { teams: NonNullable<TeamRef>[] }) {
+  if (teams.length === 0) return <b className="ml-1 text-wk-muted/50">—</b>
+  if (teams.length === 1) {
+    return <b className="ml-1 inline-flex items-center gap-1.5 text-wk-soft align-middle"><FlagImg team={teams[0]} />{teams[0].name}</b>
+  }
+  return (
+    <b className="ml-1 inline-flex items-center gap-1.5 text-wk-soft align-middle">
+      <FlagImg team={teams[0]} /><span className="text-wk-muted font-normal">&</span><FlagImg team={teams[1]} />
+    </b>
+  )
+}
+
+function PlayedRow({ m, pred, ko, joker, winSet }: { m: Match; pred?: Pred; ko?: KoPred; joker: boolean; winSet: Set<string> }) {
+  const isKo = m.stage !== 'group'
+  const pts = isKo ? (ko?.points_awarded ?? null) : (pred?.points_awarded ?? null)
+  const winner = koWinner(m)
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-2.5">
@@ -275,21 +316,36 @@ function PlayedRow({ m, pred, ko, joker }: { m: Match; pred?: Pred; ko?: KoPred;
         <PtsBadge pts={pts} joker={joker} />
       </div>
       <div className="pl-12 mt-1.5 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
-        <span>Voorspeld <b className="ml-1 text-wk-soft">{voorspeld ?? '—'}</b></span>
-        <Link href={`/wedstrijd/${m.id}`} className="group/uitslag" title="Bekijk wie wat koos">
-          Uitslag{' '}
-          <b className="ml-1 text-wk-text underline decoration-wk-muted/50 underline-offset-2 group-hover/uitslag:decoration-wk-gold transition-colors">
-            {m.home_score}–{m.away_score}
-          </b>
-        </Link>
+        {isKo ? (
+          <>
+            <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
+            <Link href={`/wedstrijd/${m.id}`} className="group/uitslag inline-flex items-center" title="Bekijk wie wat koos">
+              Uitslag{' '}
+              {winner
+                ? <b className="ml-1 inline-flex items-center gap-1.5 text-wk-text align-middle"><FlagImg team={winner} /><span className="underline decoration-wk-muted/50 underline-offset-2 group-hover/uitslag:decoration-wk-gold transition-colors">{winner.name}</span></b>
+                : <b className="ml-1 text-wk-text">—</b>}
+            </Link>
+          </>
+        ) : (
+          <>
+            <span>Voorspeld <b className="ml-1 text-wk-soft">{groupPredText(pred) ?? '—'}</b></span>
+            <Link href={`/wedstrijd/${m.id}`} className="group/uitslag" title="Bekijk wie wat koos">
+              Uitslag{' '}
+              <b className="ml-1 text-wk-text underline decoration-wk-muted/50 underline-offset-2 group-hover/uitslag:decoration-wk-gold transition-colors">
+                {m.home_score}–{m.away_score}
+              </b>
+            </Link>
+          </>
+        )}
         {joker && <JokerTag />}
       </div>
     </div>
   )
 }
 
-function UpcomingRow({ m, pred, ko, joker }: { m: Match; pred?: Pred; ko?: KoPred; joker: boolean }) {
-  const voorspeld = predText(m, pred, ko)
+function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; ko?: KoPred; joker: boolean; winSet: Set<string> }) {
+  const isKo = m.stage !== 'group'
+  const voorspeld = groupPredText(pred)
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-2.5">
@@ -301,7 +357,9 @@ function UpcomingRow({ m, pred, ko, joker }: { m: Match; pred?: Pred; ko?: KoPre
         </div>
       </div>
       <div className="pl-12 mt-1.5 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
-        <span>Voorspeld <b className={`ml-1 ${voorspeld ? 'text-wk-soft' : 'text-wk-muted/50'}`}>{voorspeld ?? '—'}</b></span>
+        {isKo
+          ? <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
+          : <span>Voorspeld <b className={`ml-1 ${voorspeld ? 'text-wk-soft' : 'text-wk-muted/50'}`}>{voorspeld ?? '—'}</b></span>}
         {joker && <JokerTag />}
       </div>
     </div>

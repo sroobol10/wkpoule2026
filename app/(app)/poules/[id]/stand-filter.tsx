@@ -7,7 +7,7 @@ import { AvatarCircle } from '@/components/avatar-circle'
 // Statistieken waarop de stand kan worden ingezien.
 // 'normaal' toont de standaard tussenstand (podium + volledige tabel); de overige
 // herrangschikken de deelnemers op die ene stat.
-type StatKey = 'correct' | 'exact' | 'joker' | 'dag' | 'bonus'
+type StatKey = 'groepsfase' | 'ko' | 'correct' | 'exact' | 'joker' | 'dag' | 'bonus'
 type FilterKey = 'normaal' | StatKey
 
 export type StandFilterEntry = {
@@ -15,6 +15,8 @@ export type StandFilterEntry = {
   username: string
   fullName: string | null
   avatarUrl: string | null
+  groepsfase: number
+  ko: number
   correct: number
   exact: number
   joker: number
@@ -25,6 +27,8 @@ export type StandFilterEntry = {
 // `pct` = toon percentage van de gespeelde wedstrijden (noemer = playedCount).
 const STATS: { key: FilterKey; label: string; unit: string; pct?: boolean }[] = [
   { key: 'normaal', label: 'Tussenstand', unit: 'pt' },
+  { key: 'groepsfase', label: 'Groepsfase', unit: 'pt' },
+  { key: 'ko', label: 'Knockout', unit: 'pt' },
   { key: 'correct', label: 'Correct resultaat', unit: '×', pct: true },
   { key: 'exact', label: 'Exacte score', unit: '×' },
   { key: 'joker', label: 'Jokerpunten', unit: 'pt' },

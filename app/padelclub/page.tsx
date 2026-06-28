@@ -151,27 +151,48 @@ export default async function PadelclubPage() {
   const koByKey: Record<string, { winnerId: string; pts: number | null }> = {}
   for (const k of dayKo ?? []) koByKey[`${k.user_id}:${k.match_id}`] = { winnerId: k.predicted_winner_id, pts: k.points_awarded }
 
-  const dayMatches: DayMatch[] = dayMatchesRaw.map((m) => {
+  // Alle landen die elk van de vier ooit als KO-winnaar koos (voor "mijn keuze" + filter)
+  const { data: allKo } = await supabase
+    .from('knockout_predictions')
+    .select('user_id, predicted_winner_id')
+    .in('user_id', playerIds)
+  const winSetByUser: Record<string, Set<string>> = {}
+  for (const id of playerIds) winSetByUser[id] = new Set()
+  for (const k of allKo ?? []) winSetByUser[k.user_id]?.add(k.predicted_winner_id)
+
+  const dayMatchesAll: DayMatch[] = dayMatchesRaw.map((m) => {
     const home = m.home_team, away = m.away_team
+    const isKo = m.stage !== 'group'
+    const winnerName = isKo && m.result_entered && m.home_score != null && m.away_score != null
+      ? (m.home_score > m.away_score ? home?.name : away?.name) ?? null
+      : null
     return {
       id: m.id,
       time: m.kickoff_at,
       home: home ? { name: home.name, flag: home.flag_url } : null,
       away: away ? { name: away.name, flag: away.flag_url } : null,
       actual: m.result_entered ? `${m.home_score}–${m.away_score}` : null,
+      isKo,
+      winnerName,
       preds: Object.fromEntries(
         playerIds.map((id) => {
-          if (m.stage === 'group') {
+          if (!isKo) {
             const p = predByKey[`${id}:${m.id}`]
             return [id, { text: p ? `${p.h}–${p.a}` : null, pts: p?.pts ?? null }]
           }
+          const set = winSetByUser[id]
+          const choices = [home, away]
+            .filter((t): t is NonNullable<typeof t> => !!t && !!set?.has(t.id))
+            .map((t) => ({ name: t.name, flag: t.flag_url }))
           const k = koByKey[`${id}:${m.id}`]
-          const winnerName = k?.winnerId === home?.id ? home?.name : k?.winnerId === away?.id ? away?.name : null
-          return [id, { text: winnerName ?? null, pts: k?.pts ?? null }]
+          return [id, { text: null, pts: k?.pts ?? null, choices }]
         })
       ),
     }
   })
+  // Het dagprogramma toont altijd álle wedstrijden van die dag; de KO-keuzes van de
+  // vier deelnemers staan per wedstrijd eronder (leeg = "—" voor wie geen land koos).
+  const dayMatches: DayMatch[] = dayMatchesAll
 
   // Dag-bonusvraag van die dag + de vier antwoorden
   const { data: dqRows } = await supabase

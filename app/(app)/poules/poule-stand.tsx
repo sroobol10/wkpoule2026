@@ -221,6 +221,9 @@ export async function PouleStand({
     username: profile.username,
     fullName: profile.full_name,
     avatarUrl: profile.avatar_url,
+    // Groepsfase = wedstrijdpunten + punten voor de eindstand van de groep
+    groepsfase: score.group_match_pts + score.group_standings_pts,
+    ko: score.knockout_pts,
     // 'Correct resultaat' = juiste richting incl. exacte scores, net als op de
     // deelnemer-detailpagina (poule_scores.correct_results telt exact NIET mee).
     correct: score.correct_results + score.exact_hits,
