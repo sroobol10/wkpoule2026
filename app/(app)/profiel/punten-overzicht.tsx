@@ -36,6 +36,7 @@ export type PuntenDetail = {
   advancementRows: { team_id: string; predicted_position: number }[]
   bracketRows: { slot: number; predicted_team_id: string; points_awarded: number | null }[]
   allTeams: Team[]
+  aliveTeamIds: string[]
   bonusQuestions: { id: string; question: string; type: string; unlock_date: string | null }[]
   bonusAnswerRows: { question_id: string; answer: string; points_awarded: number | null }[]
 }
@@ -49,11 +50,13 @@ export default function PuntenOverzicht({
   advancementRows,
   bracketRows,
   allTeams,
+  aliveTeamIds,
   bonusQuestions,
   bonusAnswerRows,
 }: PuntenDetail) {
   // Slot → stage mapping uit de statische bracket-definitie (geen DB nodig)
   const slotStageMap = Object.fromEntries(BRACKET.map((m) => [m.slot, m.stage]))
+  const aliveSet = new Set(aliveTeamIds)
   const [tab, setTab] = useState<Tab>('groepsfase')
 
   const predMap = Object.fromEntries(predRows.map((p) => [p.match_id, p]))
@@ -270,13 +273,15 @@ export default function PuntenOverzicht({
                       {stagePicks.map((pick) => {
                         const team = teamMap[pick.predicted_team_id]
                         const pts = pick.points_awarded
+                        const elim = !!team && !aliveSet.has(team.id)
                         return (
-                          <div key={pick.slot} className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-white/[0.03]">
+                          <div key={pick.slot} className={`flex items-center gap-3 px-4 py-2.5 border-l-[3px] border-transparent transition-colors duration-150 ${elim ? 'border-l-wk-red bg-wk-red/[0.04]' : 'hover:bg-white/[0.03]'}`}>
                             <span className="font-mono text-[10px] text-wk-muted w-7 shrink-0">#{pick.slot}</span>
                             {team?.flag_url && (
-                              <Image src={team.flag_url} alt={team.name} width={20} height={14} className="rounded-sm shrink-0" />
+                              <Image src={team.flag_url} alt={team.name} width={20} height={14} className={`rounded-sm shrink-0 ${elim ? 'grayscale opacity-60' : ''}`} />
                             )}
-                            <span className="flex-1 text-sm text-wk-text">{team?.name ?? '—'}</span>
+                            <span className={`flex-1 text-sm ${elim ? 'text-wk-muted line-through decoration-wk-red/60' : 'text-wk-text'}`}>{team?.name ?? '—'}</span>
+                            {elim && pts == null && <span className="font-mono text-[9px] font-bold text-wk-red tracking-[0.12em] uppercase shrink-0">uit</span>}
                             {pts != null && <PtsBadge pts={pts} />}
                           </div>
                         )

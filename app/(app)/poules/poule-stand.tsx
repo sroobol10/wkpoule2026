@@ -362,7 +362,6 @@ export async function PouleStand({
                       { label: 'KO',     val: score.knockout_pts },
                       { label: 'BONUS',  val: score.bonus_pre_pts },
                       { label: 'DAG',    val: score.bonus_daily_pts },
-                      { label: 'JOKERS', val: score.jokers_played },
                     ]
                     return (
                       <div className="pl-9 space-y-0.5">
@@ -402,7 +401,6 @@ export async function PouleStand({
                   <th className={`sticky ${changeLeft} z-10 bg-wk-surface px-0 py-2.5 w-6 font-mono text-[9px] text-wk-muted tracking-widest uppercase text-center`}>±</th>
                   <th className={`sticky ${naamLeft} z-10 bg-wk-surface pl-2 pr-4 py-2.5 font-mono text-[9px] text-wk-muted tracking-widest uppercase`}>Deelnemer</th>
                   <th className="px-3 py-2.5 w-20 min-w-20 font-mono text-[9px] text-wk-gold tracking-widest uppercase text-right">Totaal</th>
-                  <ColHeader label="JOKERS" />
                   <ColHeader label="WED" />
                   <ColHeader label="STAND" />
                   <ColHeader label="KO" />
@@ -468,9 +466,6 @@ export async function PouleStand({
                         <span className="font-display text-lg text-wk-gold [text-shadow:0_0_12px_rgba(244,185,46,0.45)]">{score.total_pts}</span>
                         <span className="font-mono text-[10px] text-wk-muted ml-0.5">pt</span>
                       </td>
-
-                      {/* Jokers */}
-                      <DataCell value={score.jokers_played} suffix={`/12`} />
 
                       {/* Groepsfase wedstrijden */}
                       <DataCell value={score.group_match_pts} suffix="pt" />

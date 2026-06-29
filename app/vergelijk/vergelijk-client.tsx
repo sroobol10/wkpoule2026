@@ -50,6 +50,7 @@ export type BonusVergelijk = {
 // Elke pick is de voorspelde winnaar van dat slot; null = niet ingevuld.
 export type KoPick = { name: string; flag: string | null } | null
 export type KnockoutSide = {
+  qf: { pair: [KoPick, KoPick]; winner: KoPick }[]
   sf1: [KoPick, KoPick]; sf1Winner: KoPick
   sf2: [KoPick, KoPick]; sf2Winner: KoPick
   finalists: [KoPick, KoPick]; champion: KoPick
@@ -197,6 +198,11 @@ function KoSide({ ko }: { ko: KnockoutSide | null }) {
   }
   return (
     <div className="space-y-5">
+      <KoBlock label="Kwartfinales">
+        <div className="space-y-3">
+          {ko.qf.map((m, i) => <KoMatchup key={i} pair={m.pair} winner={m.winner} />)}
+        </div>
+      </KoBlock>
       <KoBlock label="Halve finales">
         <div className="space-y-3">
           <KoMatchup pair={ko.sf1} winner={ko.sf1Winner} />
@@ -513,11 +519,11 @@ export default function VergelijkClient({
               </div>
             )}
 
-            {/* Eindfase-voorspelling: vanaf de halve finale */}
+            {/* Eindfase-voorspelling: vanaf de kwartfinale */}
             {(koA || koB) && (
               <div className="animate-fade-up bg-wk-surface border border-white/10 rounded-xl overflow-hidden" style={{ animationDelay: '0.65s' }}>
                 <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase px-5 pt-4 pb-2 text-center">
-                  Vanaf de halve finale
+                  Vanaf de kwartfinale
                 </p>
                 <div className="grid grid-cols-2 gap-4 sm:gap-8 px-4 sm:px-6 pb-2">
                   <span className="text-xs font-bold truncate" style={{ color: COLOR_A }}>{spelerA.username}</span>

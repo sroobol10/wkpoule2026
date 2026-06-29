@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { preBonusIndex } from '@/lib/bonus-order'
+import { computeAliveTeamIds, type AliveGroupMatch, type AliveKoMatch } from '@/lib/alive-teams'
 import ProfielClient from './profiel-client'
 import type { PuntenDetail } from './punten-overzicht'
 
@@ -122,6 +123,16 @@ export default async function ProfielPage() {
       return (a.unlock_date ?? '').localeCompare(b.unlock_date ?? '')
     })
 
+  // Welke ploegen zijn nog actief? Uitgeschakelde picks worden grijs getoond.
+  const { data: koM } = await supabase
+    .from('matches')
+    .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+    .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
+  const aliveTeamIds = [...computeAliveTeamIds(
+    (mRes.data ?? []) as unknown as AliveGroupMatch[],
+    (koM ?? []) as unknown as AliveKoMatch[],
+  )]
+
   const detail: PuntenDetail = {
     matches: (mRes.data ?? []) as unknown as PuntenDetail['matches'],
     predRows: (pRes.data ?? []) as PuntenDetail['predRows'],
@@ -129,6 +140,7 @@ export default async function ProfielPage() {
     advancementRows: (aRes.data ?? []) as PuntenDetail['advancementRows'],
     bracketRows: (brRes.data ?? []) as PuntenDetail['bracketRows'],
     allTeams: (tRes.data ?? []) as PuntenDetail['allTeams'],
+    aliveTeamIds,
     bonusQuestions: visibleBonusQuestions,
     bonusAnswerRows,
   }

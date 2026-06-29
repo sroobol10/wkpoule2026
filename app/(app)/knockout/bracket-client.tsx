@@ -29,6 +29,7 @@ type Props = {
   locked: boolean
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
+  eliminatedTeams?: string[]
   slotDist?: Record<number, SlotDist>
 }
 
@@ -116,7 +117,8 @@ function getDownstreamSlots(changedSlot: number): number[] {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, slotDist = {} }: Props) {
+export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, eliminatedTeams = [], slotDist = {} }: Props) {
+  const eliminatedSet = new Set(eliminatedTeams)
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
   // Build advancement map: group -> pos -> teamId
@@ -235,6 +237,7 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               actualWinnerId={actualWinners[matchDef.slot] ?? null}
               kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
               advancedTeams={advancedSet}
+              eliminatedTeams={eliminatedSet}
               stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
               pts={ptsPerSlot[matchDef.slot] ?? null}
               dist={slotDist[matchDef.slot] ?? null}
@@ -274,6 +277,7 @@ function BracketMatchCard({
   actualWinnerId,
   kickoffAt,
   advancedTeams,
+  eliminatedTeams,
   stageHasResults,
   pts,
   dist,
@@ -286,6 +290,7 @@ function BracketMatchCard({
   actualWinnerId: string | null
   kickoffAt: string | null
   advancedTeams: Set<string>
+  eliminatedTeams: Set<string>
   stageHasResults: boolean
   pts: number | null
   dist: SlotDist | null
@@ -359,6 +364,7 @@ function BracketMatchCard({
               selected={match.winner === homeTeam.id}
               isActualWinner={actualWinnerId === homeTeam.id}
               advanced={advancedTeams.has(homeTeam.id)}
+              eliminated={eliminatedTeams.has(homeTeam.id)}
               stageHasResults={stageHasResults}
               disabled={locked || !bothKnown}
               isPending={isPending}
@@ -372,6 +378,7 @@ function BracketMatchCard({
               selected={match.winner === awayTeam.id}
               isActualWinner={actualWinnerId === awayTeam.id}
               advanced={advancedTeams.has(awayTeam.id)}
+              eliminated={eliminatedTeams.has(awayTeam.id)}
               stageHasResults={stageHasResults}
               disabled={locked || !bothKnown}
               isPending={isPending}
@@ -466,6 +473,7 @@ function TeamBtn({
   selected,
   isActualWinner,
   advanced,
+  eliminated,
   stageHasResults,
   disabled,
   isPending,
@@ -475,13 +483,16 @@ function TeamBtn({
   selected: boolean
   isActualWinner: boolean   // won this specific match (for display)
   advanced: boolean         // reached the next round (for scoring)
+  eliminated: boolean       // is dit team uit het toernooi? → rood
   stageHasResults: boolean  // is this stage concluded?
   disabled: boolean
   isPending: boolean
   onClick: () => void
 }) {
   const pickCorrect = selected && stageHasResults && advanced
-  const pickWrong   = selected && stageHasResults && !advanced
+  // Uit het toernooi (en niet via deze ronde doorgegaan) → rood, ook in latere slots
+  const out = eliminated && !advanced
+  const pickWrong   = out && selected
 
   // Pop-animatie wanneer team net geselecteerd wordt
   const [popping, setPopping] = useState(false)
@@ -498,8 +509,8 @@ function TeamBtn({
   let colorClass: string
   if (pickCorrect) {
     colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'
-  } else if (pickWrong) {
-    colorClass = 'border-wk-red/30 bg-wk-red/5 text-wk-muted'
+  } else if (out) {
+    colorClass = 'border-wk-red/40 bg-wk-red/5 text-wk-muted'
   } else if (selected) {
     colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
   } else if (stageHasResults && advanced && !selected) {
@@ -522,9 +533,9 @@ function TeamBtn({
         alt={team.name}
         width={32}
         height={20}
-        className="w-8 h-5 object-cover rounded-sm"
+        className={`w-8 h-5 object-cover rounded-sm ${out ? 'grayscale opacity-60' : ''}`}
       />
-      <span className={`font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight ${pickWrong ? 'line-through opacity-60' : ''}`}>
+      <span className={`font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight ${out ? 'line-through opacity-60' : ''}`}>
         {team.name}
       </span>
       {pickCorrect && (

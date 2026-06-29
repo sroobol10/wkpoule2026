@@ -2,6 +2,7 @@ import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { preBonusIndex } from '@/lib/bonus-order'
+import { computeAliveTeamIds, type AliveGroupMatch, type AliveKoMatch } from '@/lib/alive-teams'
 import { AvatarCircle } from '@/components/avatar-circle'
 import { CountUp } from '@/components/count-up'
 import DeelnemerClient from './deelnemer-client'
@@ -56,6 +57,7 @@ export default async function DeelnemerProfilePage({
   type BonusQ = { id: string; question: string; type: string; unlock_date: string | null; correct_answer: string | null; correct_answer_set: boolean }
   let bracketRows = null, allTeams = null, visibleBonusQuestions: BonusQ[] = []
   let bonusAnswerRows = null
+  let aliveTeamIds: string[] = []
 
   if (canSeeData) {
     const [mRes, pRes, jRes, aRes, bqRes, baRes, tRes, brRes] = await Promise.all([
@@ -78,6 +80,16 @@ export default async function DeelnemerProfilePage({
     matches = mRes.data; predRows = pRes.data; jokerRows = jRes.data
     advancementRows = aRes.data; bonusAnswerRows = baRes.data
     allTeams = tRes.data; bracketRows = brRes.data
+
+    // Nog actieve ploegen → uitgeschakelde bracket-picks worden grijs getoond
+    const { data: koM } = await supabase
+      .from('matches')
+      .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+      .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
+    aliveTeamIds = [...computeAliveTeamIds(
+      (mRes.data ?? []) as unknown as AliveGroupMatch[],
+      (koM ?? []) as unknown as AliveKoMatch[],
+    )]
 
     // Dagelijkse vragen: alleen tonen als van gisteren of eerder én beantwoord
     const today = new Date().toISOString().split('T')[0]
@@ -117,6 +129,7 @@ export default async function DeelnemerProfilePage({
         advancementRows={advancementRows ?? []}
         bracketRows={bracketRows ?? []}
         allTeams={allTeams ?? []}
+        aliveTeamIds={aliveTeamIds}
         bonusQuestions={visibleBonusQuestions}
         bonusAnswerRows={bonusAnswerRows ?? []}
         canSeeData={canSeeData}

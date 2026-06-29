@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getActivePlayerIds } from '@/lib/active-players'
 import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
+import { computeAliveTeamIds, type AliveGroupMatch, type AliveKoMatch } from '@/lib/alive-teams'
 import KnockoutClient from './knockout-client'
 
 const LIVE_STAGES = ['r32', 'r16', 'qf', 'sf', 'final']
@@ -156,6 +157,17 @@ export default async function KnockoutPage() {
     memberIds = new Set([...activeIds].filter((id) => set.has(id)))
   }
 
+  // Uitgeschakelde ploegen → rood in de bracket (geen punten meer te halen)
+  const { data: groupForAlive } = await supabase
+    .from('matches')
+    .select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(id, name, group_name), away_team:teams!matches_away_team_id_fkey(id, name, group_name)')
+    .eq('stage', 'group')
+  const aliveSet = computeAliveTeamIds(
+    (groupForAlive ?? []) as unknown as AliveGroupMatch[],
+    (koMatches ?? []) as unknown as AliveKoMatch[],
+  )
+  const eliminatedTeams = (allTeams ?? []).filter((t) => !aliveSet.has(t.id)).map((t) => t.id)
+
   const groupByTeam: Record<string, string> = {}
   for (const t of allTeams ?? []) if (t.group_name) groupByTeam[t.id] = t.group_name
 
@@ -255,6 +267,7 @@ export default async function KnockoutPage() {
       anyMatchPlayed={anyGroupMatchPlayed}
       actualWinners={actualWinners}
       advancedFromStage={advancedFromStage}
+      eliminatedTeams={eliminatedTeams}
     />
   )
 }

@@ -320,10 +320,11 @@ export default async function VergelijkPage({
       groepsfase.push({ group: g, a: sideFor(scoreA), b: sideFor(scoreB) })
     }
 
-    // ── Knockout-voorspelling (halve finales, finale, 3e plek, kampioen) ────
-    // Elk slot bewaart de voorspelde winnaar: KF 97-100, HF 101-102, 3e 103,
-    // finale 104. De HF-teams zijn de KF-winnaars, de finalisten de HF-winnaars.
-    const KO_SLOTS = [97, 98, 99, 100, 101, 102, 103, 104]
+    // ── Knockout-voorspelling (kwartfinales t/m kampioen) ───────────────────
+    // Elk slot bewaart de voorspelde winnaar: R16 89-96, KF 97-100, HF 101-102,
+    // 3e 103, finale 104. KF-deelnemers zijn de R16-winnaars, HF-teams de
+    // KF-winnaars, finalisten de HF-winnaars.
+    const KO_SLOTS = [89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104]
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: brackets } = await (supabase as any)
       .from('bracket_predictions')
@@ -346,6 +347,12 @@ export default async function VergelijkPage({
       }
       if (!KO_SLOTS.some((s) => pick[s])) return null
       return {
+        qf: [
+          { pair: [pick[89] ?? null, pick[90] ?? null], winner: pick[97] ?? null },
+          { pair: [pick[93] ?? null, pick[94] ?? null], winner: pick[98] ?? null },
+          { pair: [pick[91] ?? null, pick[92] ?? null], winner: pick[99] ?? null },
+          { pair: [pick[95] ?? null, pick[96] ?? null], winner: pick[100] ?? null },
+        ],
         sf1: [pick[97] ?? null, pick[98] ?? null], sf1Winner: pick[101] ?? null,
         sf2: [pick[99] ?? null, pick[100] ?? null], sf2Winner: pick[102] ?? null,
         finalists: [pick[101] ?? null, pick[102] ?? null], champion: pick[104] ?? null,

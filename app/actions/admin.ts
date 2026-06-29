@@ -509,11 +509,16 @@ export async function setKnockoutResult(
   await propagateKoTeams(supabase)
 
   // Sluitstuk: zodra de héle ronde gespeeld is, alle resterende picks consistent zetten.
-  const bracketUsers = await scoreBracketAdvancement(supabase, match.stage)
-  bracketUsers.forEach((u) => affectedUsers.add(u))
+  await scoreBracketAdvancement(supabase, match.stage)
 
-  if (affectedUsers.size > 0) {
-    await recalcPouleScores(supabase, [...affectedUsers])
+  // De DB-trigger op de match-update heeft poule_scores voor ÁLLE leden al
+  // herberekend, maar punt-gebaseerd (fout bij jokers in exact/correct) en zónder
+  // bracketpunten in total_pts. Daarom hier een volledige, uitslag-gebaseerde
+  // JS-recalc over alle leden, zodat de juiste waarden de trigger overal overschrijven.
+  const { data: allMembers } = await supabase.from('poule_members').select('user_id')
+  const allMemberIds = [...new Set((allMembers ?? []).map((m) => m.user_id))]
+  if (allMemberIds.length > 0) {
+    await recalcPouleScores(supabase, allMemberIds)
   }
 
   revalidatePath('/admin')
@@ -1029,7 +1034,9 @@ async function propagateKoTeams(
     return sortedGroups[group]?.[pos] ?? null
   }
 
-  // Vul alle rondes met null-teams die nu wél op te lossen zijn (cascade in volgorde)
+  // Vul per wedstrijd elke kant zodra die op te lossen is — ook als de andere kant
+  // nog onbekend is. Zo schuift een winnaar meteen door naar zijn volgende-ronde-slot
+  // (de zusterwedstrijd hoeft nog niet gespeeld te zijn). Cascadeert door alle rondes.
   const stageOrder = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
   let updated = 0
 
@@ -1037,10 +1044,10 @@ async function propagateKoTeams(
     const stageMatches = BRACKET.filter((bm) => bm.stage === stage)
     for (const bm of stageMatches) {
       const m = matchBySlot[bm.slot]
-      if (!m || (m.home_team_id && m.away_team_id)) continue
-      const homeId = resolveTeam(bm.homeSeed)
-      const awayId = resolveTeam(bm.awaySeed)
-      if (!homeId || !awayId) continue
+      if (!m) continue
+      const homeId = m.home_team_id ?? resolveTeam(bm.homeSeed)
+      const awayId = m.away_team_id ?? resolveTeam(bm.awaySeed)
+      if (homeId === m.home_team_id && awayId === m.away_team_id) continue   // niks nieuws
       await supabase.from('matches').update({ home_team_id: homeId, away_team_id: awayId }).eq('id', m.id)
       m.home_team_id = homeId; m.away_team_id = awayId   // in-memory zodat latere rondes meeliften
       updated++
@@ -1213,15 +1220,16 @@ export async function rescoreBracket(): Promise<AdminResult> {
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
   const stages = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
-  const affectedUserIds = new Set<string>()
-
   for (const stage of stages) {
-    const users = await scoreBracketAdvancement(supabase, stage)
-    users.forEach((u) => affectedUserIds.add(u))
+    await scoreBracketAdvancement(supabase, stage)
   }
 
-  if (affectedUserIds.size > 0) {
-    await recalcPouleScores(supabase, [...affectedUserIds])
+  // Volledige recalc over álle leden: herstelt o.a. de uitslag-gebaseerde
+  // exact/correct-tellingen die de DB-trigger punt-gebaseerd kan hebben overschreven.
+  const { data: allMembers } = await supabase.from('poule_members').select('user_id')
+  const allMemberIds = [...new Set((allMembers ?? []).map((m) => m.user_id))]
+  if (allMemberIds.length > 0) {
+    await recalcPouleScores(supabase, allMemberIds)
   }
 
   revalidatePath('/admin')

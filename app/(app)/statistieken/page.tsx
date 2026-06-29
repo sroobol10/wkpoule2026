@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
-import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat, type JokerStat, type JokerWinstEntry } from './stats-client'
+import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat } from './stats-client'
 
 // PostgREST levert standaard max. 1000 rijen per query. Met ~65 deelnemers ×
 // tientallen wedstrijden/vragen lopen voorspellingen en bonusantwoorden daar
@@ -131,146 +131,6 @@ export default async function StatistiekenPage({
     }
   }
 
-  // ── Gestarte groepswedstrijden (basis voor joker-winst) ──────────────────
-  const { data: startedMatches } = await supabase
-    .from('matches')
-    .select('id, result_entered')
-    .eq('stage', 'group')
-    .lte('kickoff_at', new Date().toISOString())
-
-  // Set van reeds gespeelde wedstrijden (uitslag ingevoerd) — bepaalt welke
-  // ingezette jokers meetellen in de joker-winst.
-  const playedMatchIds = new Set((startedMatches ?? []).filter((m) => m.result_entered).map((m) => m.id))
-
-  // Punten per voorspelling (voor joker-winst)
-  const predPtsByUserMatch: Record<string, number | null> = {}
-  if (startedMatches && startedMatches.length > 0) {
-    const matchIds = startedMatches.map((m) => m.id)
-    const allPredictions = await fetchAllRows<{ user_id: string; match_id: string; points_awarded: number | null }>(
-      (from, to) => supabase
-        .from('predictions')
-        .select('user_id, match_id, points_awarded')
-        .in('match_id', matchIds)
-        .range(from, to),
-    )
-    for (const p of allPredictions) {
-      if (memberIds.has(p.user_id)) predPtsByUserMatch[`${p.user_id}:${p.match_id}`] = p.points_awarded
-    }
-  }
-
-  // ── Joker hotspots + rendement ───────────────────────────────────────────
-  let jokerStats: JokerStat[] = []
-  let jokerWinstRaw: { userId: string; extra: number; played: number }[] = []
-
-  if (tournamentStarted) {
-    const allJokersRaw = await fetchAllRows<{ match_id: string; user_id: string }>(
-      (from, to) => supabase.from('jokers').select('match_id, user_id').range(from, to),
-    )
-    const allJokers = allJokersRaw.filter((j) => memberIds.has(j.user_id))
-
-    if (allJokers && allJokers.length > 0) {
-      // Joker-winst per deelnemer. We tellen alleen jokers op reeds GESPEELDE
-      // wedstrijden (uitslag ingevoerd). `played` = aantal van die jokers;
-      // `extra` = de winst (joker verdubbelt, dus de helft van het totaal).
-      const winstByUser: Record<string, { extra: number; played: number }> = {}
-      for (const j of allJokers) {
-        if (!playedMatchIds.has(j.match_id)) continue
-        const u = (winstByUser[j.user_id] ??= { extra: 0, played: 0 })
-        u.played++
-        const pts = predPtsByUserMatch[`${j.user_id}:${j.match_id}`]
-        if (pts != null) u.extra += pts / 2
-      }
-      // Sorteer op winstpunten (hoog → laag); bij gelijke winst staat wie de
-      // minste jokers speelde bovenaan (efficiënter benut).
-      jokerWinstRaw = Object.entries(winstByUser)
-        .map(([userId, v]) => ({ userId, extra: Math.round(v.extra), played: v.played }))
-        .sort((a, b) => b.extra - a.extra || a.played - b.played)
-
-      // Count per match
-      const jokerCountByMatch: Record<string, number> = {}
-      for (const j of allJokers) {
-        jokerCountByMatch[j.match_id] = (jokerCountByMatch[j.match_id] ?? 0) + 1
-      }
-
-      // Top 8 match IDs
-      const topMatchIds = Object.entries(jokerCountByMatch)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 10)
-        .map(([id]) => id)
-
-      // Wedstrijden waarop de huidige deelnemer zelf een joker heeft ingezet
-      const myJokerMatchIds = new Set(
-        allJokers.filter((j) => j.user_id === user.id).map((j) => j.match_id)
-      )
-
-      // Fetch match details (could be started or upcoming)
-      const { data: jokerMatches } = await supabase
-        .from('matches')
-        .select(`
-          id, kickoff_at, result_entered,
-          home_team:teams!matches_home_team_id_fkey(name, group_name, flag_url),
-          away_team:teams!matches_away_team_id_fkey(name, group_name, flag_url)
-        `)
-        .in('id', topMatchIds)
-
-      type JokerTeamRef = { name: string; group_name: string; flag_url: string | null }
-      const matchInfoById: Record<string, { homeTeam: string; awayTeam: string; homeFlag: string | null; awayFlag: string | null; group: string; played: boolean }> = {}
-      for (const m of jokerMatches ?? []) {
-        const home = m.home_team as JokerTeamRef | null
-        const away = m.away_team as JokerTeamRef | null
-        if (home && away) {
-          matchInfoById[m.id] = {
-            homeTeam: home.name,
-            awayTeam: away.name,
-            homeFlag: home.flag_url,
-            awayFlag: away.flag_url,
-            group: home.group_name,
-            played: m.result_entered || new Date(m.kickoff_at) <= new Date(),
-          }
-        }
-      }
-
-      jokerStats = topMatchIds
-        .filter((id) => matchInfoById[id])
-        .map((id) => ({
-          matchId: id,
-          homeTeam: matchInfoById[id].homeTeam,
-          awayTeam: matchInfoById[id].awayTeam,
-          homeFlag: matchInfoById[id].homeFlag,
-          awayFlag: matchInfoById[id].awayFlag,
-          group: matchInfoById[id].group,
-          played: matchInfoById[id].played,
-          count: jokerCountByMatch[id],
-          mine: myJokerMatchIds.has(id),
-        }))
-    }
-  }
-
-  // ── Joker-winst: ranglijst met profielen ─────────────────────────────────
-  let jokerWinst: JokerWinstEntry[] = []
-  if (tournamentStarted && jokerWinstRaw.length > 0) {
-    const userIds = [...new Set(jokerWinstRaw.map((b) => b.userId))]
-    const { data: profileRows } = await supabase
-      .from('profiles')
-      .select('id, username, avatar_url')
-      .in('id', userIds)
-    const profileById: Record<string, { username: string; avatar_url: string | null }> = {}
-    for (const p of profileRows ?? []) profileById[p.id] = p
-
-    // Top-5, plus je eigen rij (met echte positie) als je daarbuiten valt
-    const winstEntry = (b: typeof jokerWinstRaw[number], i: number): JokerWinstEntry => ({
-      userId: b.userId,
-      username: profileById[b.userId]?.username ?? '?',
-      avatarUrl: profileById[b.userId]?.avatar_url ?? null,
-      extra: b.extra,
-      played: b.played,
-      rank: i + 1,
-    })
-    jokerWinst = jokerWinstRaw.slice(0, 5).map(winstEntry)
-    const ownIdx = jokerWinstRaw.findIndex((b) => b.userId === user.id)
-    if (ownIdx >= 5) jokerWinst.push(winstEntry(jokerWinstRaw[ownIdx], ownIdx))
-  }
-
   // ── Bonus-vraag statistieken ─────────────────────────────────────────────
   const { data: bonusQuestions } = await supabase
     .from('bonus_questions')
@@ -393,14 +253,11 @@ export default async function StatistiekenPage({
   return (
     <StatsClient
       tournamentStarted={tournamentStarted}
-      currentUserId={user.id}
       leagues={privePoules.length > 1 ? privePoules.map(({ id, name }) => ({ id, name })) : []}
       selectedLeague={selectedLeague}
       kampioenStats={kampioenStats}
       totalDeelnemers={totalDeelnemers ?? 0}
       bonusQuestionStats={bonusQuestionStats}
-      jokerStats={jokerStats}
-      jokerWinst={jokerWinst}
       teamFlags={teamFlags}
     />
   )

@@ -3,7 +3,6 @@
 import { useState, useEffect, Fragment } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { AvatarCircle } from '@/components/avatar-circle'
 import { preBonusIndex } from '@/lib/bonus-order'
 import { playerCountry } from '@/lib/player-countries'
 
@@ -26,41 +25,15 @@ export type BonusQuestionStat = {
   top_answers: { answer: string; count: number; pct: number; points: number | null; is_correct: boolean; is_mine: boolean }[]
 }
 
-export type JokerStat = {
-  matchId: string
-  homeTeam: string
-  awayTeam: string
-  homeFlag: string | null
-  awayFlag: string | null
-  group: string
-  played: boolean
-  count: number
-  mine: boolean   // deelnemer zette zelf een joker op deze wedstrijd
-}
-
-export type JokerWinstEntry = {
-  userId: string
-  username: string
-  avatarUrl: string | null
-  extra: number  // extra punten dankzij jokers (verdubbeling)
-  played: number // aantal jokers op al gescoorde wedstrijden
-  rank: number   // positie in de volledige ranking
-}
-
 type Props = {
   tournamentStarted: boolean
-  currentUserId: string
   leagues: { id: string; name: string }[]
   selectedLeague: string | null
   kampioenStats: KampioenverdeligEntry[]
   totalDeelnemers: number
   bonusQuestionStats: BonusQuestionStat[]
-  jokerStats: JokerStat[]
-  jokerWinst: JokerWinstEntry[]
   teamFlags: Record<string, string> // landnaam → vlag-URL
 }
-
-const MEDAL = ['🥇', '🥈', '🥉']
 
 // flagcdn-URLs in de database zijn w80 (80px breed) — voor grote tegels te wazig
 const hiResFlag = (url: string) => url.replace('/w80/', '/w640/')
@@ -123,14 +96,11 @@ function AnimatedBar({ pct, color }: { pct: number; color: string }) {
 
 export default function StatsClient({
   tournamentStarted,
-  currentUserId,
   leagues,
   selectedLeague,
   kampioenStats,
   totalDeelnemers,
   bonusQuestionStats,
-  jokerStats,
-  jokerWinst,
   teamFlags,
 }: Props) {
   const preBonusStats = bonusQuestionStats
@@ -279,103 +249,6 @@ export default function StatsClient({
               🔒 Zichtbaar na start van het toernooi
             </p>
           </div>
-        </section>
-      )}
-
-      {/* Joker hotspots */}
-      {jokerStats.length > 0 && tournamentStarted && (
-        <section className="animate-fade-up" style={{ animationDelay: '250ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Joker hotspots — meest gekozen wedstrijden (TOP-10)
-          </p>
-          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {jokerStats.map((stat) => {
-              const maxCount = jokerStats[0]?.count ?? 1
-              const pct = Math.round((stat.count / maxCount) * 100)
-              // Eigen joker(s) krijgen de gele opmaak
-              const mine = stat.mine
-              return (
-                <div key={stat.matchId} className={`px-5 py-3 ${mine ? 'bg-wk-gold/5' : ''}`}>
-                  <div className="flex items-center gap-3 mb-1.5">
-                    {/* Gespeeld → voetbal, anders de groepsletter */}
-                    <span className="w-5 text-center shrink-0" title={stat.played ? 'Wedstrijd is gespeeld' : `Groep ${stat.group}`}>
-                      {stat.played
-                        ? <span className="text-xs">⚽</span>
-                        : <span className="font-mono text-[10px] text-wk-muted">{stat.group}</span>}
-                    </span>
-                    {/* Vlag thuis · namen · vlag uit — vlaggen sluiten aan op de teams */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      {stat.homeFlag && (
-                        <Image src={stat.homeFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
-                      )}
-                      <span className={`text-sm font-semibold truncate ${mine ? 'text-wk-gold' : 'text-wk-text'}`}>
-                        {stat.homeTeam} – {stat.awayTeam}
-                      </span>
-                      {stat.awayFlag && (
-                        <Image src={stat.awayFlag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
-                      )}
-                    </div>
-                    <span className={`ml-auto font-mono text-xs font-bold shrink-0 ${mine ? 'text-wk-gold' : 'text-wk-soft'}`}>
-                      {stat.count}×
-                    </span>
-                  </div>
-                  <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                    <AnimatedBar pct={pct} color={mine ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Joker-winst per deelnemer */}
-      {jokerWinst.length > 0 && tournamentStarted && (
-        <section className="animate-fade-up" style={{ animationDelay: '275ms' }}>
-          <p className="font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase mb-3">
-            Joker-winst ★ — extra punten dankzij jokers (TOP-5)
-          </p>
-          <div className="bg-wk-surface border border-white/10 rounded-xl overflow-hidden divide-y divide-white/5">
-            {jokerWinst.map((entry, i) => {
-              const maxExtra = Math.max(jokerWinst[0]?.extra ?? 0, 1)
-              const pct = Math.round((entry.extra / maxExtra) * 100)
-              const isMe = entry.userId === currentUserId
-              // Ruimte vóór de eigen rij wanneer die niet aansluit op de top-5
-              const gap = i > 0 && entry.rank > jokerWinst[i - 1].rank + 1
-              return (
-                <Fragment key={entry.userId}>
-                  {gap && (
-                    <div className="px-5 py-1.5 text-center font-mono text-[10px] text-wk-muted/50 tracking-[0.3em] select-none">
-                      ···
-                    </div>
-                  )}
-                <div className={`px-5 py-3 ${isMe ? 'bg-wk-gold/5' : ''}`}>
-                  <div className="flex items-center gap-3 mb-1.5">
-                    <span className="font-mono text-xs text-wk-muted w-5 text-center shrink-0">
-                      {entry.rank <= 3 && entry.extra > 0 ? MEDAL[entry.rank - 1] : entry.rank}
-                    </span>
-                    <AvatarCircle username={entry.username} avatarUrl={entry.avatarUrl} size={24} />
-                    <span className={`flex-1 text-sm truncate ${isMe ? 'font-bold text-wk-gold' : 'font-semibold text-wk-text'}`}>
-                      {entry.username}
-                    </span>
-                    <span className="font-mono text-[10px] text-wk-muted shrink-0">
-                      {entry.played} {entry.played === 1 ? 'joker' : 'jokers'}
-                    </span>
-                    <span className={`font-mono text-xs font-bold shrink-0 w-10 text-right ${isMe ? 'text-wk-gold' : 'text-wk-soft'}`}>
-                      +{entry.extra}
-                    </span>
-                  </div>
-                  <div className="ml-8 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                    <AnimatedBar pct={pct} color={isMe ? 'bg-wk-gold' : 'bg-wk-muted/40'} />
-                  </div>
-                </div>
-                </Fragment>
-              )
-            })}
-          </div>
-          <p className="font-mono text-[9px] text-wk-muted/60 tracking-[0.12em] mt-1.5">
-            Een joker verdubbelt de punten; de winst is het verschil met spelen zonder joker
-          </p>
         </section>
       )}
 
