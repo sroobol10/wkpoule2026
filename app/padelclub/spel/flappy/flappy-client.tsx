@@ -31,8 +31,9 @@ const C = { bg1: '#0B0E14', bg2: '#11151F', pipe: '#2EA84B', pipeCap: '#F4B92E',
 // Spel-afbeeldingen staan in /public/spelers (512×512, strak bijgesneden).
 const FIGS = '/spelers'
 const CHARACTERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png', 'dejuul.png', 'trein.png', 'ashi.png', 'pimp.png']
-// Rick zoeft horizontaal; de rest valt tuimelend uit de lucht
-const FALL_CHARS = CHARACTERS.filter((c) => c !== 'rick.png')
+// Rick zoeft horizontaal; de rest valt tuimelend uit de lucht — dezelfde flyer-
+// afbeeldingen als op /padelclub (uit public/, niet uit /spelers).
+const FALL_CHARS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'ashi.png', 'kim2.png', 'trein.png', 'dejuul.png', 'girlref.png']
 
 type Pipe = { x: number; gapY: number; scored: boolean }
 
@@ -200,7 +201,7 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
         if (scoreRef.current % 15 === 0) setRickFly((k) => k + 1)
         else if (Math.random() < 0.33) {
           const src = FALL_CHARS[Math.floor(Math.random() * FALL_CHARS.length)]
-          setFallers((f) => [...f.slice(-3), { key: ++fallerKey.current, src, left: 6 + Math.random() * 80, size: 56 + Math.random() * 46 }])
+          setFallers((f) => [...f.slice(-3), { key: ++fallerKey.current, src, left: 4 + Math.random() * 78, size: 100 + Math.random() * 90 }])
         }
       }
     }
@@ -298,7 +299,7 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
       {fallers.map((fl) => (
         <div key={fl.key} className="pointer-events-none fixed top-0 z-50" style={{ left: `${fl.left}%` }} aria-hidden>
           <Image
-            src={`${FIGS}/${fl.src}`} alt="" width={120} height={120}
+            src={`/${fl.src}`} alt="" width={200} height={200}
             onAnimationEnd={() => setFallers((f) => f.filter((x) => x.key !== fl.key))}
             className="h-auto drop-shadow-2xl"
             style={{ width: fl.size, animation: 'flappy-fall 2.3s cubic-bezier(0.45,0,0.7,1) forwards' }}

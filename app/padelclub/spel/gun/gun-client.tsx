@@ -109,7 +109,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   const endGame = useCallback((win: boolean) => {
     if (phaseRef.current === 'over') return
     phaseRef.current = 'over'; setPhase('over')
-    const final = score.current
+    const final = Math.round(score.current)
     const prevBest = board.find((e) => e.id === currentUserId)?.best ?? 0
     setResult({ score: final, record: final > prevBest, win })
     setBoard((prev) => prev.map((e) => (e.id === currentUserId ? { ...e, best: Math.max(e.best, final) } : e)).sort((a, b) => b.best - a.best))

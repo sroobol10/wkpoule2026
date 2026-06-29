@@ -48,7 +48,7 @@ const KEEPER_POOL = ['rick.png', 'bus.png', 'ho.png', 'kim.png', 'vince.png', 'd
 const START_BOOSTERS = 1
 const BOOST_EVERY = 10   // elke 10 goals krijg je er één bij (max 1 in voorraad)
 // Rick is (voorlopig) géén keeper meer — hij wandelt enkel langs het doel (zie rickWalk).
-const KEEPER_REAL = KEEPER_POOL.filter((k) => k !== 'rick.png')
+const KEEPER_REAL = [KEEPER, ...KEEPER_POOL.filter((k) => k !== 'rick.png')]   // random keeperpool (incl. Lukaku, zonder Rick)
 // Na een booster-goal vliegt de keeper weg en komt er een willekeurige nieuwe (Lukaku is de eerste)
 const randomKeeper = () => KEEPER_REAL[Math.floor(Math.random() * KEEPER_REAL.length)]
 const RICK_GOALS_MAX = 5   // na zoveel goals loopt Rick weg
@@ -364,7 +364,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     scoreRef.current = 0; setScore(0); setResult(null)
     waveRef.current = 0; boostActive.current = false; setArmed(false)
     rickRef.current = false; rickGoals.current = 0; rickHomeX.current = zx(2); rickHomeY.current = GOAL_LINE; setRickLeave(null); setKeeperFlyOff(null)
-    boostersRef.current = START_BOOSTERS; setBoosters(START_BOOSTERS); boostProgress.current = 0; setKeeperSrc(KEEPER)
+    boostersRef.current = START_BOOSTERS; setBoosters(START_BOOSTERS); boostProgress.current = 0; setKeeperSrc(randomKeeper())
     pwr.current = { pos: 0, dir: 1 }
     phaseRef.current = 'power'; setPhase('power')
     last.current = performance.now()
@@ -484,7 +484,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
               </button>
             ))}
             {boosters === 0 && (
-              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">scoor 5× voor een nieuwe booster</span>
+              <span className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">scoor 10× voor een nieuwe booster</span>
             )}
           </div>
         )}
