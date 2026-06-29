@@ -14,6 +14,7 @@ type Match = {
   id: string
   kickoff_at: string
   stage: string
+  match_number: number | null
   home_score: number | null
   away_score: number | null
   result_entered: boolean
@@ -21,7 +22,6 @@ type Match = {
   away_team: TeamRef
 }
 type Pred = { match_id: string; predicted_home: number; predicted_away: number; points_awarded: number | null }
-type KoPred = { match_id: string; predicted_winner_id: string; points_awarded: number | null }
 type Question = {
   id: string
   question: string
@@ -60,7 +60,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
   const { data: matchesRaw } = await supabase
     .from('matches')
     .select(`
-      id, kickoff_at, stage, home_score, away_score, result_entered,
+      id, kickoff_at, stage, match_number, home_score, away_score, result_entered,
       home_team:teams!matches_home_team_id_fkey(id, name, code, flag_url),
       away_team:teams!matches_away_team_id_fkey(id, name, code, flag_url)
     `)
@@ -70,33 +70,31 @@ export async function DagOverzicht({ userId }: { userId: string }) {
   const matches = (matchesRaw ?? []) as unknown as Match[]
   const matchIds = matches.map((m) => m.id)
 
-  // ── Voorspellingen, KO-keuzes en jokers voor die wedstrijden ──────────────
-  const [{ data: preds }, { data: koPreds }, { data: jokers }] = await Promise.all([
+  // ── Groepsvoorspellingen en jokers voor die wedstrijden ───────────────────
+  const [{ data: preds }, { data: jokers }] = await Promise.all([
     matchIds.length
       ? supabase.from('predictions')
           .select('match_id, predicted_home, predicted_away, points_awarded')
           .eq('user_id', userId).in('match_id', matchIds)
       : Promise.resolve({ data: [] as Pred[] }),
     matchIds.length
-      ? supabase.from('knockout_predictions')
-          .select('match_id, predicted_winner_id, points_awarded')
-          .eq('user_id', userId).in('match_id', matchIds)
-      : Promise.resolve({ data: [] as KoPred[] }),
-    matchIds.length
       ? supabase.from('jokers').select('match_id').eq('user_id', userId).in('match_id', matchIds)
       : Promise.resolve({ data: [] as { match_id: string }[] }),
   ])
   const predMap = Object.fromEntries(((preds ?? []) as Pred[]).map((p) => [p.match_id, p]))
-  const koMap = Object.fromEntries(((koPreds ?? []) as KoPred[]).map((p) => [p.match_id, p]))
   const jokerIds = new Set(((jokers ?? []) as { match_id: string }[]).map((j) => j.match_id))
 
-  // Alle landen die deze deelnemer ooit als KO-winnaar koos (over alle KO-wedstrijden).
-  // Hiermee bepalen we welke KO-wedstrijden van vandaag we tonen en "mijn keuze".
-  const { data: allKoWinners } = await supabase
-    .from('knockout_predictions')
-    .select('predicted_winner_id')
+  // KO-winnaars komen uit de bracket (bracket_predictions): per slot het land dat je
+  // liet winnen. winSet = alle landen die je ergens als winnaar koos; bracketBySlot
+  // levert de punten per KO-wedstrijd (slot = match_number).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: bracketRows } = await (supabase as any)
+    .from('bracket_predictions')
+    .select('slot, predicted_team_id, points_awarded')
     .eq('user_id', userId)
-  const winSet = new Set(((allKoWinners ?? []) as { predicted_winner_id: string }[]).map((k) => k.predicted_winner_id))
+  const bracket = (bracketRows ?? []) as { slot: number; predicted_team_id: string; points_awarded: number | null }[]
+  const winSet = new Set(bracket.map((b) => b.predicted_team_id))
+  const koPtsBySlot = Object.fromEntries(bracket.map((b) => [b.slot, b.points_awarded])) as Record<number, number | null>
 
   // KO-wedstrijden alleen tonen als je minstens één van de twee landen als winnaar
   // voorspelde. Groepsfase-wedstrijden tonen we zoals altijd.
@@ -171,7 +169,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Behaalde punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {played.map((m) => (
-                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} ko={koMap[m.id]} joker={jokerIds.has(m.id)} winSet={winSet} />
+                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} koPts={koPtsBySlot[m.match_number ?? -1] ?? null} joker={jokerIds.has(m.id)} winSet={winSet} />
                   ))}
                 </div>
               </SubSection>
@@ -180,7 +178,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Nog te behalen punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {upcoming.map((m) => (
-                    <UpcomingRow key={m.id} m={m} pred={predMap[m.id]} ko={koMap[m.id]} joker={jokerIds.has(m.id)} winSet={winSet} />
+                    <UpcomingRow key={m.id} m={m} pred={predMap[m.id]} joker={jokerIds.has(m.id)} winSet={winSet} />
                   ))}
                 </div>
               </SubSection>
@@ -300,9 +298,9 @@ function MyChoice({ teams }: { teams: NonNullable<TeamRef>[] }) {
   )
 }
 
-function PlayedRow({ m, pred, ko, joker, winSet }: { m: Match; pred?: Pred; ko?: KoPred; joker: boolean; winSet: Set<string> }) {
+function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; koPts?: number | null; joker: boolean; winSet: Set<string> }) {
   const isKo = m.stage !== 'group'
-  const pts = isKo ? (ko?.points_awarded ?? null) : (pred?.points_awarded ?? null)
+  const pts = isKo ? (koPts ?? null) : (pred?.points_awarded ?? null)
   const winner = koWinner(m)
   return (
     <div className="px-4 py-3">
@@ -343,7 +341,7 @@ function PlayedRow({ m, pred, ko, joker, winSet }: { m: Match; pred?: Pred; ko?:
   )
 }
 
-function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; ko?: KoPred; joker: boolean; winSet: Set<string> }) {
+function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; joker: boolean; winSet: Set<string> }) {
   const isKo = m.stage !== 'group'
   const voorspeld = groupPredText(pred)
   return (

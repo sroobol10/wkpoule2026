@@ -121,7 +121,7 @@ export default async function PadelclubPage() {
   const { data: dayMatchRows } = await supabase
     .from('matches')
     .select(`
-      id, kickoff_at, stage, home_score, away_score, result_entered,
+      id, kickoff_at, stage, match_number, home_score, away_score, result_entered,
       home_team:teams!matches_home_team_id_fkey(id, name, flag_url),
       away_team:teams!matches_away_team_id_fkey(id, name, flag_url)
     `)
@@ -130,35 +130,35 @@ export default async function PadelclubPage() {
     .order('kickoff_at')
   type MTeam = { id: string; name: string; flag_url: string | null } | null
   type MRow = {
-    id: string; kickoff_at: string; stage: string
+    id: string; kickoff_at: string; stage: string; match_number: number | null
     home_score: number | null; away_score: number | null; result_entered: boolean
     home_team: MTeam; away_team: MTeam
   }
   const dayMatchesRaw = (dayMatchRows ?? []) as unknown as MRow[]
   const dayMatchIds = dayMatchesRaw.map((m) => m.id)
 
-  // Voorspellingen (groep) en KO-keuzes van de vier voor die wedstrijden
-  const [{ data: dayPreds }, { data: dayKo }] = await Promise.all([
-    dayMatchIds.length
-      ? supabase.from('predictions').select('user_id, match_id, predicted_home, predicted_away, points_awarded').in('user_id', playerIds).in('match_id', dayMatchIds)
-      : Promise.resolve({ data: [] as { user_id: string; match_id: string; predicted_home: number; predicted_away: number; points_awarded: number | null }[] }),
-    dayMatchIds.length
-      ? supabase.from('knockout_predictions').select('user_id, match_id, predicted_winner_id, points_awarded').in('user_id', playerIds).in('match_id', dayMatchIds)
-      : Promise.resolve({ data: [] as { user_id: string; match_id: string; predicted_winner_id: string; points_awarded: number | null }[] }),
-  ])
+  // Groepsvoorspellingen van de vier voor die wedstrijden
+  const { data: dayPreds } = dayMatchIds.length
+    ? await supabase.from('predictions').select('user_id, match_id, predicted_home, predicted_away, points_awarded').in('user_id', playerIds).in('match_id', dayMatchIds)
+    : { data: [] as { user_id: string; match_id: string; predicted_home: number; predicted_away: number; points_awarded: number | null }[] }
   const predByKey: Record<string, { h: number; a: number; pts: number | null }> = {}
   for (const p of dayPreds ?? []) predByKey[`${p.user_id}:${p.match_id}`] = { h: p.predicted_home, a: p.predicted_away, pts: p.points_awarded }
-  const koByKey: Record<string, { winnerId: string; pts: number | null }> = {}
-  for (const k of dayKo ?? []) koByKey[`${k.user_id}:${k.match_id}`] = { winnerId: k.predicted_winner_id, pts: k.points_awarded }
 
-  // Alle landen die elk van de vier ooit als KO-winnaar koos (voor "mijn keuze" + filter)
-  const { data: allKo } = await supabase
-    .from('knockout_predictions')
-    .select('user_id, predicted_winner_id')
+  // KO-keuzes komen uit de bracket (bracket_predictions): per slot het land dat je
+  // liet winnen. winSetByUser = alle gekozen winnaars; ptsByUserSlot = punten per slot.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: bracketRows } = await (supabase as any)
+    .from('bracket_predictions')
+    .select('user_id, slot, predicted_team_id, points_awarded')
     .in('user_id', playerIds)
+  const brk = (bracketRows ?? []) as { user_id: string; slot: number; predicted_team_id: string; points_awarded: number | null }[]
   const winSetByUser: Record<string, Set<string>> = {}
   for (const id of playerIds) winSetByUser[id] = new Set()
-  for (const k of allKo ?? []) winSetByUser[k.user_id]?.add(k.predicted_winner_id)
+  const koPtsByKey: Record<string, number | null> = {}
+  for (const b of brk) {
+    winSetByUser[b.user_id]?.add(b.predicted_team_id)
+    koPtsByKey[`${b.user_id}:${b.slot}`] = b.points_awarded
+  }
 
   const dayMatchesAll: DayMatch[] = dayMatchesRaw.map((m) => {
     const home = m.home_team, away = m.away_team
@@ -184,8 +184,8 @@ export default async function PadelclubPage() {
           const choices = [home, away]
             .filter((t): t is NonNullable<typeof t> => !!t && !!set?.has(t.id))
             .map((t) => ({ name: t.name, flag: t.flag_url }))
-          const k = koByKey[`${id}:${m.id}`]
-          return [id, { text: null, pts: k?.pts ?? null, choices }]
+          const pts = m.match_number != null ? (koPtsByKey[`${id}:${m.match_number}`] ?? null) : null
+          return [id, { text: null, pts, choices }]
         })
       ),
     }

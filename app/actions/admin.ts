@@ -56,45 +56,23 @@ async function scoreBracketAdvancement(
   const pointsForStage = KO_POINTS[stage] ?? 0
   if (pointsForStage === 0) return []
 
-  // Verzamel de doorgestoten teams voor deze ronde
-  let advancedTeams: Set<string>
+  // Wedstrijden van deze ronde ophalen. We scoren de bracket-picks pas wanneer de
+  // héle ronde gespeeld is — dan staan alle doorgangers vast (winnaars van de ronde).
+  const { data: roundMatches } = await supabase
+    .from('matches')
+    .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+    .eq('stage', stage)
+  if (!roundMatches || roundMatches.length === 0) return []
 
-  if (stage === 'final' || stage === 'third_place') {
-    // Final / troostfinale: de winnaar is de enige die "doorgaat" (= kampioen / 3e plek)
-    const { data: m } = await supabase
-      .from('matches')
-      .select('home_team_id, away_team_id, home_score, away_score')
-      .eq('stage', stage)
-      .eq('result_entered', true)
-      .maybeSingle()
-    if (!m || m.home_score == null || m.away_score == null) return []
-    const winner = m.home_score > m.away_score ? m.home_team_id! : m.away_team_id!
-    advancedTeams = new Set([winner])
-  } else {
-    // Andere rondes: kijk welke ploegen DEELNEMEN aan de VOLGENDE ronde
-    const nextStageMap: Record<string, string[]> = {
-      r32: ['r16'],
-      r16: ['qf'],
-      qf:  ['sf'],
-      sf:  ['final', 'third_place'],
-    }
-    const nextStages = nextStageMap[stage] ?? []
-    if (nextStages.length === 0) return []
+  const allDone = roundMatches.every((m) => m.result_entered && m.home_score != null && m.away_score != null)
+  if (!allDone) return []
 
-    const { data: nextMatches } = await supabase
-      .from('matches')
-      .select('home_team_id, away_team_id')
-      .in('stage', nextStages)
-      .not('home_team_id', 'is', null)
-      .not('away_team_id', 'is', null)
-
-    advancedTeams = new Set<string>()
-    for (const m of nextMatches ?? []) {
-      if (m.home_team_id) advancedTeams.add(m.home_team_id)
-      if (m.away_team_id) advancedTeams.add(m.away_team_id)
-    }
+  // Doorgestoten teams = winnaars van deze ronde (voor final/troostfinale idem: de winnaar)
+  const advancedTeams = new Set<string>()
+  for (const m of roundMatches) {
+    const w = (m.home_score ?? 0) > (m.away_score ?? 0) ? m.home_team_id : m.away_team_id
+    if (w) advancedTeams.add(w)
   }
-
   if (advancedTeams.size === 0) return []
 
   // Haal alle bracket-picks op voor slots in deze ronde
@@ -472,20 +450,21 @@ export async function setKnockoutResult(
     .from('matches')
     .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
     .eq('id', matchId)
-    .select('stage')
+    .select('stage, home_team_id, away_team_id')
     .single()
 
   if (error || !match) return { ok: false, error: 'Opslaan mislukt.' }
 
   const pointsForRound = KO_POINTS[match.stage] ?? 0
+  const loserId = match.home_team_id === winnerId ? match.away_team_id : match.home_team_id
 
+  const affectedUsers = new Set<string>()
+
+  // (Optioneel) per-wedstrijd knockout_predictions scoren — meestal leeg.
   const { data: preds } = await supabase
     .from('knockout_predictions')
     .select('id, user_id, predicted_winner_id')
     .eq('match_id', matchId)
-
-  const affectedUsers = new Set<string>()
-
   if (preds && preds.length > 0) {
     const correctIds: string[] = []
     const wrongIds: string[] = []
@@ -499,8 +478,37 @@ export async function setKnockoutResult(
     ])
   }
 
-  // Bracket-voorspellingen: score alle picks voor deze ronde o.b.v. doorgestoten ploegen
-  // (ronde-gebaseerd: slot is niet relevant, puur welke teams de ronde halen)
+  // Bracket-voorspellingen direct scoren voor de twee landen die net speelden:
+  // wie de winnaar koos krijgt de rondepunten, wie de verliezer koos krijgt 0.
+  // (Andere picks worden gescoord zodra hún wedstrijd is ingevoerd.)
+  if (pointsForRound > 0) {
+    const slotsInStage = BRACKET.filter((b) => b.stage === match.stage).map((b) => b.slot)
+    const teamIds = [winnerId, loserId].filter(Boolean) as string[]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: picks } = await (supabase as any)
+      .from('bracket_predictions')
+      .select('id, user_id, predicted_team_id')
+      .in('slot', slotsInStage)
+      .in('predicted_team_id', teamIds)
+    const correctIds: string[] = []
+    const wrongIds: string[] = []
+    for (const p of (picks ?? []) as { id: string; user_id: string; predicted_team_id: string }[]) {
+      ;(p.predicted_team_id === winnerId ? correctIds : wrongIds).push(p.id)
+      affectedUsers.add(p.user_id)
+    }
+    await Promise.all([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      correctIds.length ? (supabase as any).from('bracket_predictions').update({ points_awarded: pointsForRound }).in('id', correctIds) : Promise.resolve(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      wrongIds.length ? (supabase as any).from('bracket_predictions').update({ points_awarded: 0 }).in('id', wrongIds) : Promise.resolve(),
+    ])
+  }
+
+  // Winnaar(s) automatisch doorzetten naar de volgende ronde (vult de fixtures zodra
+  // beide feeders gespeeld zijn).
+  await propagateKoTeams(supabase)
+
+  // Sluitstuk: zodra de héle ronde gespeeld is, alle resterende picks consistent zetten.
   const bracketUsers = await scoreBracketAdvancement(supabase, match.stage)
   bracketUsers.forEach((u) => affectedUsers.add(u))
 
@@ -929,10 +937,12 @@ export async function autoFillGroupResultsUntil(isoDate: string): Promise<AdminR
 }
 
 // ─── Vul teams in voor de volgende KO-ronde op basis van gespeelde resultaten ─
-export async function assignNextKoRoundTeams(): Promise<AdminResult> {
-  const { supabase } = await assertAdmin()
-  if (!supabase) return { ok: false, error: 'Geen toegang.' }
-
+// Zet winnaars door naar de volgende ronde: vult elke KO-wedstrijd waarvan beide
+// 'feeders' (vorige ronde) gespeeld zijn met de juiste teams. Cascadeert door alle
+// rondes. Retourneert hoeveel wedstrijden zijn ingevuld. Herbruikbaar én idempotent.
+async function propagateKoTeams(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<number> {
   // Haal alle KO-wedstrijden op (admin heeft SELECT op alle matches)
   const { data: koMatches } = await supabase
     .from('matches')
@@ -940,9 +950,7 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
     .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
     .order('match_number')
 
-  if (!koMatches || koMatches.length === 0) {
-    return { ok: false, error: 'Geen KO-wedstrijden gevonden. Maak ze eerst aan via het script.' }
-  }
+  if (!koMatches || koMatches.length === 0) return 0
 
   // Bouw een map: slot → match
   const matchBySlot = Object.fromEntries(koMatches.map((m) => [m.match_number, m]))
@@ -1021,34 +1029,33 @@ export async function assignNextKoRoundTeams(): Promise<AdminResult> {
     return sortedGroups[group]?.[pos] ?? null
   }
 
-  // Vind de eerste ronde met null-teams en vul die in
+  // Vul alle rondes met null-teams die nu wél op te lossen zijn (cascade in volgorde)
   const stageOrder = ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']
   let updated = 0
 
   for (const stage of stageOrder) {
     const stageMatches = BRACKET.filter((bm) => bm.stage === stage)
-    const needsTeams = stageMatches.filter((bm) => {
+    for (const bm of stageMatches) {
       const m = matchBySlot[bm.slot]
-      return m && (!m.home_team_id || !m.away_team_id)
-    })
-
-    if (needsTeams.length === 0) continue
-
-    for (const bm of needsTeams) {
+      if (!m || (m.home_team_id && m.away_team_id)) continue
       const homeId = resolveTeam(bm.homeSeed)
       const awayId = resolveTeam(bm.awaySeed)
       if (!homeId || !awayId) continue
-
-      const m = matchBySlot[bm.slot]
       await supabase.from('matches').update({ home_team_id: homeId, away_team_id: awayId }).eq('id', m.id)
+      m.home_team_id = homeId; m.away_team_id = awayId   // in-memory zodat latere rondes meeliften
       updated++
     }
-
-    if (updated > 0) break // verwerk één ronde per keer
   }
+  return updated
+}
 
+// Admin-actie: winnaars handmatig doorzetten (fallback; gebeurt nu ook automatisch
+// bij het invoeren van een KO-uitslag).
+export async function assignNextKoRoundTeams(): Promise<AdminResult> {
+  const { supabase } = await assertAdmin()
+  if (!supabase) return { ok: false, error: 'Geen toegang.' }
+  const updated = await propagateKoTeams(supabase)
   if (updated === 0) return { ok: false, error: 'Geen teams om in te vullen. Controleer of de vorige ronde volledig gespeeld is.' }
-
   revalidatePath('/admin')
   revalidatePath('/knockout')
   return { ok: true }
