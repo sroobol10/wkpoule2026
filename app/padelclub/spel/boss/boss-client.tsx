@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 const W = 380
 const H = 600
@@ -330,6 +331,7 @@ export default function BossClient({ leaderboard, currentUserId }: { leaderboard
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}

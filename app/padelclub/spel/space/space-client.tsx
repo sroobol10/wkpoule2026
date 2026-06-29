@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 // ── Logisch speelveld (wordt geschaald naar de breedte van het scherm) ──────────
 const W = 380
@@ -89,7 +90,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   const [phase, setPhase] = useState<'idle' | 'playing' | 'over'>('idle')
   const [hud, setHud] = useState({ score: 0, lives: 3, wave: 0, bossHp: 0, bossMax: 0, bossName: '' })
   const [board, setBoard] = useState<LeaderEntry[]>(leaderboard)
-  const [result, setResult] = useState<{ score: number; record: boolean; win: boolean } | null>(null)
+  const [result, setResult] = useState<{ score: number; record: boolean; win: boolean; timeBonus?: number; secs?: number } | null>(null)
   const [ready, setReady] = useState(false)
 
   const phaseRef = useRef(phase); phaseRef.current = phase
@@ -116,6 +117,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   const bgY = useRef(0)
   const score = useRef(0)
   const lives = useRef(3)
+  const runStart = useRef(0)   // start-tijd (voor de tijdbonus bij uitspelen)
   const stage = useRef(0)          // index in STAGES
   const curWave = useRef(WAVES[0]) // huidige golf-config (snelheid/vuur)
   const pending = useRef(0)        // tijd tot volgende golf/boss
@@ -183,7 +185,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   }, [])
 
   const spawnBoss = useCallback((kind: 'mech' | 'rick') => {
-    const hpv = kind === 'mech' ? 90 : 160
+    const hpv = kind === 'mech' ? 130 : 240
     boss.current = { kind, x: W / 2, y: -130, vx: kind === 'mech' ? 72 : 46, hp: hpv, max: hpv, t: 0, fireCd: 1.4, entering: true }
     setHud((h) => ({ ...h, bossHp: hpv, bossMax: hpv, bossName: kind === 'mech' ? 'Mecha-Tank' : 'Reuze-Rick' }))
   }, [])
@@ -200,9 +202,13 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   const endGame = useCallback((win: boolean) => {
     if (phaseRef.current === 'over') return
     phaseRef.current = 'over'; setPhase('over')
+    // Tijdbonus bij uitspelen: hoe sneller je Reuze-Rick verslaat, hoe meer punten
+    const secs = Math.max(0, Math.round((performanceNow() - runStart.current) / 1000))
+    const timeBonus = win ? Math.max(0, Math.round(5000 - secs * 15)) : 0
+    if (timeBonus > 0) score.current += timeBonus
     const final = score.current
     const prevBest = board.find((e) => e.id === currentUserId)?.best ?? 0
-    setResult({ score: final, record: final > prevBest, win })
+    setResult({ score: final, record: final > prevBest, win, timeBonus, secs })
     setBoard((prev) => prev.map((e) => (e.id === currentUserId ? { ...e, best: Math.max(e.best, final) } : e)).sort((a, b) => b.best - a.best))
     void submitPadelScore('space', final)
   }, [board, currentUserId])
@@ -579,6 +585,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   const start = useCallback(() => {
     if (!ready) return
     reset(); setResult(null)
+    runStart.current = performanceNow()
     phaseRef.current = 'playing'; setPhase('playing')
   }, [ready, reset])
 
@@ -599,6 +606,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}
@@ -654,6 +662,9 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
               <p className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: result.win ? 'var(--color-wk-green)' : 'var(--color-wk-red)' }}>{result.win ? '🏆 Reuze-Rick verslagen!' : 'Game over'}</p>
               <p className="font-score text-5xl text-wk-gold leading-none">{result.score}</p>
               <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">punten</p>
+              {result.win && (result.timeBonus ?? 0) > 0 && (
+                <p className="font-mono text-[10px] text-wk-green tracking-[0.12em] uppercase">⚡ {Math.floor((result.secs ?? 0) / 60)}:{String((result.secs ?? 0) % 60).padStart(2, '0')} · tijdbonus +{result.timeBonus}</p>
+              )}
               {result.record && <p className="font-mono text-xs text-wk-green tracking-[0.14em] uppercase">Nieuw record!</p>}
               <button onClick={(e) => { e.stopPropagation(); start() }} className="mt-1 font-display text-base uppercase tracking-wide px-7 py-2.5 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer">
                 Opnieuw

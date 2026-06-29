@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 // Logische speelwereld (px); canvas schaalt mee met de breedte.
 const W = 380
@@ -30,6 +31,8 @@ const C = { bg1: '#0B0E14', bg2: '#11151F', pipe: '#2EA84B', pipeCap: '#F4B92E',
 // Spel-afbeeldingen staan in /public/spelers (512×512, strak bijgesneden).
 const FIGS = '/spelers'
 const CHARACTERS = ['bus.png', 'ho.png', 'kim.png', 'vince.png', 'rick.png', 'dejuul.png', 'trein.png', 'ashi.png', 'pimp.png']
+// Rick zoeft horizontaal; de rest valt tuimelend uit de lucht
+const FALL_CHARS = CHARACTERS.filter((c) => c !== 'rick.png')
 
 type Pipe = { x: number; gapY: number; scored: boolean }
 
@@ -47,6 +50,9 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
   const [char, setChar] = useState<string>('bus.png')
   // Easter egg: bij elke 15 punten zoeft een grote Rick over het scherm
   const [rickFly, setRickFly] = useState(0)
+  // De andere spelers vallen af en toe tuimelend uit de lucht
+  const [fallers, setFallers] = useState<{ key: number; src: string; left: number; size: number }[]>([])
+  const fallerKey = useRef(0)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const charImg = useRef<HTMLImageElement | null>(null)
@@ -192,6 +198,10 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
       if (!p.scored && p.x + PIPE_W < BIRD_X) {
         p.scored = true; scoreRef.current += 1; setScore(scoreRef.current)
         if (scoreRef.current % 15 === 0) setRickFly((k) => k + 1)
+        else if (Math.random() < 0.33) {
+          const src = FALL_CHARS[Math.floor(Math.random() * FALL_CHARS.length)]
+          setFallers((f) => [...f.slice(-3), { key: ++fallerKey.current, src, left: 6 + Math.random() * 80, size: 56 + Math.random() * 46 }])
+        }
       }
     }
 
@@ -272,6 +282,7 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       {/* Easter egg: grote Rick photobomt het scherm bij elke 15 punten */}
       {rickFly > 0 && (
         <div key={rickFly} className="pointer-events-none fixed inset-0 z-50 flex items-center overflow-hidden" aria-hidden>
@@ -283,6 +294,17 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
           />
         </div>
       )}
+      {/* De andere spelers vallen tuimelend uit de lucht */}
+      {fallers.map((fl) => (
+        <div key={fl.key} className="pointer-events-none fixed top-0 z-50" style={{ left: `${fl.left}%` }} aria-hidden>
+          <Image
+            src={`${FIGS}/${fl.src}`} alt="" width={120} height={120}
+            onAnimationEnd={() => setFallers((f) => f.filter((x) => x.key !== fl.key))}
+            className="h-auto drop-shadow-2xl"
+            style={{ width: fl.size, animation: 'flappy-fall 2.3s cubic-bezier(0.45,0,0.7,1) forwards' }}
+          />
+        </div>
+      ))}
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}

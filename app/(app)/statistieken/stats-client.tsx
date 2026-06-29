@@ -33,6 +33,7 @@ type Props = {
   totalDeelnemers: number
   bonusQuestionStats: BonusQuestionStat[]
   teamFlags: Record<string, string> // landnaam → vlag-URL
+  eliminatedCountries?: string[]    // uitgeschakelde landen → grijs
 }
 
 // flagcdn-URLs in de database zijn w80 (80px breed) — voor grote tegels te wazig
@@ -102,7 +103,9 @@ export default function StatsClient({
   totalDeelnemers,
   bonusQuestionStats,
   teamFlags,
+  eliminatedCountries = [],
 }: Props) {
+  const eliminatedSet = new Set(eliminatedCountries)
   const preBonusStats = bonusQuestionStats
     .filter((q) => q.type === 'pre_tournament')
     .sort((a, b) => preBonusIndex(a.question) - preBonusIndex(b.question))
@@ -264,7 +267,7 @@ export default function StatsClient({
                 {preBonusStats.map((q) =>
                   isGoatQuestion(q.question)
                     ? <GoatTeaser key={q.id} />
-                    : <BonusQuestionCard key={q.id} stat={q} teamFlags={teamFlags} />
+                    : <BonusQuestionCard key={q.id} stat={q} teamFlags={teamFlags} eliminated={eliminatedSet} />
                 )}
               </div>
             )}
@@ -274,7 +277,7 @@ export default function StatsClient({
                   Dagelijkse vragen
                 </p>
                 {dailyBonusStats.map((q) => (
-                  <BonusQuestionCard key={q.id} stat={q} teamFlags={teamFlags} />
+                  <BonusQuestionCard key={q.id} stat={q} teamFlags={teamFlags} eliminated={eliminatedSet} />
                 ))}
               </div>
             )}
@@ -301,6 +304,16 @@ function answerFlag(question: string, answer: string, teamFlags: Record<string, 
   return null
 }
 
+// Het land dat bij een antwoord hoort (voor de "uitgeschakeld"-markering).
+function answerCountry(question: string, answer: string): string | null {
+  const q = question.toLowerCase()
+  const playerBased = q.includes('topscorer') || q.includes('beste speler')
+  const countryBased = q.includes('goalgettergigant') || q.includes('desastreuze') || q.includes('kaartenkoning')
+  if (playerBased) return playerCountry(answer)
+  if (countryBased) return answer
+  return null
+}
+
 // Mobiel: voornaam van spelers weglaten (topscorer/beste speler) en lange
 // landnamen inkorten (kaartenkoning/desastreuze defensie) — scheelt ruimte.
 const COUNTRY_ABBR_MOBILE: Record<string, string> = {
@@ -324,7 +337,7 @@ function statDetailKey(question: string): string | null {
   return null
 }
 
-function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamFlags: Record<string, string> }) {
+function BonusQuestionCard({ stat, teamFlags, eliminated }: { stat: BonusQuestionStat; teamFlags: Record<string, string>; eliminated: Set<string> }) {
   const q = stat.question.toLowerCase()
   const playerBased = q.includes('topscorer') || q.includes('beste speler')
   const countryBased = q.includes('goalgettergigant') || q.includes('desastreuze') || q.includes('kaartenkoning')
@@ -360,6 +373,8 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
         <div className="px-5 py-3 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 sm:gap-x-3 gap-y-2">
           {stat.top_answers.map(({ answer, count, pct, points, is_correct, is_mine }) => {
             const flag = answerFlag(stat.question, answer, teamFlags)
+            const land = answerCountry(stat.question, answer)
+            const elim = !is_correct && !!land && eliminated.has(land)
             // Kleurregels:
             // - correct antwoord → groen (met ✓)
             // - eigen keuze, dagelijkse vraag met bekende uitslag & fout → rood
@@ -380,9 +395,9 @@ function BonusQuestionCard({ stat, teamFlags }: { stat: BonusQuestionStat; teamF
               <Fragment key={answer}>
                 <div className="flex items-center gap-1.5 min-w-0">
                   {flag && (
-                    <Image src={flag} alt="" width={20} height={14} className="rounded-sm object-cover shrink-0 w-5 h-3.5" />
+                    <Image src={flag} alt="" width={20} height={14} className={`rounded-sm object-cover shrink-0 w-5 h-3.5 ${elim ? 'grayscale opacity-60' : ''}`} />
                   )}
-                  <span className={`font-mono text-xs font-semibold whitespace-nowrap ${textColor}`}>
+                  <span className={`font-mono text-xs font-semibold whitespace-nowrap ${elim ? 'text-wk-muted/70 line-through decoration-wk-red/50' : textColor}`}>
                     <span className="sm:hidden">{mobileLabel(answer)}</span>
                     <span className="hidden sm:inline">{answer}</span>
                     {is_correct && <span className="ml-1 text-wk-green">✓</span>}

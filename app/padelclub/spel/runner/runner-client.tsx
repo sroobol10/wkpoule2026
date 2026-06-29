@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 // Liggend speelveld (2:1) — schaalt naar de breedte van de kolom.
 const W = 640
@@ -239,6 +240,7 @@ export default function RunnerClient({ leaderboard, currentUserId }: { leaderboa
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}

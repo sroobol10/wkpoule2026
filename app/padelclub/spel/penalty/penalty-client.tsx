@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 const W = 380
 const H = 480
@@ -44,8 +45,8 @@ const FIGS = '/spelers'
 const KEEPER = 'lukaku.png'   // startkeeper (komt elke 2e wave terug)
 // Pool voor de willekeurige keeper (de "even" waves zijn Lukaku, "oneven" random)
 const KEEPER_POOL = ['rick.png', 'bus.png', 'ho.png', 'kim.png', 'vince.png', 'dejuul.png', 'trein.png', 'ashi.png', 'pimp.png']
-const START_BOOSTERS = 3
-const BOOST_EVERY = 5   // elke 5 goals krijg je er één bij
+const START_BOOSTERS = 1
+const BOOST_EVERY = 10   // elke 10 goals krijg je er één bij (max 1 in voorraad)
 // Rick is (voorlopig) géén keeper meer — hij wandelt enkel langs het doel (zie rickWalk).
 const KEEPER_REAL = KEEPER_POOL.filter((k) => k !== 'rick.png')
 // Na een booster-goal vliegt de keeper weg en komt er een willekeurige nieuwe (Lukaku is de eerste)
@@ -81,6 +82,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const [boosters, setBoosters] = useState(START_BOOSTERS)   // voorraad vuur-boosters
   const [armed, setArmed] = useState(false)                  // booster gewapend voor dit schot
   const boostersRef = useRef(START_BOOSTERS)
+  const boostProgress = useRef(0)   // goals sinds laatste booster (booster-goal telt 3)
   const waveRef = useRef(0)
   const boostActive = useRef(false)   // huidige power-schot is een booster
   const boostSnd = useRef<HTMLAudioElement | null>(null)
@@ -289,7 +291,8 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     const ramp = Math.pow(1.05, scoreRef.current)
     if (p === 'power') {
       // Booster: 50% sneller (eenmalig deze beurt)
-      const speed = Math.min(3.4, 1.25 * ramp) * (boostActive.current ? 1.5 : 1)
+      // Booster maakt de balk eenmalig 15% langzamer (makkelijker te timen)
+      const speed = Math.min(3.4, 1.25 * ramp) * (boostActive.current ? 0.85 : 1)
       let pos = pwr.current.pos + pwr.current.dir * speed * dt
       let dir = pwr.current.dir
       if (pos > 1) { pos = 1; dir = -1 }
@@ -317,7 +320,8 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
       }
       if (k >= 1) {
         if (!shot.current.scored) { boostActive.current = false; setArmed(false); endGame(); return }
-        scoreRef.current += 1; setScore(scoreRef.current)
+        const gain = shot.current.booster ? 3 : 1   // booster-goal telt voor 3
+        scoreRef.current += gain; setScore(scoreRef.current)
         setGoalFx((gf) => gf + 1)
         burst(zx(shot.current.lock), TARGET_Y, '#F4B92E', shot.current.booster ? 34 : 22)
         if (shot.current.booster) {
@@ -340,11 +344,12 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
           if (shot.current.panenka) setPanenka((pp) => pp + 1)
           if (scoreRef.current % 7 === 0) setKeeperFall((pp) => pp + 1)
         }
-        // Elke 5 goals: nieuwe booster erbij + mijlpaal-flits + geluid
-        if (scoreRef.current % BOOST_EVERY === 0) {
-          boostersRef.current += 1; setBoosters(boostersRef.current)
+        // Elke 10 goals: één nieuwe booster (max 1 in voorraad) + mijlpaal-flits + geluid
+        boostProgress.current += gain
+        if (boostProgress.current >= BOOST_EVERY) {
+          boostProgress.current -= BOOST_EVERY
+          if (boostersRef.current < 1) { boostersRef.current = 1; setBoosters(1); playBoostSnd() }
           setStreakFx(scoreRef.current)
-          playBoostSnd()
         }
         pwr.current = { pos: 0, dir: 1 }
         placeRick()   // Rick (indien keeper) dook elk schot ergens anders op
@@ -359,7 +364,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
     scoreRef.current = 0; setScore(0); setResult(null)
     waveRef.current = 0; boostActive.current = false; setArmed(false)
     rickRef.current = false; rickGoals.current = 0; rickHomeX.current = zx(2); rickHomeY.current = GOAL_LINE; setRickLeave(null); setKeeperFlyOff(null)
-    boostersRef.current = START_BOOSTERS; setBoosters(START_BOOSTERS); setKeeperSrc(KEEPER)
+    boostersRef.current = START_BOOSTERS; setBoosters(START_BOOSTERS); boostProgress.current = 0; setKeeperSrc(KEEPER)
     pwr.current = { pos: 0, dir: 1 }
     phaseRef.current = 'power'; setPhase('power')
     last.current = performance.now()
@@ -437,6 +442,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       {/* Scherm kleurt vurig zolang een booster gewapend is */}
       {armed && (
         <div
@@ -587,7 +593,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
               <p className="text-sm text-wk-soft leading-relaxed">
                 Stop de power-balk in het <b className="text-wk-green">groen</b> → bijna zeker raak. Hoe verder van groen, hoe kleiner de kans; <b className="text-wk-red">rood</b> is over. De balk gaat elke goal <b>sneller</b>. Eén misser = klaar.
                 <br /><br />
-                Je start met <b className="text-wk-gold">3 🔥 boosters</b> — tik er één aan om je schot te wapenen: <b className="text-wk-green">groen</b> én <b className="text-wk-gold">geel</b> zijn dan zeker raak en de keeper vliegt het veld uit. Elke <b>5 goals</b> krijg je een nieuwe booster.
+                Je start met <b className="text-wk-gold">1 🔥 booster</b> — tik 'm aan om je schot te wapenen: <b className="text-wk-green">groen</b> én <b className="text-wk-gold">geel</b> zijn dan zeker raak, de balk gaat <b>15% langzamer</b>, de keeper vliegt weg en de goal telt voor <b>3</b>. Elke <b>10 goals</b> krijg je een nieuwe (max 1).
               </p>
               <button onClick={(e) => { e.stopPropagation(); start() }} className="font-display text-lg uppercase tracking-wide px-8 py-3 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer">
                 Start

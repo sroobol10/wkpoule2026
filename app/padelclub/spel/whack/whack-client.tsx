@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 const HOLES = 9
 const GAME_SECONDS = 30
@@ -172,6 +173,7 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       {/* Easter egg: grote Rick dendert van links naar rechts als je 'm tikt */}
       {rickFly > 0 && (
         <div key={rickFly} className="pointer-events-none fixed inset-0 z-50 flex items-center overflow-hidden" aria-hidden>

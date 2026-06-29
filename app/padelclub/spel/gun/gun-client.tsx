@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
+import TeamsPopup from '../teams-popup'
 
 const W = 560, H = 320
 const GROUND = 272          // voetlijn (wereld)
@@ -18,8 +19,9 @@ const WALK = Array.from({ length: 6 }, (_, i) => `/spel/gun/walk${i}.png`)
 const FLY = Array.from({ length: 8 }, (_, i) => `/spel/gun/fly${i}.png`)
 const TANK = Array.from({ length: 4 }, (_, i) => `/spel/gun/tank${i}.png`)
 const JUMP = '/spel/gun/jump.png', BULLET = '/spel/gun/bullet.png', BG = '/spel/gun/bg.png'
+const FACE = '/rick.png'   // Rick bestuurt de alien-tank (gepixeld op de toren)
 const BOOM = { src: '/spel/space/explosion.png', frames: 8, fw: 48, fh: 48 }
-const ALL = [...RUN, ...IDLE, ...WALK, ...FLY, ...TANK, JUMP, BULLET, BG, BOOM.src]
+const ALL = [...RUN, ...IDLE, ...WALK, ...FLY, ...TANK, JUMP, BULLET, BG, FACE, BOOM.src]
 
 const PLATFORMS: { x: number; y: number; w: number }[] = [
   { x: 520, y: 212, w: 120 }, { x: 800, y: 168, w: 110 }, { x: 1150, y: 210, w: 130 },
@@ -63,13 +65,18 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   const score = useRef(0)
   const spawnCd = useRef(1.5)
   const bossOn = useRef(false)
+  const facePix = useRef<HTMLCanvasElement | null>(null)   // gepixelde Rick voor de tank
 
   useEffect(() => {
     let alive = true; let done = 0
     ALL.forEach((src) => {
       const im = new window.Image()
       const fin = () => { done++; if (done === ALL.length && alive) setReady(true) }
-      im.onload = () => { imgs.current[src] = im; fin() }
+      im.onload = () => {
+        imgs.current[src] = im
+        if (src === FACE) { const c = document.createElement('canvas'); c.width = 32; c.height = 32; c.getContext('2d')?.drawImage(im, 0, 0, 32, 32); facePix.current = c }
+        fin()
+      }
       im.onerror = fin
       im.src = src
     })
@@ -284,9 +291,13 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
       else drawImg(ctx, WALK[e.frame % WALK.length], e.x, e.y, 38, flip)
     }
 
-    // tank-baas
+    // tank-baas — met Rick (gepixeld) als bestuurder op de toren
     const tk = tank.current
-    if (tk) drawImg(ctx, TANK[tk.frame], tk.x, tk.y, 70, true)
+    if (tk) {
+      drawImg(ctx, TANK[tk.frame], tk.x, tk.y, 70, true)
+      const f = facePix.current
+      if (f) { const s = 26; ctx.drawImage(f, tk.x - s / 2, tk.y - 70, s, s) }
+    }
 
     // explosies
     for (const bm of booms.current) {
@@ -328,6 +339,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
 
   return (
     <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}
@@ -364,17 +376,6 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
             </div>
           )}
 
-          {/* on-screen besturing */}
-          {phase === 'playing' && (
-            <>
-              <div className="absolute bottom-3 left-3 flex gap-2 z-20">
-                <button {...hold(inL)} className="w-14 h-14 rounded-full bg-black/45 border border-white/25 text-white text-2xl flex items-center justify-center active:bg-black/70" aria-label="Links">◀</button>
-                <button {...hold(inR)} className="w-14 h-14 rounded-full bg-black/45 border border-white/25 text-white text-2xl flex items-center justify-center active:bg-black/70" aria-label="Rechts">▶</button>
-              </div>
-              <button onPointerDown={(e) => { e.preventDefault(); doJump() }} className="absolute bottom-3 right-3 z-20 w-16 h-16 rounded-full bg-wk-gold/80 border border-white/30 text-wk-bg text-xl font-display flex items-center justify-center active:scale-95" aria-label="Springen">JUMP</button>
-            </>
-          )}
-
           {phase === 'idle' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6 bg-wk-bg/60 backdrop-blur-[1px] rounded-2xl">
               <p className="text-5xl">🔫</p>
@@ -399,6 +400,17 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
             </div>
           )}
         </div>
+
+        {/* Besturing onder het speelveld — overlapt nooit het scherm (fijn op mobiel) */}
+        {phase === 'playing' && (
+          <div className="flex items-center justify-between gap-3 max-w-[460px] mx-auto select-none touch-none">
+            <div className="flex gap-3">
+              <button {...hold(inL)} className="w-16 h-16 rounded-2xl bg-wk-surface border border-white/15 text-wk-text text-2xl flex items-center justify-center active:bg-white/10" aria-label="Links">◀</button>
+              <button {...hold(inR)} className="w-16 h-16 rounded-2xl bg-wk-surface border border-white/15 text-wk-text text-2xl flex items-center justify-center active:bg-white/10" aria-label="Rechts">▶</button>
+            </div>
+            <button onPointerDown={(e) => { e.preventDefault(); doJump() }} className="w-24 h-16 rounded-2xl bg-wk-gold/90 border border-white/20 text-wk-bg text-lg font-display uppercase tracking-wide flex items-center justify-center active:scale-95" aria-label="Springen">Jump</button>
+          </div>
+        )}
 
         <GameLeaderboard entries={board} currentUserId={currentUserId} />
       </div>

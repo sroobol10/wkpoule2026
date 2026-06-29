@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
+import { computeAliveTeamIds, type AliveGroupMatch, type AliveKoMatch } from '@/lib/alive-teams'
 import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat } from './stats-client'
 
 // PostgREST levert standaard max. 1000 rijen per query. Met ~65 deelnemers ×
@@ -246,9 +247,20 @@ export default async function StatistiekenPage({
   }
 
   // Vlaggen-map (landnaam → vlag) voor de antwoordverdeling
-  const { data: allTeamsForFlags } = await supabase.from('teams').select('name, flag_url')
+  const { data: allTeamsForFlags } = await supabase.from('teams').select('id, name, flag_url')
   const teamFlags: Record<string, string> = {}
   for (const t of allTeamsForFlags ?? []) if (t.flag_url) teamFlags[t.name] = t.flag_url
+
+  // Uitgeschakelde landen → grijs bij de bonusvragen
+  const [{ data: aliveGroupM }, { data: aliveKoM }] = await Promise.all([
+    supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(id, name, group_name), away_team:teams!matches_away_team_id_fkey(id, name, group_name)').eq('stage', 'group'),
+    supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered').in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']),
+  ])
+  const aliveSet = computeAliveTeamIds(
+    (aliveGroupM ?? []) as unknown as AliveGroupMatch[],
+    (aliveKoM ?? []) as unknown as AliveKoMatch[],
+  )
+  const eliminatedCountries = (allTeamsForFlags ?? []).filter((t) => !aliveSet.has(t.id)).map((t) => t.name)
 
   return (
     <StatsClient
@@ -259,6 +271,7 @@ export default async function StatistiekenPage({
       totalDeelnemers={totalDeelnemers ?? 0}
       bonusQuestionStats={bonusQuestionStats}
       teamFlags={teamFlags}
+      eliminatedCountries={eliminatedCountries}
     />
   )
 }
