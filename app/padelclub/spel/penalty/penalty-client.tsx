@@ -46,7 +46,7 @@ const FIGS = '/spelers'
 const KEEPER = 'lukaku.png'   // startkeeper (komt elke 2e wave terug)
 // Pool voor de willekeurige keeper (de "even" waves zijn Lukaku, "oneven" random)
 const KEEPER_POOL = ['rick.png', 'bus.png', 'ho.png', 'kim.png', 'vince.png', 'dejuul.png', 'trein.png', 'ashi.png', 'pimp.png']
-const START_BOOSTERS = 1
+const START_BOOSTERS = 0   // je begint zonder; pas ná 10 goals krijg je er één
 const BOOST_EVERY = 10   // elke 10 goals krijg je er één bij (max 1 in voorraad)
 // Rick is (voorlopig) géén keeper meer — hij wandelt enkel langs het doel (zie rickWalk).
 const KEEPER_REAL = [KEEPER, ...KEEPER_POOL.filter((k) => k !== 'rick.png')]   // random keeperpool (incl. Lukaku, zonder Rick)
@@ -85,7 +85,8 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const boostersRef = useRef(START_BOOSTERS)
   const boostProgress = useRef(0)   // goals sinds laatste booster (booster-goal telt 3)
   const waveRef = useRef(0)
-  const boostActive = useRef(false)   // huidige power-schot is een booster
+  const boostActive = useRef(false)   // huidige power-schot is een booster (snellere balk + betere kansen)
+  const slowBase = useRef(1)          // persistente basis-snelheidsfactor: ×0.65 na elke booster (-35%), bouwt weer op via de ramp
   const boostSnd = useRef<HTMLAudioElement | null>(null)
   const playBoostSnd = () => { const a = boostSnd.current; if (a) { a.currentTime = 0; void a.play().catch(() => {}) } }
   // Rick als keeper: hij dook elk schot willekeurig links/rechts/boven het doel op → alles raak behalve rood. Na 5 goals loopt hij weg.
@@ -288,12 +289,13 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
       particles.current = particles.current.filter((pt) => pt.life > 0)
     }
     const p = phaseRef.current
-    // De power-balk gaat elke goal 5% sneller (oplopende moeilijkheid)
-    const ramp = Math.pow(1.05, scoreRef.current)
+    // De power-balk gaat elke goal 5% sneller (oplopende moeilijkheid). slowBase verlaagt
+    // de basis na een booster met 35% → die wordt de nieuwe basis waar de +5%/goal weer op opbouwt.
+    const ramp = Math.pow(1.05, scoreRef.current) * slowBase.current
     if (p === 'power') {
-      // Booster: 50% sneller (eenmalig deze beurt)
-      // Booster maakt de balk eenmalig 15% langzamer (makkelijker te timen)
-      const speed = Math.min(3.4, 1.25 * ramp) * (boostActive.current ? 0.85 : 1)
+      // Booster-schot zelf: 40% sneller. De verlaging tot -35% pakt vanaf het schot dáárna (via slowBase).
+      const speedMult = boostActive.current ? 1.4 : 1
+      const speed = Math.min(3.4, 1.25 * ramp) * speedMult
       let pos = pwr.current.pos + pwr.current.dir * speed * dt
       let dir = pwr.current.dir
       if (pos > 1) { pos = 1; dir = -1 }
@@ -328,6 +330,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
         if (shot.current.booster) {
           // keeper geveld → tolt groeiend naar links/rechtsboven het scherm uit, nieuwe keeper erin
           boostActive.current = false; setArmed(false)
+          slowBase.current *= 0.65   // vanaf het volgende schot zakt de basis-snelheid 35% (bouwt weer op via +5%/goal)
           waveRef.current += 1
           setKeeperFlyOff({ src: keeperSrcRef.current, dir: Math.random() < 0.5 ? 'left' : 'right', k: ++keeperFlyK.current })
           rickRef.current = false
@@ -363,7 +366,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   const start = useCallback(() => {
     if (raf.current != null) cancelAnimationFrame(raf.current)
     scoreRef.current = 0; setScore(0); setResult(null)
-    waveRef.current = 0; boostActive.current = false; setArmed(false)
+    waveRef.current = 0; boostActive.current = false; slowBase.current = 1; setArmed(false)
     rickRef.current = false; rickGoals.current = 0; rickHomeX.current = zx(2); rickHomeY.current = GOAL_LINE; setRickLeave(null); setKeeperFlyOff(null)
     boostersRef.current = START_BOOSTERS; setBoosters(START_BOOSTERS); boostProgress.current = 0; setKeeperSrc(randomKeeper())
     pwr.current = { pos: 0, dir: 1 }
@@ -595,7 +598,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
               <p className="text-sm text-wk-soft leading-relaxed">
                 Stop de power-balk in het <b className="text-wk-green">groen</b> → bijna zeker raak. Hoe verder van groen, hoe kleiner de kans; <b className="text-wk-red">rood</b> is over. De balk gaat elke goal <b>sneller</b>. Eén misser = klaar.
                 <br /><br />
-                Je start met <b className="text-wk-gold">1 🔥 booster</b> — tik 'm aan om je schot te wapenen: <b className="text-wk-green">groen</b> én <b className="text-wk-gold">geel</b> zijn dan zeker raak, de balk gaat <b>15% langzamer</b>, de keeper vliegt weg en de goal telt voor <b>3</b>. Elke <b>10 goals</b> krijg je een nieuwe (max 1).
+                Na <b>10 goals</b> verdien je een <b className="text-wk-gold">🔥 booster</b> (max 1, telkens na 10 goals weer één) — tik 'm aan om je schot te wapenen: <b className="text-wk-green">groen</b> én <b className="text-wk-gold">geel</b> zijn dan zeker raak, de balk gaat <b>sneller</b>, de keeper vliegt weg en de goal telt voor <b>3</b>. Dáárna zakt de balk-snelheid <b>35%</b> terug en bouwt weer rustig op — zo profiteer je zo'n <b>10 schoten</b> lang.
               </p>
               <button onClick={(e) => { e.stopPropagation(); start() }} className="font-display text-lg uppercase tracking-wide px-8 py-3 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer">
                 Start
