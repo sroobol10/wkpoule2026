@@ -48,9 +48,9 @@ type Pickup = { x: number; y: number }
 // Camera-lock boss-arena's: zodra de speler een gate bereikt, stopt het scrollen
 // en verschijnt de boss. Verslagen → door naar de volgende. Laatste = de Alien-Tank.
 const BOSS_GATES: { x: number; kind: BossKind; hp: number; name: string }[] = [
-  { x: 1150, kind: 'mech',   hp: 48, name: 'Mecha-Unit' },
-  { x: 2450, kind: 'saucer', hp: 54, name: 'Alien-Schotel' },
-  { x: 4050, kind: 'tank',   hp: 90, name: 'Alien-Tank' },
+  { x: 1150, kind: 'mech',   hp: 30, name: 'Mecha-Unit' },
+  { x: 2450, kind: 'saucer', hp: 48, name: 'Alien-Schotel' },
+  { x: 4050, kind: 'tank',   hp: 85, name: 'Alien-Tank' },
 ]
 
 export default function GunClient({ leaderboard, currentUserId }: { leaderboard: LeaderEntry[]; currentUserId: string }) {
@@ -311,9 +311,9 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
         if (bs.fireCd <= 0) {
           const rage = bs.hp < bs.max * 0.5
           if (bs.kind === 'mech') {
-            bs.fireCd = rage ? 0.85 : 1.25
+            bs.fireCd = rage ? 1.15 : 1.7
             const aim = Math.atan2((p.y - 26) - (bs.y - 44), p.x - bs.x)
-            for (const off of rage ? [-0.3, 0, 0.3] : [-0.2, 0.2]) ebullets.current.push({ x: bs.x, y: bs.y - 44, vx: Math.cos(aim + off) * 250, vy: Math.sin(aim + off) * 250, grav: false })
+            for (const off of rage ? [-0.26, 0, 0.26] : [-0.16, 0.16]) ebullets.current.push({ x: bs.x, y: bs.y - 44, vx: Math.cos(aim + off) * 205, vy: Math.sin(aim + off) * 205, grav: false })
           } else if (bs.kind === 'saucer') {
             bs.fireCd = rage ? 0.7 : 1.05
             for (const dx of [-24, 0, 24]) ebullets.current.push({ x: bs.x + dx, y: bs.y + 20, vx: 0, vy: 150, grav: true })
