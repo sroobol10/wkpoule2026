@@ -189,6 +189,7 @@ export default function StatsClient({
               <div className="grid grid-cols-4 sm:grid-cols-6 auto-rows-[68px] sm:auto-rows-[76px] gap-1.5">
                 {kampioenStats.map(({ answer, count, flag_url }, i) => {
                   const pct = totalDeelnemers > 0 ? Math.round((count / totalDeelnemers) * 100) : 0
+                  const elim = eliminatedSet.has(answer)   // uitgeschakeld land → grijs
                   const isTop = i === 0
                   const span = isTop
                     ? 'col-span-2 row-span-2'
@@ -211,15 +212,16 @@ export default function StatsClient({
                           alt={answer}
                           fill
                           sizes="(max-width: 640px) 50vw, 33vw"
-                          className="object-cover opacity-80 group-hover:scale-110 transition-transform duration-300"
+                          className={`object-cover group-hover:scale-110 transition-transform duration-300 ${elim ? 'grayscale opacity-40' : 'opacity-80'}`}
                         />
                       ) : (
                         <div className="absolute inset-0 bg-wk-bg2" />
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
                       {isTop && <span className="absolute top-1.5 right-2 text-base drop-shadow">👑</span>}
+                      {elim && <span className="absolute top-1.5 left-2 font-mono text-[8px] font-bold text-wk-red bg-black/50 rounded px-1 tracking-widest uppercase">uit</span>}
                       <div className="absolute inset-x-0 bottom-0 px-2 pb-1.5 sm:px-2.5 sm:pb-2">
-                        <p className={`font-display uppercase leading-none truncate drop-shadow ${
+                        <p className={`font-display uppercase leading-none truncate drop-shadow ${elim ? 'line-through opacity-70 ' : ''}${
                           isTop
                             ? 'text-wk-gold text-base sm:text-xl'
                             : i <= 2

@@ -254,7 +254,7 @@ export default async function StatistiekenPage({
   // Uitgeschakelde landen → grijs bij de bonusvragen
   const [{ data: aliveGroupM }, { data: aliveKoM }] = await Promise.all([
     supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(id, name, group_name), away_team:teams!matches_away_team_id_fkey(id, name, group_name)').eq('stage', 'group'),
-    supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered').in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']),
+    supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id').in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']),
   ])
   const aliveSet = computeAliveTeamIds(
     (aliveGroupM ?? []) as unknown as AliveGroupMatch[],

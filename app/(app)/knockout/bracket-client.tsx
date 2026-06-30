@@ -309,6 +309,7 @@ function BracketMatchCard({
   //  wedstrijden ten onrechte rood zodra één duel in de ronde gespeeld was.)
   const isCorrect = !!userPick && advancedTeams.has(userPick)
   const isWrong   = !!userPick && eliminatedTeams.has(userPick)
+  const resultIn  = actualWinnerId != null   // uitslag ingevoerd → datum weg, ruimte voor punten
 
   return (
     <div className={`bg-wk-surface border rounded-xl overflow-hidden ${
@@ -323,23 +324,13 @@ function BracketMatchCard({
           <span className="font-mono text-[9px] text-wk-gold/70 tracking-widest uppercase shrink-0">
             {STAGE_LABELS[match.stage] ?? match.stage}
           </span>
-          {kickoffAt && (
+          {kickoffAt && !resultIn && (
             <span className="font-mono text-[9px] text-wk-muted/60 tracking-widest truncate">
               · {formatInAmsterdam(kickoffAt, 'd MMM HH:mm')}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          {isCorrect && (
-            <span className="font-mono text-[9px] font-bold text-wk-green border border-wk-green/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
-              ✓ Correct
-            </span>
-          )}
-          {isWrong && (
-            <span className="font-mono text-[9px] font-bold text-wk-red border border-wk-red/30 rounded-full px-2 py-0.5 tracking-widest uppercase">
-              ✗ Fout
-            </span>
-          )}
           {pts !== null && (
             <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-[0.12em] uppercase ${
               pts > 0
@@ -540,16 +531,17 @@ function TeamBtn({
       <span className={`font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight ${out ? 'line-through opacity-60' : ''}`}>
         {team.name}
       </span>
+      {/* Altijd "mijn keuze" bij jouw gekozen land — los van resultaat/correct */}
+      {selected && (
+        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">★ Mijn keuze</span>
+      )}
       {pickCorrect && (
         <span className="font-mono text-[9px] tracking-widest uppercase text-wk-green">✓ Correct</span>
       )}
       {pickWrong && (
         <span className="font-mono text-[9px] tracking-widest uppercase text-wk-red">✗ Uitgeschakeld</span>
       )}
-      {!stageHasResults && selected && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">★ Mijn keuze</span>
-      )}
-      {stageHasResults && advanced && !selected && isActualWinner && (
+      {!selected && isActualWinner && (
         <span className="font-mono text-[9px] tracking-widest uppercase text-wk-muted">Uitslag</span>
       )}
     </button>

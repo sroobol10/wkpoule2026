@@ -323,12 +323,13 @@ function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; k
         {isKo ? (
           <>
             <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
-            <Link href={`/wedstrijd/${m.id}`} className="group/uitslag inline-flex items-center" title="Bekijk wie wat koos">
+            {/* KO: geen doorklik (de wedstrijdpagina toont hier niets relevants) */}
+            <span className="inline-flex items-center">
               Uitslag{' '}
               {winner
-                ? <b className="ml-1 inline-flex items-center gap-1.5 text-wk-text align-middle"><FlagImg team={winner} /><span className="underline decoration-wk-muted/50 underline-offset-2 group-hover/uitslag:decoration-wk-gold transition-colors">{winner.name}</span></b>
+                ? <b className="ml-1 inline-flex items-center gap-1.5 text-wk-text align-middle"><FlagImg team={winner} />{winner.name}</b>
                 : <b className="ml-1 text-wk-text">—</b>}
-            </Link>
+            </span>
           </>
         ) : (
           <>

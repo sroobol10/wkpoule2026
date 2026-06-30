@@ -48,7 +48,7 @@ type Pickup = { x: number; y: number }
 // Camera-lock boss-arena's: zodra de speler een gate bereikt, stopt het scrollen
 // en verschijnt de boss. Verslagen → door naar de volgende. Laatste = de Alien-Tank.
 const BOSS_GATES: { x: number; kind: BossKind; hp: number; name: string }[] = [
-  { x: 1150, kind: 'mech',   hp: 30, name: 'Mecha-Unit' },
+  { x: 1150, kind: 'mech',   hp: 24, name: 'Mecha-Unit' },
   { x: 2450, kind: 'saucer', hp: 48, name: 'Alien-Schotel' },
   { x: 4050, kind: 'tank',   hp: 85, name: 'Alien-Tank' },
 ]
@@ -72,7 +72,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   const last = useRef(0)
   const imgs = useRef<Record<string, Img>>({})
 
-  const player = useRef({ x: 60, y: GROUND, vy: 0, face: 1, grounded: true, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0 })
+  const player = useRef({ x: 60, y: GROUND, vy: 0, face: 1, grounded: true, jumps: 0, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0 })
   const inL = useRef(false); const inR = useRef(false)
   const bullets = useRef<Bullet[]>([])
   const ebullets = useRef<Bullet[]>([])
@@ -128,7 +128,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   }
 
   const reset = useCallback(() => {
-    player.current = { x: 60, y: GROUND, vy: 0, face: 1, grounded: true, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0 }
+    player.current = { x: 60, y: GROUND, vy: 0, face: 1, grounded: true, jumps: 0, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0 }
     bullets.current = []; ebullets.current = []; enemies.current = []; booms.current = []; pickups.current = []; boss.current = null
     camX.current = 0; camLock.current = null; nextGate.current = 0; score.current = 0; spawnCd.current = 1.4
     inL.current = false; inR.current = false
@@ -150,7 +150,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   }, [reset])
   const doJump = useCallback(() => {
     if (phaseRef.current !== 'playing') return
-    const p = player.current; if (p.grounded) { p.vy = -JUMP_V; p.grounded = false }
+    const p = player.current; if (p.jumps < 2) { p.vy = -JUMP_V; p.grounded = false; p.jumps++ }   // dubbele sprong
   }, [])
 
   const hitPlayer = useCallback(() => {
@@ -233,7 +233,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
     const prevFeet = p.y
     p.vy += G * dt; p.y += p.vy * dt
     const gy = landY(p.x, p.y, prevFeet)
-    if (p.y >= gy) { p.y = gy; p.vy = 0; p.grounded = true } else p.grounded = false
+    if (p.y >= gy) { p.y = gy; p.vy = 0; p.grounded = true; p.jumps = 0 } else p.grounded = false
     if (p.inv > 0) p.inv -= dt
     if (p.grounded && dir !== 0) { p.ft += dt; if (p.ft > 0.05) { p.ft = 0; p.frame = (p.frame + 1) % RUN.length } }
 
@@ -311,9 +311,9 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
         if (bs.fireCd <= 0) {
           const rage = bs.hp < bs.max * 0.5
           if (bs.kind === 'mech') {
-            bs.fireCd = rage ? 1.15 : 1.7
+            bs.fireCd = rage ? 1.3 : 1.9
             const aim = Math.atan2((p.y - 26) - (bs.y - 44), p.x - bs.x)
-            for (const off of rage ? [-0.26, 0, 0.26] : [-0.16, 0.16]) ebullets.current.push({ x: bs.x, y: bs.y - 44, vx: Math.cos(aim + off) * 205, vy: Math.sin(aim + off) * 205, grav: false })
+            for (const off of rage ? [-0.24, 0, 0.24] : [-0.14, 0.14]) ebullets.current.push({ x: bs.x, y: bs.y - 44, vx: Math.cos(aim + off) * 185, vy: Math.sin(aim + off) * 185, grav: false })
           } else if (bs.kind === 'saucer') {
             bs.fireCd = rage ? 0.7 : 1.05
             for (const dx of [-24, 0, 24]) ebullets.current.push({ x: bs.x + dx, y: bs.y + 20, vx: 0, vy: 150, grav: true })
@@ -375,12 +375,14 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
     enemies.current = enemies.current.filter((e) => e.hp > 0 && e.x > camX.current - 120)
 
     // ── schade aan de speler ──
+    // Compactere speler-hitbox (eerlijker): smal lijf, midden iets boven de voeten
+    const PX = 9, PYC = p.y - 22, PYH = 18
     if (p.inv <= 0) {
-      for (const e of enemies.current) { const rw = e.type === 'fly' || e.type === 'ace' ? 24 : e.type === 'tough' ? 26 : 20; if (Math.abs(e.x - p.x) < rw && Math.abs((e.y - 18) - (p.y - 22)) < 32) { hitPlayer(); break } }
+      for (const e of enemies.current) { const rw = e.type === 'fly' || e.type === 'ace' ? 20 : e.type === 'tough' ? 22 : 16; if (Math.abs(e.x - p.x) < rw && Math.abs((e.y - 18) - PYC) < 28) { hitPlayer(); break } }
       // boss raakt de speler aan (contactschade)
-      if (p.inv <= 0 && bs && !bs.entering) { const bw = bs.kind === 'saucer' ? 50 : 44; if (Math.abs(bs.x - p.x) < bw && Math.abs((bs.kind === 'saucer' ? bs.y : bs.y - 30) - (p.y - 22)) < 46) hitPlayer() }
+      if (p.inv <= 0 && bs && !bs.entering) { const bw = bs.kind === 'saucer' ? 44 : 40; if (Math.abs(bs.x - p.x) < bw && Math.abs((bs.kind === 'saucer' ? bs.y : bs.y - 30) - PYC) < 42) hitPlayer() }
     }
-    if (p.inv <= 0) for (const b of ebullets.current) { if (Math.abs(b.x - p.x) < 12 && Math.abs(b.y - (p.y - 22)) < 22) { b.x = -9999; hitPlayer(); break } }
+    if (p.inv <= 0) for (const b of ebullets.current) { if (Math.abs(b.x - p.x) < PX && Math.abs(b.y - PYC) < PYH) { b.x = -9999; hitPlayer(); break } }
     ebullets.current = ebullets.current.filter((b) => b.x !== -9999)
 
     score.current += dt * 4   // beetje voortgang-score
@@ -519,7 +521,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6 bg-wk-bg/60 backdrop-blur-[1px] rounded-2xl">
               <p className="text-5xl">🔫</p>
               <p className="text-sm text-wk-soft leading-relaxed">
-                <b className="text-wk-gold">◀ ▶</b> om te lopen, <b className="text-wk-gold">JUMP</b> om te springen — je <b>schiet automatisch</b> vooruit. Maai je door de aliens, verover de arena's en versla <b className="text-wk-red">3 bazen</b>: de Mecha-Unit, de Alien-Schotel en de Alien-Tank. <span className="text-wk-muted">(Desktop: pijltjes + spatie)</span>
+                <b className="text-wk-gold">◀ ▶</b> om te lopen, <b className="text-wk-gold">JUMP</b> om te springen (nogmaals = <b>dubbelsprong</b>) — je <b>schiet automatisch</b> vooruit. Maai je door de aliens, verover de arena's en versla <b className="text-wk-red">3 bazen</b>: de Mecha-Unit, de Alien-Schotel en de Alien-Tank. <span className="text-wk-muted">(Desktop: pijltjes + spatie)</span>
               </p>
               <button onClick={(e) => { e.stopPropagation(); startOrJump() }} disabled={!ready} className="font-display text-lg uppercase tracking-wide px-8 py-3 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer disabled:opacity-50">
                 {ready ? 'Start' : 'Laden…'}
