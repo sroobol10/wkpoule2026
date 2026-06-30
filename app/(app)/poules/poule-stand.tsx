@@ -147,7 +147,7 @@ export async function PouleStand({
       .eq('stage', 'group'),
     supabase
       .from('matches')
-      .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+      .select('home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id')
       .neq('stage', 'group'),
   ])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
