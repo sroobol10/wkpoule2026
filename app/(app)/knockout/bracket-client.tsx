@@ -304,9 +304,11 @@ function BracketMatchCard({
   // "Wie koos wat" standaard open; klapt 48u na de aftrap automatisch in
   const collapsedByTime = !!kickoffAt && Date.now() > new Date(kickoffAt).getTime() + 48 * 60 * 60 * 1000
   const [distOpen, setDistOpen] = useState(!collapsedByTime)
-  // Correct = jouw pick staat in de teams die deze ronde halen (ongeacht slot)
-  const isCorrect = stageHasResults && !!userPick && advancedTeams.has(userPick)
-  const isWrong   = stageHasResults && !!userPick && !advancedTeams.has(userPick)
+  // Correct = jouw pick ging deze ronde door; Fout = jouw pick is uitgeschakeld.
+  // (Niet "stageHasResults && niet doorgegaan" — dan kleurden nog-niet-gespeelde
+  //  wedstrijden ten onrechte rood zodra één duel in de ronde gespeeld was.)
+  const isCorrect = !!userPick && advancedTeams.has(userPick)
+  const isWrong   = !!userPick && eliminatedTeams.has(userPick)
 
   return (
     <div className={`bg-wk-surface border rounded-xl overflow-hidden ${

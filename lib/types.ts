@@ -278,6 +278,7 @@ export type Database = {
           kickoff_at: string
           match_number: number | null
           result_entered: boolean
+          shootout_winner_id: string | null
           stage: string
           venue: string | null
         }
@@ -291,6 +292,7 @@ export type Database = {
           kickoff_at: string
           match_number?: number | null
           result_entered?: boolean
+          shootout_winner_id?: string | null
           stage: string
           venue?: string | null
         }
@@ -304,6 +306,7 @@ export type Database = {
           kickoff_at?: string
           match_number?: number | null
           result_entered?: boolean
+          shootout_winner_id?: string | null
           stage?: string
           venue?: string | null
         }

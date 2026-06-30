@@ -30,7 +30,7 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
   const { data: match } = await supabase
     .from('matches')
     .select(`
-      id, kickoff_at, stage, match_number, venue, home_score, away_score, result_entered,
+      id, kickoff_at, stage, match_number, venue, home_score, away_score, result_entered, shootout_winner_id,
       home_team:teams!matches_home_team_id_fkey(id, name, flag_url),
       away_team:teams!matches_away_team_id_fkey(id, name, flag_url)
     `)
@@ -43,9 +43,12 @@ export default async function WedstrijdPage({ params }: Readonly<{ params: Promi
   const homeTeam = (match.home_team as Team | null) ?? { id: '', name: 'N.t.b.', flag_url: null }
   const awayTeam = (match.away_team as Team | null) ?? { id: '', name: 'N.t.b.', flag_url: null }
   const isKnockout = match.stage !== 'group'
-  const actualWinnerId = match.result_entered
-    ? ((match.home_score ?? 0) > (match.away_score ?? 0) ? homeTeam.id : awayTeam.id)
-    : null
+  // KO-winnaar: gelijkspel → strafschoppen-winnaar
+  const actualWinnerId = !match.result_entered
+    ? null
+    : (match.home_score ?? 0) > (match.away_score ?? 0) ? homeTeam.id
+    : (match.away_score ?? 0) > (match.home_score ?? 0) ? awayTeam.id
+    : (match.shootout_winner_id ?? null)
 
   // Vanaf de toernooistart zijn alle voorspellingen zichtbaar (zelfde regel als
   // de deelnemerspagina's); daarvoor blijven ze geheim.

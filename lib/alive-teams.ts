@@ -14,6 +14,7 @@
 
 import { sortGroupStandings, type TeamStat } from '@/lib/group-standings'
 import { compareThirds, type ThirdEntry } from '@/lib/third-place'
+import { koLoserId } from '@/lib/ko-winner'
 
 export type AliveGroupMatch = {
   home_team_id: string | null
@@ -31,6 +32,7 @@ export type AliveKoMatch = {
   home_score: number | null
   away_score: number | null
   result_entered: boolean
+  shootout_winner_id?: string | null
 }
 
 // Doorgegane teams uit een afgeronde groepsfase: 2 per groep + de 8 beste nummers 3.
@@ -93,12 +95,12 @@ export function computeAliveTeamIds(
 
   const eliminated = new Set<string>()
 
-  // Verliezers van gespeelde KO-wedstrijden (winnaar = hoogste score)
+  // Verliezers van gespeelde KO-wedstrijden (gelijkspel → strafschoppen-winnaar)
   for (const m of koMatches) {
     if (!m.result_entered || m.home_score == null || m.away_score == null) continue
     if (!m.home_team_id || !m.away_team_id) continue
-    if (m.home_score > m.away_score) eliminated.add(m.away_team_id)
-    else if (m.away_score > m.home_score) eliminated.add(m.home_team_id)
+    const loser = koLoserId(m)
+    if (loser) eliminated.add(loser)
   }
 
   // Pas zodra de hele groepsfase is gespeeld kunnen niet-doorgegane teams afvallen.

@@ -32,7 +32,7 @@ export default async function AdminPage() {
 
   const { data: matches } = await supabase
     .from('matches')
-    .select('id, stage, kickoff_at, match_number, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .select('id, stage, kickoff_at, match_number, home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id')
     .in('stage', ['group', ...KNOCKOUT_STAGES])
     .order('kickoff_at', { ascending: true })
 

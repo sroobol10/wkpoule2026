@@ -18,6 +18,7 @@ type Match = {
   home_score: number | null
   away_score: number | null
   result_entered: boolean
+  shootout_winner_id: string | null
   home_team: TeamRef
   away_team: TeamRef
 }
@@ -60,7 +61,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
   const { data: matchesRaw } = await supabase
     .from('matches')
     .select(`
-      id, kickoff_at, stage, match_number, home_score, away_score, result_entered,
+      id, kickoff_at, stage, match_number, home_score, away_score, result_entered, shootout_winner_id,
       home_team:teams!matches_home_team_id_fkey(id, name, code, flag_url),
       away_team:teams!matches_away_team_id_fkey(id, name, code, flag_url)
     `)
@@ -277,7 +278,12 @@ function myChoiceTeams(m: Match, winSet: Set<string>): NonNullable<TeamRef>[] {
 }
 function koWinner(m: Match): TeamRef {
   if (!m.result_entered || m.home_score == null || m.away_score == null) return null
-  return m.home_score > m.away_score ? m.home_team : m.away_team
+  if (m.home_score > m.away_score) return m.home_team
+  if (m.away_score > m.home_score) return m.away_team
+  // gelijkspel → strafschoppen-winnaar
+  if (m.shootout_winner_id && m.shootout_winner_id === m.home_team?.id) return m.home_team
+  if (m.shootout_winner_id && m.shootout_winner_id === m.away_team?.id) return m.away_team
+  return null
 }
 
 function FlagImg({ team }: { team: NonNullable<TeamRef> }) {

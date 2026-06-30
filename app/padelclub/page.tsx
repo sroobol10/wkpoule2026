@@ -121,7 +121,7 @@ export default async function PadelclubPage() {
   const { data: dayMatchRows } = await supabase
     .from('matches')
     .select(`
-      id, kickoff_at, stage, match_number, home_score, away_score, result_entered,
+      id, kickoff_at, stage, match_number, home_score, away_score, result_entered, shootout_winner_id,
       home_team:teams!matches_home_team_id_fkey(id, name, flag_url),
       away_team:teams!matches_away_team_id_fkey(id, name, flag_url)
     `)
@@ -131,7 +131,7 @@ export default async function PadelclubPage() {
   type MTeam = { id: string; name: string; flag_url: string | null } | null
   type MRow = {
     id: string; kickoff_at: string; stage: string; match_number: number | null
-    home_score: number | null; away_score: number | null; result_entered: boolean
+    home_score: number | null; away_score: number | null; result_entered: boolean; shootout_winner_id: string | null
     home_team: MTeam; away_team: MTeam
   }
   const dayMatchesRaw = (dayMatchRows ?? []) as unknown as MRow[]
@@ -163,8 +163,12 @@ export default async function PadelclubPage() {
   const dayMatchesAll: DayMatch[] = dayMatchesRaw.map((m) => {
     const home = m.home_team, away = m.away_team
     const isKo = m.stage !== 'group'
-    const winnerName = isKo && m.result_entered && m.home_score != null && m.away_score != null
-      ? (m.home_score > m.away_score ? home?.name : away?.name) ?? null
+    const winnerName = !isKo || !m.result_entered || m.home_score == null || m.away_score == null
+      ? null
+      : m.home_score > m.away_score ? (home?.name ?? null)
+      : m.away_score > m.home_score ? (away?.name ?? null)
+      : m.shootout_winner_id === home?.id ? (home?.name ?? null)   // gelijkspel → strafschoppen
+      : m.shootout_winner_id === away?.id ? (away?.name ?? null)
       : null
     return {
       id: m.id,

@@ -17,6 +17,7 @@ type Match = {
   home_score: number | null
   away_score: number | null
   result_entered: boolean
+  shootout_winner_id: string | null
 }
 type BonusQuestion = {
   id: string
@@ -364,6 +365,10 @@ function MatchResultRow({
   const [editing, setEditing] = useState(false)
   const [home, setHome] = useState(String(match.home_score ?? ''))
   const [away, setAway] = useState(String(match.away_score ?? ''))
+  // Winnaar na strafschoppen bij een gelijke KO-stand
+  const [shootout, setShootout] = useState<'home' | 'away' | null>(
+    match.shootout_winner_id === match.home_team_id ? 'home' : match.shootout_winner_id === match.away_team_id ? 'away' : null,
+  )
   const [isPending, startTransition] = useTransition()
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
@@ -390,7 +395,11 @@ function MatchResultRow({
     startTransition(async () => {
       let result
       if (knockout) {
-        const winnerId = h > a ? match.home_team_id! : match.away_team_id!
+        let winnerId: string | null
+        if (h > a) winnerId = match.home_team_id
+        else if (a > h) winnerId = match.away_team_id
+        else winnerId = shootout === 'home' ? match.home_team_id : shootout === 'away' ? match.away_team_id : null
+        if (!winnerId) { showToast('Gelijkspel — kies de winnaar na strafschoppen.', false); return }
         result = await setKnockoutResult(match.id, h, a, winnerId)
       } else {
         result = await setMatchResult(match.id, h, a)
@@ -444,18 +453,34 @@ function MatchResultRow({
                 {match.home_score}–{match.away_score}
               </span>
             ) : editing ? (
-              <div className="flex items-center gap-1 shrink-0">
-                <input
-                  type="number" min={0} max={99} value={home}
-                  onChange={(e) => setHome(e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="w-10 text-center rounded bg-wk-bg2 border border-white/10 py-1 text-sm font-display text-wk-gold focus:border-wk-gold focus:outline-none transition"
-                />
-                <span className="text-wk-muted font-mono text-xs">:</span>
-                <input
-                  type="number" min={0} max={99} value={away}
-                  onChange={(e) => setAway(e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="w-10 text-center rounded bg-wk-bg2 border border-white/10 py-1 text-sm font-display text-wk-gold focus:border-wk-gold focus:outline-none transition"
-                />
+              <div className="flex flex-col items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number" min={0} max={99} value={home}
+                    onChange={(e) => setHome(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                    className="w-10 text-center rounded bg-wk-bg2 border border-white/10 py-1 text-sm font-display text-wk-gold focus:border-wk-gold focus:outline-none transition"
+                  />
+                  <span className="text-wk-muted font-mono text-xs">:</span>
+                  <input
+                    type="number" min={0} max={99} value={away}
+                    onChange={(e) => setAway(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                    className="w-10 text-center rounded bg-wk-bg2 border border-white/10 py-1 text-sm font-display text-wk-gold focus:border-wk-gold focus:outline-none transition"
+                  />
+                </div>
+                {/* Gelijkspel in een KO-duel → winnaar na strafschoppen kiezen */}
+                {knockout && home !== '' && away !== '' && parseInt(home) === parseInt(away) && (
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono text-[8px] text-wk-muted tracking-wider uppercase">pen.</span>
+                    {(['home', 'away'] as const).map((side) => (
+                      <button
+                        key={side} type="button" onClick={() => setShootout(side)}
+                        className={`font-mono text-[9px] px-1.5 py-0.5 rounded border tracking-wider uppercase max-w-[70px] truncate ${shootout === side ? 'bg-wk-gold border-wk-gold text-wk-bg' : 'border-white/15 text-wk-muted hover:text-wk-soft'}`}
+                      >
+                        {(side === 'home' ? homeTeam?.name : awayTeam?.name) ?? side}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <span className="font-mono text-[10px] text-wk-muted shrink-0">–:–</span>
@@ -475,7 +500,7 @@ function MatchResultRow({
                 className="rounded bg-wk-green px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
                 {isPending ? '…' : 'OK'}
               </button>
-              <button onClick={() => { setEditing(false); setHome(String(match.home_score ?? '')); setAway(String(match.away_score ?? '')) }}
+              <button onClick={() => { setEditing(false); setHome(String(match.home_score ?? '')); setAway(String(match.away_score ?? '')); setShootout(match.shootout_winner_id === match.home_team_id ? 'home' : match.shootout_winner_id === match.away_team_id ? 'away' : null) }}
                 className="rounded border border-white/10 px-3 py-1 text-xs font-mono text-wk-muted hover:text-wk-soft transition-colors">
                 ✕
               </button>

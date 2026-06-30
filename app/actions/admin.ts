@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { KO_POINTS } from '@/lib/constants'
 import { BRACKET, assignThirdPlaceSlots } from '@/lib/bracket'
+import { koWinnerId, koLoserId } from '@/lib/ko-winner'
 import { sortGroupStandings, type TeamStat } from '@/lib/group-standings'
 
 type AdminResult = { ok: true } | { ok: false; error: string }
@@ -60,17 +61,17 @@ async function scoreBracketAdvancement(
   // héle ronde gespeeld is — dan staan alle doorgangers vast (winnaars van de ronde).
   const { data: roundMatches } = await supabase
     .from('matches')
-    .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+    .select('home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id')
     .eq('stage', stage)
   if (!roundMatches || roundMatches.length === 0) return []
 
   const allDone = roundMatches.every((m) => m.result_entered && m.home_score != null && m.away_score != null)
   if (!allDone) return []
 
-  // Doorgestoten teams = winnaars van deze ronde (voor final/troostfinale idem: de winnaar)
+  // Doorgestoten teams = winnaars van deze ronde (gelijkspel → strafschoppen-winnaar)
   const advancedTeams = new Set<string>()
   for (const m of roundMatches) {
-    const w = (m.home_score ?? 0) > (m.away_score ?? 0) ? m.home_team_id : m.away_team_id
+    const w = koWinnerId(m)
     if (w) advancedTeams.add(w)
   }
   if (advancedTeams.size === 0) return []
@@ -446,9 +447,11 @@ export async function setKnockoutResult(
   const { supabase } = await assertAdmin()
   if (!supabase) return { ok: false, error: 'Geen toegang.' }
 
+  // Bij een gelijke stand bepaalt de strafschoppen-winnaar wie doorgaat.
+  const shootoutWinnerId = homeScore === awayScore ? winnerId : null
   const { data: match, error } = await supabase
     .from('matches')
-    .update({ home_score: homeScore, away_score: awayScore, result_entered: true })
+    .update({ home_score: homeScore, away_score: awayScore, result_entered: true, shootout_winner_id: shootoutWinnerId })
     .eq('id', matchId)
     .select('stage, home_team_id, away_team_id')
     .single()
@@ -951,7 +954,7 @@ async function propagateKoTeams(
   // Haal alle KO-wedstrijden op (admin heeft SELECT op alle matches)
   const { data: koMatches } = await supabase
     .from('matches')
-    .select('id, match_number, stage, home_team_id, away_team_id, home_score, away_score, result_entered')
+    .select('id, match_number, stage, home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id')
     .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
     .order('match_number')
 
@@ -1013,16 +1016,14 @@ async function propagateKoTeams(
   // Resolver: seed → teamId
   function resolveTeam(seed: string): string | null {
     if (seed.startsWith('W')) {
-      const slot = parseInt(seed.slice(1))
-      const m = matchBySlot[slot]
+      const m = matchBySlot[parseInt(seed.slice(1))]
       if (!m?.result_entered || m.home_score == null || m.away_score == null) return null
-      return m.home_score > m.away_score ? m.home_team_id : m.away_team_id
+      return koWinnerId(m)
     }
     if (seed.startsWith('L')) {
-      const slot = parseInt(seed.slice(1))
-      const m = matchBySlot[slot]
+      const m = matchBySlot[parseInt(seed.slice(1))]
       if (!m?.result_entered || m.home_score == null || m.away_score == null) return null
-      return m.home_score > m.away_score ? m.away_team_id : m.home_team_id
+      return koLoserId(m)
     }
     if (seed.startsWith('3_')) {
       const slot = parseInt(seed.slice(2))
