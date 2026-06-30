@@ -36,6 +36,15 @@ const STILL = {
 }
 // Onze eigen mannen als "ace"-vijanden (gepixeld, droppen gegarandeerd een power-up).
 const ACE_FACES = ['/spelers/lukaku.png', '/spelers/bus.png', '/spelers/ho.png', '/spelers/kim.png', '/spelers/vince.png']
+// Eindbaas-koppen ná Reuze-Rick: twee vaste + één willekeurige uit de pool (gepixeld als reuzenkop).
+const BOSS_FIXED = ['/spelers/dejuul.png', '/spelers/ashi.png']
+const BOSS_RANDOM_POOL = ['/spelers/trein.png', '/spelers/pimp.png', '/spelers/kim.png', '/spelers/vince.png']
+const BOSS_NAME: Record<string, string> = {
+  '/spelers/dejuul.png': 'Generaal De Juul', '/spelers/ashi.png': 'Kapitein Ashi',
+  '/spelers/trein.png': 'De Sneltrein', '/spelers/pimp.png': 'De Pimp',
+  '/spelers/kim.png': 'Kommandant Kim', '/spelers/vince.png': 'Vice-Admiraal Vince',
+}
+const BOSS_FACE_SRCS = [...BOSS_FIXED, ...BOSS_RANDOM_POOL]
 
 type EnemyKind = 'enemy1' | 'enemy2' | 'enemy3' | 'bot1' | 'bot2' | 'bot3'
 const ENEMY_DEF: Record<EnemyKind, { hp: number; pts: number; r: number; scale: number }> = {
@@ -49,18 +58,22 @@ const ENEMY_DEF: Record<EnemyKind, { hp: number; pts: number; r: number; scale: 
 
 // Verloop: 3 golven → mid-boss (pixel-mech) → 2 golven → eindbaas Reuze-Rick.
 const WAVES: { count: number; types: EnemyKind[]; speed: number; rocks: number; fire: number }[] = [
-  { count: 6,  types: ['enemy2', 'bot1'],           speed: 1.0,  rocks: 0, fire: 0.5 },
-  { count: 8,  types: ['bot1', 'enemy3', 'bot2'],    speed: 1.1,  rocks: 1, fire: 0.7 },
-  { count: 9,  types: ['enemy3', 'bot2', 'enemy1'],  speed: 1.2,  rocks: 2, fire: 0.9 },
-  { count: 11, types: ['bot1', 'bot3', 'enemy1'],    speed: 1.35, rocks: 2, fire: 1.1 },
-  { count: 13, types: ['enemy1', 'bot3', 'enemy3'],  speed: 1.5,  rocks: 3, fire: 1.3 },
+  { count: 5,  types: ['enemy2', 'bot1'],           speed: 0.85, rocks: 0, fire: 0.32 },
+  { count: 6,  types: ['bot1', 'enemy3', 'bot2'],    speed: 0.95, rocks: 1, fire: 0.48 },
+  { count: 8,  types: ['enemy3', 'bot2', 'enemy1'],  speed: 1.05, rocks: 1, fire: 0.68 },
+  { count: 10, types: ['bot1', 'bot3', 'enemy1'],    speed: 1.25, rocks: 2, fire: 0.95 },
+  { count: 12, types: ['enemy1', 'bot3', 'enemy3'],  speed: 1.4,  rocks: 3, fire: 1.15 },
 ]
-type Stage = { t: 'wave'; i: number } | { t: 'boss'; kind: 'mech' | 'rick' }
+type Stage = { t: 'wave'; i: number } | { t: 'mech' } | { t: 'fboss'; n: number }
 const STAGES: Stage[] = [
   { t: 'wave', i: 0 }, { t: 'wave', i: 1 }, { t: 'wave', i: 2 },
-  { t: 'boss', kind: 'mech' },
+  { t: 'mech' },
   { t: 'wave', i: 3 }, { t: 'wave', i: 4 },
-  { t: 'boss', kind: 'rick' },
+  { t: 'fboss', n: 0 },   // Reuze-Rick
+  { t: 'wave', i: 3 },    // korte adempauze (power-ups bijtanken)
+  { t: 'fboss', n: 1 },   // De Juul
+  { t: 'fboss', n: 2 },   // Ashi
+  { t: 'fboss', n: 3 },   // willekeurige
 ]
 
 type PowerKind = 'rapid' | 'spread' | 'shield' | 'bomb' | 'life'
@@ -78,7 +91,7 @@ type Bullet = { x: number; y: number; vx: number; vy: number; frame: number; ft:
 type Rock = { x: number; y: number; vy: number; vx: number; rot: number; vr: number; img: Img | null; size: number; hp: number }
 type Pow = { x: number; y: number; vy: number; kind: PowerKind; t: number }
 type Boom = { x: number; y: number; frame: number; ft: number; scale: number }
-type Boss = { kind: 'mech' | 'rick'; x: number; y: number; vx: number; hp: number; max: number; t: number; fireCd: number; entering: boolean }
+type Boss = { kind: 'mech' | 'face'; face?: string; name: string; tier: number; x: number; y: number; vx: number; hp: number; max: number; t: number; fireCd: number; entering: boolean }
 type Ace = { x: number; y: number; ty: number; vx: number; t: number; hp: number; max: number; face: string; fireCd: number }
 
 export default function SpaceClient({ leaderboard, currentUserId }: { leaderboard: LeaderEntry[]; currentUserId: string }) {
@@ -100,10 +113,13 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   const last = useRef(0)
   const imgs = useRef<Record<string, Img>>({})
   const rickPix = useRef<HTMLCanvasElement | null>(null)   // gepixeleerde Rick voor de boss
+  const bossPix = useRef<Record<string, HTMLCanvasElement>>({})   // gepixelde reuzenkoppen (Rick + extra bazen)
+  const bossQueue = useRef<{ face: string; name: string; hp: number }[]>([])   // face-bazen op volgorde
   const facePix = useRef<Record<string, HTMLCanvasElement>>({})   // gepixelde footballers (aces)
 
   // Spelstaat (refs zodat de loop niet herstart)
   const player = useRef({ x: W / 2, y: H - 80, tx: W / 2, ty: H - 80, fireCd: 0, inv: 0, rapid: 0, spread: 0, shield: 0, frame: 2 })
+  const keys = useRef({ u: false, d: false, l: false, r: false })   // pijltjes/WASD (desktop)
   const bullets = useRef<Bullet[]>([])
   const ebullets = useRef<Bullet[]>([])
   const enemies = useRef<Enemy[]>([])
@@ -128,15 +144,16 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   // ── Assets laden ────────────────────────────────────────────────────────────
   useEffect(() => {
     let alive = true
-    const all = [...Object.values(SHEET).map((s) => s.src), ...Object.values(STILL), ...ACE_FACES]
+    const all = [...new Set([...Object.values(SHEET).map((s) => s.src), ...Object.values(STILL), ...ACE_FACES, ...BOSS_FACE_SRCS])]
     let done = 0
     const pixelate = (im: Img, size = 40) => { const c = document.createElement('canvas'); c.width = size; c.height = size; const cx = c.getContext('2d'); if (cx) cx.drawImage(im, 0, 0, size, size); return c }
     all.forEach((src) => {
       const im = new window.Image()
       im.onload = () => {
         imgs.current[src] = im
-        if (src === STILL.rick) rickPix.current = pixelate(im, 44)
-        else if (ACE_FACES.includes(src)) facePix.current[src] = pixelate(im, 38)
+        if (src === STILL.rick) { rickPix.current = pixelate(im, 44); bossPix.current[src] = pixelate(im, 46) }
+        if (ACE_FACES.includes(src)) facePix.current[src] = pixelate(im, 38)
+        if (BOSS_FACE_SRCS.includes(src)) bossPix.current[src] = pixelate(im, 46)
         done++; if (done === all.length && alive) setReady(true)
       }
       im.onerror = () => { done++; if (done === all.length && alive) setReady(true) }
@@ -185,16 +202,30 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
     }
   }, [])
 
-  const spawnBoss = useCallback((kind: 'mech' | 'rick') => {
-    const hpv = kind === 'mech' ? 130 : 240
-    boss.current = { kind, x: W / 2, y: -130, vx: kind === 'mech' ? 72 : 46, hp: hpv, max: hpv, t: 0, fireCd: 1.4, entering: true }
-    setHud((h) => ({ ...h, bossHp: hpv, bossMax: hpv, bossName: kind === 'mech' ? 'Mecha-Tank' : 'Reuze-Rick' }))
+  const spawnBoss = useCallback((st: { t: 'mech' } | { t: 'fboss'; n: number }) => {
+    if (st.t === 'mech') {
+      boss.current = { kind: 'mech', name: 'Mecha-Tank', tier: 0, x: W / 2, y: -130, vx: 72, hp: 85, max: 85, t: 0, fireCd: 1.4, entering: true }
+      setHud((h) => ({ ...h, bossHp: 85, bossMax: 85, bossName: 'Mecha-Tank' }))
+    } else {
+      const fb = bossQueue.current[st.n] ?? bossQueue.current[0]
+      boss.current = { kind: 'face', face: fb.face, name: fb.name, tier: st.n, x: W / 2, y: -130, vx: 46 + st.n * 7, hp: fb.hp, max: fb.hp, t: 0, fireCd: 1.4, entering: true }
+      setHud((h) => ({ ...h, bossHp: fb.hp, bossMax: fb.hp, bossName: fb.name }))
+    }
   }, [])
 
   const reset = useCallback(() => {
     player.current = { x: W / 2, y: H - 80, tx: W / 2, ty: H - 80, fireCd: 0, inv: 0, rapid: 0, spread: 0, shield: 0, frame: 2 }
     bullets.current = []; ebullets.current = []; enemies.current = []; aces.current = []; rocks.current = []
     powers.current = []; booms.current = []; boss.current = null
+    keys.current = { u: false, d: false, l: false, r: false }
+    // Face-bazen op volgorde: Rick → De Juul → Ashi → willekeurige (steeds taaier)
+    const rnd = BOSS_RANDOM_POOL[Math.floor(Math.random() * BOSS_RANDOM_POOL.length)]
+    bossQueue.current = [
+      { face: STILL.rick, name: 'Reuze-Rick', hp: 195 },
+      { face: '/spelers/dejuul.png', name: BOSS_NAME['/spelers/dejuul.png'], hp: 235 },
+      { face: '/spelers/ashi.png', name: BOSS_NAME['/spelers/ashi.png'], hp: 275 },
+      { face: rnd, name: BOSS_NAME[rnd] ?? 'Eindbaas', hp: 315 },
+    ]
     score.current = 0; lives.current = 3; stage.current = 0; aceTimer.current = 9; pending.current = 1.2; flash.current = 0
     if (!stars.current.length) stars.current = Array.from({ length: 70 }, () => ({ x: Math.random() * W, y: Math.random() * H, z: 0.3 + Math.random() * 1.4 }))
     setHud({ score: 0, lives: 3, wave: 0, bossHp: 0, bossMax: 0, bossName: '' })
@@ -282,7 +313,15 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   // ── Simulatie-stap ───────────────────────────────────────────────────────────
   const step = (dt: number) => {
     const p = player.current
-    // speler volgt vinger/muis (lerp)
+    // toetsenbord (desktop): pijltjes/WASD verschuiven het mik-doel
+    const kx = (keys.current.r ? 1 : 0) - (keys.current.l ? 1 : 0)
+    const ky = (keys.current.d ? 1 : 0) - (keys.current.u ? 1 : 0)
+    if (kx || ky) {
+      const KSPD = 380
+      p.tx = Math.max(20, Math.min(W - 20, p.tx + kx * KSPD * dt))
+      p.ty = Math.max(H * 0.4, Math.min(H - 30, p.ty + ky * KSPD * dt))
+    }
+    // speler volgt vinger/muis/toetsen (lerp)
     p.x += (p.tx - p.x) * Math.min(1, dt * 12)
     p.y += (p.ty - p.y) * Math.min(1, dt * 12)
     p.x = Math.max(20, Math.min(W - 20, p.x)); p.y = Math.max(H * 0.4, Math.min(H - 30, p.y))
@@ -388,9 +427,9 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
           if (Math.random() < 0.5) addBoom(b.x, b.y, 0.5)
           setHud((h) => ({ ...h, bossHp: Math.max(0, bs.hp) }))
           if (bs.hp <= 0) {
-            const big = bs.kind === 'rick'
+            const big = bs.kind === 'face'
             for (let i = 0; i < (big ? 16 : 11); i++) setTimeout(() => addBoom(bs.x + (Math.random() - 0.5) * (big ? 180 : 150), bs.y + (Math.random() - 0.5) * 120, big ? 1.5 : 1.1), i * 65)
-            score.current += big ? 1000 : 500
+            score.current += big ? 1000 + bs.tier * 250 : 500
             flash.current = 0.55; flashCol.current = big ? '#F4B92E' : '#E8862E'
             boss.current = null
             setHud((h) => ({ ...h, bossHp: 0, bossMax: 0 }))
@@ -442,16 +481,19 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
         if (bs.fireCd <= 0) {
           if (bs.kind === 'mech') {
             // twin-kanonnen: twee gerichte schoten + kleine waaier
-            bs.fireCd = rage ? 0.7 : 1.05
+            bs.fireCd = rage ? 1.0 : 1.45
             const aim = Math.atan2(p.y - bs.y, p.x - bs.x)
-            for (const off of [-30, 30]) ebullets.current.push({ x: bs.x + off, y: bs.y + 30, vx: Math.cos(aim) * 210, vy: Math.max(80, Math.sin(aim) * 210), frame: 0, ft: 0, r: 7 })
-            const n = rage ? 5 : 3
-            for (let i = 0; i < n; i++) { const a = Math.PI / 2 + (i - (n - 1) / 2) * 0.3; ebullets.current.push({ x: bs.x, y: bs.y + 30, vx: Math.cos(a) * 165, vy: Math.sin(a) * 165, frame: 0, ft: 0, r: 7 }) }
+            for (const off of [-30, 30]) ebullets.current.push({ x: bs.x + off, y: bs.y + 30, vx: Math.cos(aim) * 175, vy: Math.max(70, Math.sin(aim) * 175), frame: 0, ft: 0, r: 7 })
+            const n = rage ? 4 : 3
+            for (let i = 0; i < n; i++) { const a = Math.PI / 2 + (i - (n - 1) / 2) * 0.3; ebullets.current.push({ x: bs.x, y: bs.y + 30, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150, frame: 0, ft: 0, r: 7 }) }
           } else {
-            bs.fireCd = rage ? 0.85 : 1.25
-            const n = rage ? 9 : 6
-            for (let i = 0; i < n; i++) { const a = Math.PI / 2 + (i - (n - 1) / 2) * 0.26; const sp = rage ? 200 : 165; ebullets.current.push({ x: bs.x, y: bs.y + 40, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, frame: 0, ft: 0, r: 8 }) }
-            if (rage) { const ang = Math.atan2(p.y - bs.y, p.x - bs.x); ebullets.current.push({ x: bs.x, y: bs.y + 40, vx: Math.cos(ang) * 240, vy: Math.sin(ang) * 240, frame: 0, ft: 0, r: 8 }) }
+            const tier = bs.tier
+            bs.fireCd = rage ? Math.max(0.72, 1.05 - tier * 0.06) : Math.max(0.95, 1.5 - tier * 0.08)
+            const n = (rage ? 7 : 5) + tier
+            const sp = (rage ? 180 : 150) + tier * 12
+            for (let i = 0; i < n; i++) { const a = Math.PI / 2 + (i - (n - 1) / 2) * 0.26; ebullets.current.push({ x: bs.x, y: bs.y + 40, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, frame: 0, ft: 0, r: 8 }) }
+            if (rage) { const ang = Math.atan2(p.y - bs.y, p.x - bs.x); ebullets.current.push({ x: bs.x, y: bs.y + 40, vx: Math.cos(ang) * (210 + tier * 12), vy: Math.sin(ang) * (210 + tier * 12), frame: 0, ft: 0, r: 8 }) }
+            if (tier >= 2) for (const off of [-0.7, 0.7]) ebullets.current.push({ x: bs.x, y: bs.y + 40, vx: Math.cos(Math.PI / 2 + off) * (sp + 20), vy: Math.sin(Math.PI / 2 + off) * (sp + 20), frame: 0, ft: 0, r: 8 })
           }
         }
       }
@@ -464,7 +506,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
         const st = STAGES[stage.current]
         if (!st) { endGame(true); return }
         if (st.t === 'wave') { spawnWave(st.i); setHud((h) => ({ ...h, wave: st.i + 1 })) }
-        else { spawnBoss(st.kind); setHud((h) => ({ ...h, wave: WAVES.length + 1 })) }
+        else { spawnBoss(st); setHud((h) => ({ ...h, wave: WAVES.length + 1 })) }
         stage.current += 1
         pending.current = 99
       }
@@ -563,8 +605,8 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
     // klinknagels
     ctx.fillStyle = 'rgba(0,0,0,0.4)'
     for (let i = -3; i <= 3; i++) { ctx.beginPath(); ctx.arc(i * 26, -bh / 2 + 8, 2, 0, Math.PI * 2); ctx.fill() }
-    // gepixeleerde Rick als "gezicht" in een venster
-    const rp = rickPix.current
+    // gepixeleerde voetballerkop als "gezicht" in een venster
+    const rp = bossPix.current[bs.face ?? ''] ?? rickPix.current
     const fs = 78
     ctx.fillStyle = '#0b0e14'; ctx.beginPath(); ctx.roundRect(-fs / 2 - 4, -fs / 2 - 2, fs + 8, fs + 8, 8); ctx.fill()
     if (rp) ctx.drawImage(rp, -fs / 2, -fs / 2, fs, fs)
@@ -596,6 +638,24 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
     raf.current = requestAnimationFrame(loop)
     return () => { if (raf.current != null) cancelAnimationFrame(raf.current) }
   }, [setupCanvas, loop])
+
+  // Toetsenbord (desktop): pijltjes + WASD
+  useEffect(() => {
+    const set = (e: KeyboardEvent, on: boolean) => {
+      switch (e.code) {
+        case 'ArrowLeft': case 'KeyA': keys.current.l = on; break
+        case 'ArrowRight': case 'KeyD': keys.current.r = on; break
+        case 'ArrowUp': case 'KeyW': keys.current.u = on; break
+        case 'ArrowDown': case 'KeyS': keys.current.d = on; break
+        default: return
+      }
+      e.preventDefault()
+    }
+    const down = (e: KeyboardEvent) => set(e, true)
+    const up = (e: KeyboardEvent) => set(e, false)
+    window.addEventListener('keydown', down); window.addEventListener('keyup', up)
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
+  }, [])
 
   const onPointer = (e: React.PointerEvent) => {
     if (phaseRef.current !== 'playing') return
@@ -651,7 +711,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6 bg-wk-bg/55 backdrop-blur-[1px] rounded-2xl">
               <p className="text-5xl">🚀</p>
               <p className="text-sm text-wk-soft leading-relaxed">
-                Beweeg je <b className="text-wk-gold">vinger of muis</b> — je schip volgt en vuurt <b>automatisch</b>. Sloop de golven, pak <b className="text-wk-green">power-ups</b> (💎) en knal de <b className="text-wk-gold">ace-schotels</b> van de mannen (zekere power-up!) uit de lucht. Eerst de <b>Mecha-Tank</b>, dan eindbaas <b className="text-wk-red">Reuze-Rick</b>.
+                Beweeg je <b className="text-wk-gold">vinger of muis</b> (of de <b className="text-wk-gold">pijltjes</b>/WASD op desktop) — je schip volgt en vuurt <b>automatisch</b>. Sloop de golven, pak <b className="text-wk-green">power-ups</b> (💎) en knal de <b className="text-wk-gold">ace-schotels</b> van de mannen (zekere power-up!) uit de lucht. Eerst de <b>Mecha-Tank</b>, dan een <b className="text-wk-red">boss-rush</b>: Reuze-Rick, De Juul, Ashi en nog een verrassingsbaas — elk taaier dan de vorige.
               </p>
               <button onClick={(e) => { e.stopPropagation(); start() }} disabled={!ready} className="font-display text-lg uppercase tracking-wide px-8 py-3 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer disabled:opacity-50">
                 {ready ? 'Start' : 'Laden…'}
@@ -661,7 +721,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
 
           {phase === 'over' && result && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-6 bg-wk-bg/65 backdrop-blur-[1px] rounded-2xl">
-              <p className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: result.win ? 'var(--color-wk-green)' : 'var(--color-wk-red)' }}>{result.win ? '🏆 Reuze-Rick verslagen!' : 'Game over'}</p>
+              <p className="font-mono text-[10px] tracking-[0.2em] uppercase" style={{ color: result.win ? 'var(--color-wk-green)' : 'var(--color-wk-red)' }}>{result.win ? '🏆 Alle bazen verslagen!' : 'Game over'}</p>
               <p className="font-score text-5xl text-wk-gold leading-none">{result.score}</p>
               <p className="font-mono text-[10px] text-wk-muted tracking-[0.12em] uppercase">punten</p>
               {result.win && (result.timeBonus ?? 0) > 0 && (
