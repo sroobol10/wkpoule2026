@@ -388,3 +388,46 @@
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
   input[type=number] { appearance: textfield; }
 }
+
+/* ── Mini-games: immersive "groot scherm"-modus (werkt overal, ook iPhone) ──── */
+[data-immersive='true'] {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-immersive='true'] .gx-container {
+  max-width: none;
+  height: 100dvh;
+  margin: 0;
+  padding: max(0.5rem, env(safe-area-inset-top)) 0.5rem max(0.5rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+[data-immersive='true'] .gx-hide { display: none !important; }
+[data-immersive='true'] .gx-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+[data-immersive='true'] .gx-stage > canvas {
+  aspect-ratio: auto !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
+/* Whack heeft een DOM-grid i.p.v. een canvas */
+[data-immersive='true'] .gx-grid {
+  width: min(100%, 82dvh) !important;
+  height: auto !important;
+  margin: 0 auto !important;
+}

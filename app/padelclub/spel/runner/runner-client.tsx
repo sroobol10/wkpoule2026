@@ -7,6 +7,7 @@ import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
 import TeamsPopup from '../teams-popup'
+import ImmersiveToggle from '../immersive-toggle'
 
 // Liggend speelveld (2:1) — schaalt naar de breedte van de kolom.
 const W = 640
@@ -239,8 +240,9 @@ export default function RunnerClient({ leaderboard, currentUserId }: { leaderboa
   }, [jump])
 
   return (
-    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      <TeamsPopup />
+    <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup active={phase === 'playing'} />
+      <ImmersiveToggle />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}
@@ -251,8 +253,8 @@ export default function RunnerClient({ leaderboard, currentUserId }: { leaderboa
         </svg>
       </Link>
 
-      <div className="relative max-w-md mx-auto px-4 py-8 sm:py-12 space-y-5">
-        <header className="text-center animate-fade-up">
+      <div className="relative max-w-md mx-auto gx-container px-4 py-8 sm:py-12 space-y-5">
+        <header className="gx-hide text-center animate-fade-up">
           <Link href="/padelclub/spel" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-[0.2em] uppercase mb-2 inline-block">← Spellen</Link>
           <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none text-wk-gold">Sunny Sprint</h1>
         </header>
@@ -264,7 +266,7 @@ export default function RunnerClient({ leaderboard, currentUserId }: { leaderboa
           </div>
         )}
 
-        <div className="relative mx-auto w-full max-w-[440px] select-none touch-none cursor-pointer" onPointerDown={(e) => { e.preventDefault(); jump() }}>
+        <div className="gx-stage relative mx-auto w-full max-w-[440px] select-none touch-none cursor-pointer" onPointerDown={(e) => { e.preventDefault(); jump() }}>
           <canvas ref={canvasRef} className="w-full block rounded-2xl border border-white/10 bg-black" style={{ aspectRatio: `${W} / ${H}`, imageRendering: 'pixelated' }} />
 
           {phase === 'idle' && (
@@ -292,7 +294,7 @@ export default function RunnerClient({ leaderboard, currentUserId }: { leaderboa
           )}
         </div>
 
-        <GameLeaderboard entries={board} currentUserId={currentUserId} />
+        <div className="gx-hide"><GameLeaderboard entries={board} currentUserId={currentUserId} /></div>
       </div>
     </div>
   )

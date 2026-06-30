@@ -8,6 +8,7 @@ import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
 import TeamsPopup from '../teams-popup'
+import ImmersiveToggle from '../immersive-toggle'
 
 // Logische speelwereld (px); canvas schaalt mee met de breedte.
 const W = 380
@@ -282,8 +283,9 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
   }, [setupCanvas, draw, flap])
 
   return (
-    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      <TeamsPopup />
+    <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup active={phase === 'playing'} />
+      <ImmersiveToggle />
       {/* Easter egg: grote Rick photobomt het scherm bij elke 15 punten */}
       {rickFly > 0 && (
         <div key={rickFly} className="pointer-events-none fixed inset-0 z-50 flex items-center overflow-hidden" aria-hidden>
@@ -316,15 +318,15 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
         </svg>
       </Link>
 
-      <div className="relative max-w-md mx-auto px-4 py-10 sm:py-14 space-y-6">
-        <header className="text-center animate-fade-up">
+      <div className="relative max-w-md mx-auto gx-container px-4 py-10 sm:py-14 space-y-6">
+        <header className="gx-hide text-center animate-fade-up">
           <Link href="/padelclub/spel" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-[0.2em] uppercase mb-2 inline-block">← Spellen</Link>
           <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none text-wk-gold">Flappy Padel</h1>
         </header>
 
         {/* Speelveld */}
         <div
-          className="relative mx-auto w-full max-w-[380px] select-none touch-none"
+          className="gx-stage relative mx-auto w-full max-w-[380px] select-none touch-none"
           onPointerDown={(e) => { e.preventDefault(); flap() }}
         >
           <canvas ref={canvasRef} className="w-full block rounded-2xl border border-white/10" style={{ aspectRatio: `${W} / ${H}` }} />
@@ -371,7 +373,7 @@ export default function FlappyClient({ leaderboard, currentUserId }: { leaderboa
           )}
         </div>
 
-        <GameLeaderboard entries={board} currentUserId={currentUserId} />
+        <div className="gx-hide"><GameLeaderboard entries={board} currentUserId={currentUserId} /></div>
       </div>
     </div>
   )

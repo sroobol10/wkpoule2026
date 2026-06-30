@@ -7,6 +7,7 @@ import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
 import TeamsPopup from '../teams-popup'
+import ImmersiveToggle from '../immersive-toggle'
 
 const W = 560, H = 320
 const GROUND = 272          // voetlijn (wereld)
@@ -43,7 +44,7 @@ type Enemy = { x: number; y: number; vy: number; type: 'walk' | 'fly' | 'tough' 
 type Boom = { x: number; y: number; frame: number; ft: number; scale: number }
 type BossKind = 'mech' | 'saucer' | 'tank'
 type Boss = { kind: BossKind; x: number; y: number; hp: number; max: number; fireCd: number; frame: number; ft: number; t: number; vx: number; entering: boolean }
-type Pickup = { x: number; y: number }
+type Pickup = { x: number; y: number; kind: 'heart' | 'rapid' | 'spread' }
 
 // Camera-lock boss-arena's: zodra de speler een gate bereikt, stopt het scrollen
 // en verschijnt de boss. Verslagen → door naar de volgende. Laatste = de Alien-Tank.
@@ -72,7 +73,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   const last = useRef(0)
   const imgs = useRef<Record<string, Img>>({})
 
-  const player = useRef({ x: 60, y: GROUND, vy: 0, face: 1, grounded: true, jumps: 0, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0 })
+  const player = useRef({ x: 60, y: GROUND, vy: 0, face: 1, grounded: true, jumps: 0, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0, rapid: 0, spread: 0 })
   const inL = useRef(false); const inR = useRef(false)
   const bullets = useRef<Bullet[]>([])
   const ebullets = useRef<Bullet[]>([])
@@ -128,7 +129,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   }
 
   const reset = useCallback(() => {
-    player.current = { x: 60, y: GROUND, vy: 0, face: 1, grounded: true, jumps: 0, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0 }
+    player.current = { x: 60, y: GROUND, vy: 0, face: 1, grounded: true, jumps: 0, frame: 0, ft: 0, fireCd: 0, hp: 3, inv: 0, rapid: 0, spread: 0 }
     bullets.current = []; ebullets.current = []; enemies.current = []; booms.current = []; pickups.current = []; boss.current = null
     camX.current = 0; camLock.current = null; nextGate.current = 0; score.current = 0; spawnCd.current = 1.4
     inL.current = false; inR.current = false
@@ -171,7 +172,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
     boss.current = null
     camLock.current = null
     nextGate.current += 1
-    pickups.current.push({ x: bs.x, y: GROUND - 24 })   // hartje als beloning
+    pickups.current.push({ x: bs.x, y: GROUND - 24, kind: 'heart' })   // hartje als beloning
     setHud((h) => ({ ...h, bossHp: 0, bossMax: 0 }))
     if (big) setTimeout(() => endGame(true), 1100)
   }, [endGame])
@@ -238,17 +239,24 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
     if (p.grounded && dir !== 0) { p.ft += dt; if (p.ft > 0.05) { p.ft = 0; p.frame = (p.frame + 1) % RUN.length } }
 
     // auto-vuren naar voren
+    if (p.rapid > 0) p.rapid -= dt
+    if (p.spread > 0) p.spread -= dt
     p.fireCd -= dt
-    if (p.fireCd <= 0) { p.fireCd = 0.2; bullets.current.push({ x: p.x + p.face * 24, y: p.y - 26, vx: p.face * 720, vy: 0, grav: false }) }
-    for (const b of bullets.current) { b.x += b.vx * dt }
-    bullets.current = bullets.current.filter((b) => b.x > camX.current - 40 && b.x < camX.current + W + 60)
+    if (p.fireCd <= 0) {
+      p.fireCd = p.rapid > 0 ? 0.11 : 0.2
+      const mk = (vy: number) => bullets.current.push({ x: p.x + p.face * 24, y: p.y - 26, vx: p.face * 720, vy, grav: false })
+      mk(0)
+      if (p.spread > 0) { mk(-230); mk(230) }   // diagonale schoten → raakt ook vliegers
+    }
+    for (const b of bullets.current) { b.x += b.vx * dt; b.y += b.vy * dt }
+    bullets.current = bullets.current.filter((b) => b.x > camX.current - 40 && b.x < camX.current + W + 60 && b.y > -20 && b.y < H + 20)
 
     // Boss-gate bereikt? → camera vergrendelen + boss laten verschijnen
     if (!boss.current && nextGate.current < BOSS_GATES.length) {
       const gate = BOSS_GATES[nextGate.current]
       if (p.x >= gate.x) {
         camLock.current = Math.max(0, Math.min(LEN - W, p.x - 180))
-        const by = gate.kind === 'saucer' ? 116 : GROUND
+        const by = gate.kind === 'saucer' ? 170 : GROUND
         boss.current = { kind: gate.kind, x: camLock.current + W + 60, y: by, hp: gate.hp, max: gate.hp, fireCd: 1.6, frame: 0, ft: 0, t: 0, vx: -42, entering: true }
         enemies.current = []
         setHud((h) => ({ ...h, bossHp: gate.hp, bossMax: gate.hp, bossName: gate.name }))
@@ -261,8 +269,8 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
         const r = Math.random()
         const sx = camX.current + W + 30
         const noAce = enemies.current.some((e) => e.type === 'ace')   // hooguit één ace tegelijk
-        if (!noAce && r < 0.07) enemies.current.push({ x: sx, y: 100 + Math.random() * 60, vy: 0, type: 'ace', hp: 5, frame: 0, ft: 0, grounded: false, fireCd: 1.2, bob: Math.random() * 6, face: ACE_FACES[Math.floor(Math.random() * ACE_FACES.length)] })
-        else if (r < 0.38) enemies.current.push({ x: sx, y: 90 + Math.random() * 80, vy: 0, type: 'fly', hp: 2, frame: 0, ft: 0, grounded: false, fireCd: 1.5, bob: Math.random() * 6 })
+        if (!noAce && r < 0.07) enemies.current.push({ x: sx, y: 145 + Math.random() * 45, vy: 0, type: 'ace', hp: 5, frame: 0, ft: 0, grounded: false, fireCd: 1.2, bob: Math.random() * 6, face: ACE_FACES[Math.floor(Math.random() * ACE_FACES.length)] })
+        else if (r < 0.38) enemies.current.push({ x: sx, y: 135 + Math.random() * 60, vy: 0, type: 'fly', hp: 2, frame: 0, ft: 0, grounded: false, fireCd: 1.5, bob: Math.random() * 6 })
         else if (r < 0.56) enemies.current.push({ x: sx, y: GROUND, vy: 0, type: 'tough', hp: 4, frame: 0, ft: 0, grounded: true, fireCd: 2, bob: 0 })
         else enemies.current.push({ x: sx, y: GROUND, vy: 0, type: 'walk', hp: 2, frame: 0, ft: 0, grounded: true, fireCd: 0, bob: 0 })
         spawnCd.current = Math.max(0.7, 1.7 - p.x / 3200) + Math.random() * 0.6
@@ -283,13 +291,13 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
       } else if (e.type === 'fly') {
         e.bob += dt; e.x += Math.sign(p.x - e.x) * 42 * dt; e.y += Math.sin(e.bob * 2) * 18 * dt
         e.fireCd -= dt
-        if (e.fireCd <= 0 && Math.abs(e.x - p.x) < 360) { e.fireCd = 1.8; const a = Math.atan2(p.y - 24 - e.y, p.x - e.x); ebullets.current.push({ x: e.x, y: e.y, vx: Math.cos(a) * 230, vy: Math.sin(a) * 230, grav: false }) }
+        if (e.fireCd <= 0 && Math.abs(e.x - p.x) < 360) { e.fireCd = 2; const a = Math.atan2(p.y - 24 - e.y, p.x - e.x); ebullets.current.push({ x: e.x, y: e.y, vx: Math.cos(a) * 175, vy: Math.sin(a) * 175, grav: false }) }
       } else {
         // walk + tough (zwaarder, trager, schiet af en toe)
         e.x += Math.sign(p.x - e.x) * (e.type === 'tough' ? 40 : 64) * dt; e.y = GROUND
         if (e.type === 'tough') {
           e.fireCd -= dt
-          if (e.fireCd <= 0 && Math.abs(e.x - p.x) < 380) { e.fireCd = 2.2; const a = Math.atan2((p.y - 24) - (e.y - 24), p.x - e.x); ebullets.current.push({ x: e.x, y: e.y - 24, vx: Math.cos(a) * 210, vy: Math.sin(a) * 210, grav: false }) }
+          if (e.fireCd <= 0 && Math.abs(e.x - p.x) < 380) { e.fireCd = 2.4; const a = Math.atan2((p.y - 24) - (e.y - 24), p.x - e.x); ebullets.current.push({ x: e.x, y: e.y - 24, vx: Math.cos(a) * 170, vy: Math.sin(a) * 170, grav: false }) }
         }
       }
     }
@@ -306,7 +314,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
       } else {
         bs.x += bs.vx * dt
         if (bs.x < base + 90 || bs.x > base + W - 70) bs.vx *= -1
-        if (bs.kind === 'saucer') bs.y = 116 + Math.sin(bs.t * 1.6) * 26
+        if (bs.kind === 'saucer') bs.y = 168 + Math.sin(bs.t * 1.6) * 22
         bs.fireCd -= dt
         if (bs.fireCd <= 0) {
           const rage = bs.hp < bs.max * 0.5
@@ -315,9 +323,9 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
             const aim = Math.atan2((p.y - 26) - (bs.y - 44), p.x - bs.x)
             for (const off of rage ? [-0.24, 0, 0.24] : [-0.14, 0.14]) ebullets.current.push({ x: bs.x, y: bs.y - 44, vx: Math.cos(aim + off) * 185, vy: Math.sin(aim + off) * 185, grav: false })
           } else if (bs.kind === 'saucer') {
-            bs.fireCd = rage ? 0.7 : 1.05
-            for (const dx of [-24, 0, 24]) ebullets.current.push({ x: bs.x + dx, y: bs.y + 20, vx: 0, vy: 150, grav: true })
-            if (rage) { const a = Math.atan2((p.y - 24) - bs.y, p.x - bs.x); ebullets.current.push({ x: bs.x, y: bs.y + 16, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240, grav: false }) }
+            bs.fireCd = rage ? 0.95 : 1.4
+            for (const dx of [-26, 26]) ebullets.current.push({ x: bs.x + dx, y: bs.y + 20, vx: 0, vy: 120, grav: true })
+            if (rage) { const a = Math.atan2((p.y - 24) - bs.y, p.x - bs.x); ebullets.current.push({ x: bs.x, y: bs.y + 16, vx: Math.cos(a) * 195, vy: Math.sin(a) * 195, grav: false }) }
           } else {
             bs.fireCd = rage ? 0.95 : 1.4
             for (const off of rage ? [-0.25, 0, 0.25] : [-0.18, 0.18]) {
@@ -328,11 +336,13 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
         }
       }
     }
-    // pickups (drijvende harten) verzamelen
+    // pickups (power-ups) verzamelen
     for (const pk of pickups.current) {
-      if (Math.abs(pk.x - p.x) < 26 && Math.abs(pk.y - (p.y - 22)) < 40) {
+      if (Math.abs(pk.x - p.x) < 26 && Math.abs(pk.y - (p.y - 22)) < 44) {
         pk.x = -9999
-        if (p.hp < 3) { p.hp += 1; setHud((h) => ({ ...h, hp: p.hp })) }
+        if (pk.kind === 'heart') { if (p.hp < 3) { p.hp += 1; setHud((h) => ({ ...h, hp: p.hp })) } }
+        else if (pk.kind === 'rapid') p.rapid = 9
+        else if (pk.kind === 'spread') p.spread = 9
         addBoom(p.x, p.y - 22, 0.5)
       }
     }
@@ -356,7 +366,8 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
           if (e.hp <= 0) {
             score.current += e.type === 'fly' ? 20 : e.type === 'tough' ? 30 : e.type === 'ace' ? 70 : 15
             addBoom(e.x, e.y - 18, e.type === 'ace' || e.type === 'tough' ? 1 : 0.8)
-            if (e.type === 'ace') pickups.current.push({ x: e.x, y: GROUND - 24 })   // ace dropt een hartje
+            if (e.type === 'ace') pickups.current.push({ x: e.x, y: GROUND - 24, kind: 'heart' })   // ace dropt een hartje
+            else if (Math.random() < 0.14) pickups.current.push({ x: e.x, y: GROUND - 24, kind: Math.random() < 0.5 ? 'rapid' : 'spread' })   // soms een power-up
           }
           break
         }
@@ -401,12 +412,14 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
     ctx.fillStyle = '#9be83a'
     for (const b of ebullets.current) { ctx.save(); ctx.shadowColor = '#9be83a'; ctx.shadowBlur = 8; ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore() }
 
-    // pickups (drijvende harten)
+    // pickups (drijvende power-ups)
     for (const pk of pickups.current) {
+      const icon = pk.kind === 'heart' ? '❤' : pk.kind === 'rapid' ? '⚡' : '✦'
+      const col = pk.kind === 'heart' ? '#E63946' : pk.kind === 'rapid' ? '#F4B92E' : '#2EA84B'
       ctx.save(); ctx.translate(pk.x, pk.y + Math.sin(performanceFrame() / 6) * 3)
-      ctx.fillStyle = '#E63946'; ctx.shadowColor = '#E63946'; ctx.shadowBlur = 8
+      ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 8
       ctx.font = '20px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillText('❤', 0, 0); ctx.restore()
+      ctx.fillText(icon, 0, 0); ctx.restore()
     }
 
     // vijanden
@@ -452,6 +465,13 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
       const src = !p.grounded ? JUMP : (inL.current || inR.current) ? RUN[p.frame] : IDLE[Math.floor(performanceFrame() / 8) % IDLE.length]
       drawImg(ctx, src, p.x, p.y, 48, p.face < 0)
     }
+    // actieve power-up boven de speler
+    if (p.rapid > 0 || p.spread > 0) {
+      ctx.save(); ctx.font = '14px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const icons = (p.spread > 0 ? '✦' : '') + (p.rapid > 0 ? '⚡' : '')
+      ctx.fillStyle = '#fff'; ctx.shadowColor = '#000'; ctx.shadowBlur = 4
+      ctx.fillText(icons, p.x, p.y - 58); ctx.restore()
+    }
   }
   const performanceFrame = () => Math.floor((typeof performance !== 'undefined' ? performance.now() : 0) / 16)
 
@@ -479,8 +499,9 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
   })
 
   return (
-    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      <TeamsPopup />
+    <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup active={phase === 'playing'} />
+      <ImmersiveToggle />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}
@@ -491,8 +512,8 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
         </svg>
       </Link>
 
-      <div className="relative max-w-md mx-auto px-4 py-8 sm:py-12 space-y-5">
-        <header className="text-center animate-fade-up">
+      <div className="relative max-w-md mx-auto gx-container px-4 py-8 sm:py-12 space-y-5">
+        <header className="gx-hide text-center animate-fade-up">
           <Link href="/padelclub/spel" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-[0.2em] uppercase mb-2 inline-block">← Spellen</Link>
           <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none text-wk-gold">Alien Assault</h1>
         </header>
@@ -505,7 +526,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
           </div>
         )}
 
-        <div className="relative mx-auto w-full max-w-[460px] select-none touch-none">
+        <div className="gx-stage relative mx-auto w-full max-w-[460px] select-none touch-none">
           <canvas ref={canvasRef} className="w-full block rounded-2xl border border-white/10 bg-black" style={{ aspectRatio: `${W} / ${H}`, imageRendering: 'pixelated' }} />
 
           {phase === 'playing' && hud.bossMax > 0 && (
@@ -521,7 +542,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6 bg-wk-bg/60 backdrop-blur-[1px] rounded-2xl">
               <p className="text-5xl">🔫</p>
               <p className="text-sm text-wk-soft leading-relaxed">
-                <b className="text-wk-gold">◀ ▶</b> om te lopen, <b className="text-wk-gold">JUMP</b> om te springen (nogmaals = <b>dubbelsprong</b>) — je <b>schiet automatisch</b> vooruit. Maai je door de aliens, verover de arena's en versla <b className="text-wk-red">3 bazen</b>: de Mecha-Unit, de Alien-Schotel en de Alien-Tank. <span className="text-wk-muted">(Desktop: pijltjes + spatie)</span>
+                <b className="text-wk-gold">◀ ▶</b> om te lopen, <b className="text-wk-gold">JUMP</b> om te springen (nogmaals = <b>dubbelsprong</b>) — je <b>schiet automatisch</b> vooruit. Maai je door de aliens, verover de arena's en versla <b className="text-wk-red">3 bazen</b>. Pak <b className="text-wk-gold">power-ups</b>: ⚡ sneller vuren, ✦ spread-shot (raakt ook vliegers!), ❤ extra leven. <span className="text-wk-muted">(Desktop: pijltjes + spatie)</span>
               </p>
               <button onClick={(e) => { e.stopPropagation(); startOrJump() }} disabled={!ready} className="font-display text-lg uppercase tracking-wide px-8 py-3 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer disabled:opacity-50">
                 {ready ? 'Start' : 'Laden…'}
@@ -553,7 +574,7 @@ export default function GunClient({ leaderboard, currentUserId }: { leaderboard:
           </div>
         )}
 
-        <GameLeaderboard entries={board} currentUserId={currentUserId} />
+        <div className="gx-hide"><GameLeaderboard entries={board} currentUserId={currentUserId} /></div>
       </div>
     </div>
   )

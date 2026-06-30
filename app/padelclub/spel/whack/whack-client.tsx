@@ -8,6 +8,7 @@ import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
 import TeamsPopup from '../teams-popup'
+import ImmersiveToggle from '../immersive-toggle'
 
 const HOLES = 9
 const GAME_SECONDS = 30
@@ -172,8 +173,9 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
   }
 
   return (
-    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      <TeamsPopup />
+    <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup active={phase === 'playing'} />
+      <ImmersiveToggle />
       {/* Easter egg: grote Rick dendert van links naar rechts als je 'm tikt */}
       {rickFly > 0 && (
         <div key={rickFly} className="pointer-events-none fixed inset-0 z-50 flex items-center overflow-hidden" aria-hidden>
@@ -197,8 +199,8 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
         </svg>
       </button>
 
-      <div className="relative max-w-md mx-auto px-4 py-10 sm:py-14 space-y-6">
-        <header className="text-center animate-fade-up">
+      <div className="relative max-w-md mx-auto gx-container px-4 py-10 sm:py-14 space-y-6">
+        <header className="gx-hide text-center animate-fade-up">
           <Link href="/padelclub/spel" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-[0.2em] uppercase mb-2 inline-block">← Spellen</Link>
           <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none text-wk-gold">Whack-a-flyer</h1>
         </header>
@@ -217,20 +219,20 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
         )}
 
         {phase !== 'idle' && (
-          <div className="grid grid-cols-3 gap-px bg-white/10 rounded-2xl overflow-hidden">
+          <div className="gx-grid grid grid-cols-3 gap-px bg-white/10 rounded-2xl overflow-hidden">
             {holes.map((h, i) => (
               <button
                 key={i}
                 type="button"
-                onClick={() => whack(i)}
+                onPointerDown={(e) => { e.preventDefault(); whack(i) }}
                 disabled={phase !== 'playing'}
-                className="relative aspect-square bg-wk-bg2 overflow-hidden select-none active:scale-95 transition-transform flex items-center justify-center"
-                style={h?.exploding ? ({ animation: 'whack-shock 0.4s ease-out', ['--shock' as string]: h.rick ? 'var(--color-wk-red)' : 'var(--color-wk-green)' } as React.CSSProperties) : undefined}
+                className="relative aspect-square bg-wk-bg2 overflow-hidden select-none touch-none active:scale-95 transition-transform flex items-center justify-center"
+                style={{ touchAction: 'none', ...(h?.exploding ? { animation: 'whack-shock 0.4s ease-out', ['--shock' as string]: h.rick ? 'var(--color-wk-red)' : 'var(--color-wk-green)' } : {}) } as React.CSSProperties}
               >
                 {h && (
                   <span
                     key={h.key}
-                    className={`relative ${h.exploding ? '' : 'animate-pop'}`}
+                    className={`pointer-events-none relative ${h.exploding ? '' : 'animate-pop'}`}
                     style={{
                       width: `${Math.round(h.scale * 100)}%`,
                       height: `${Math.round(h.scale * 100)}%`,
@@ -280,7 +282,7 @@ export default function WhackClient({ leaderboard, currentUserId }: { leaderboar
           </div>
         )}
 
-        <GameLeaderboard entries={board} currentUserId={currentUserId} />
+        <div className="gx-hide"><GameLeaderboard entries={board} currentUserId={currentUserId} /></div>
       </div>
     </div>
   )

@@ -8,6 +8,7 @@ import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
 import TeamsPopup from '../teams-popup'
+import ImmersiveToggle from '../immersive-toggle'
 
 const W = 380
 const H = 480
@@ -441,8 +442,9 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
   }, [setupCanvas, drawScene, tap, start])
 
   return (
-    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      <TeamsPopup />
+    <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup active={phase === 'power' || phase === 'shoot'} />
+      <ImmersiveToggle />
       {/* Scherm kleurt vurig zolang een booster gewapend is */}
       {armed && (
         <div
@@ -461,8 +463,8 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
         </svg>
       </Link>
 
-      <div className="relative max-w-md mx-auto px-4 py-10 sm:py-14 space-y-6">
-        <header className="text-center animate-fade-up">
+      <div className="relative max-w-md mx-auto gx-container px-4 py-10 sm:py-14 space-y-6">
+        <header className="gx-hide text-center animate-fade-up">
           <Link href="/padelclub/spel" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-[0.2em] uppercase mb-2 inline-block">← Spellen</Link>
           <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none text-wk-gold">Strafschoppen</h1>
         </header>
@@ -489,7 +491,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
           </div>
         )}
 
-        <div className="relative mx-auto w-full max-w-[380px] select-none touch-none" onPointerDown={(e) => { e.preventDefault(); tap() }}>
+        <div className="gx-stage relative mx-auto w-full max-w-[380px] select-none touch-none" onPointerDown={(e) => { e.preventDefault(); tap() }}>
           <canvas ref={canvasRef} className="w-full block rounded-2xl border border-white/10" style={{ aspectRatio: `${W} / ${H}` }} />
 
           {/* Vurige gloed rond het speelveld + power-balk zolang gewapend */}
@@ -614,7 +616,7 @@ export default function PenaltyClient({ leaderboard, currentUserId }: { leaderbo
           )}
         </div>
 
-        <GameLeaderboard entries={board} currentUserId={currentUserId} />
+        <div className="gx-hide"><GameLeaderboard entries={board} currentUserId={currentUserId} /></div>
       </div>
     </div>
   )

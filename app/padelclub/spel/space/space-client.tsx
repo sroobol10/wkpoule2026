@@ -7,6 +7,7 @@ import { submitPadelScore } from '@/app/actions/padel-game'
 import type { LeaderEntry } from '@/lib/padel-leaderboard'
 import GameLeaderboard from '../game-leaderboard'
 import TeamsPopup from '../teams-popup'
+import ImmersiveToggle from '../immersive-toggle'
 
 // ── Logisch speelveld (wordt geschaald naar de breedte van het scherm) ──────────
 const W = 380
@@ -605,8 +606,9 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
   }
 
   return (
-    <div className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
-      <TeamsPopup />
+    <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
+      <TeamsPopup active={phase === 'playing'} />
+      <ImmersiveToggle />
       <Link
         href="/padelclub/spel" aria-label="Sluiten"
         onClick={(e) => { e.preventDefault(); close() }}
@@ -617,8 +619,8 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
         </svg>
       </Link>
 
-      <div className="relative max-w-md mx-auto px-4 py-8 sm:py-12 space-y-5">
-        <header className="text-center animate-fade-up">
+      <div className="relative max-w-md mx-auto gx-container px-4 py-8 sm:py-12 space-y-5">
+        <header className="gx-hide text-center animate-fade-up">
           <Link href="/padelclub/spel" className="font-mono text-[10px] text-wk-muted hover:text-wk-soft tracking-[0.2em] uppercase mb-2 inline-block">← Spellen</Link>
           <h1 className="font-display text-4xl sm:text-5xl uppercase leading-none text-wk-gold">Space Strikers</h1>
         </header>
@@ -632,7 +634,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
           </div>
         )}
 
-        <div className="relative mx-auto w-full max-w-[380px] select-none touch-none" onPointerMove={onPointer} onPointerDown={onPointer}>
+        <div className="gx-stage relative mx-auto w-full max-w-[380px] select-none touch-none" onPointerMove={onPointer} onPointerDown={onPointer}>
           <canvas ref={canvasRef} className="w-full block rounded-2xl border border-white/10 bg-black" style={{ aspectRatio: `${W} / ${H}`, imageRendering: 'pixelated' }} />
 
           {/* boss-HP-balk */}
@@ -673,7 +675,7 @@ export default function SpaceClient({ leaderboard, currentUserId }: { leaderboar
           )}
         </div>
 
-        <GameLeaderboard entries={board} currentUserId={currentUserId} />
+        <div className="gx-hide"><GameLeaderboard entries={board} currentUserId={currentUserId} /></div>
       </div>
     </div>
   )

@@ -6,7 +6,7 @@ import Image from 'next/image'
 // Speelse "Teams-belletje"-popup rechtsonder tijdens elk spel. Verschijnt willekeurig
 // (minimaal 10s tussen verschijningen) en blijft hooguit 1 seconde staan. Blokkeert
 // het spel niet (pointer-events uit). Speelt een kort Teams-achtig "ba-doop"-geluidje.
-export default function TeamsPopup() {
+export default function TeamsPopup({ active = true }: { active?: boolean }) {
   const [show, setShow] = useState(false)
   const audio = useRef<AudioContext | null>(null)
 
@@ -34,6 +34,8 @@ export default function TeamsPopup() {
   }
 
   useEffect(() => {
+    // Alleen tijdens het spelen — niet op het start-/eindscherm
+    if (!active) { setShow(false); return }
     let alive = true
     let showT: ReturnType<typeof setTimeout>
     let hideT: ReturnType<typeof setTimeout>
@@ -47,8 +49,8 @@ export default function TeamsPopup() {
       }, delay)
     }
     cycle()
-    return () => { alive = false; clearTimeout(showT); clearTimeout(hideT); void audio.current?.close() }
-  }, [])
+    return () => { alive = false; clearTimeout(showT); clearTimeout(hideT) }
+  }, [active])
 
   return (
     <div
