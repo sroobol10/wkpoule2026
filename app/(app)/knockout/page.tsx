@@ -207,6 +207,8 @@ export default async function KnockoutPage() {
   // uit-plek werd voorspeld (= bereikt dit duel via die seed).
   const homeBySlot: Record<number, Record<string, number>> = {}
   const awayBySlot: Record<number, Record<string, number>> = {}
+  // Daarnaast: hoe vaak elk team als WINNAAR van dit slot werd getipt (los van de seed).
+  const winnerBySlot: Record<number, Record<string, number>> = {}
   for (const uid of memberArr) {
     const picks = picksByUser[uid] ?? {}
     const adv = advByUser[uid]
@@ -219,6 +221,8 @@ export default async function KnockoutPage() {
       if (!r) continue
       if (r.home) (homeBySlot[b.slot] ??= {})[r.home] = ((homeBySlot[b.slot]?.[r.home]) ?? 0) + 1
       if (r.away) (awayBySlot[b.slot] ??= {})[r.away] = ((awayBySlot[b.slot]?.[r.away]) ?? 0) + 1
+      const w = picks[b.slot]
+      if (w) (winnerBySlot[b.slot] ??= {})[w] = ((winnerBySlot[b.slot]?.[w]) ?? 0) + 1
     }
   }
 
@@ -238,19 +242,24 @@ export default async function KnockoutPage() {
     homeSeed: string; awaySeed: string
     home: { teamId: string; count: number }[]
     away: { teamId: string; count: number }[]
+    winner: { teamId: string; count: number }[]
     actualHome: string | null; actualAway: string | null
+    actualWinner: string | null
   }> = {}
   for (const b of BRACKET) {
     const home = sortRows(homeBySlot[b.slot] ?? {})
     const away = sortRows(awayBySlot[b.slot] ?? {})
-    if (!home.length && !away.length) continue
+    const winner = sortRows(winnerBySlot[b.slot] ?? {})
+    if (!home.length && !away.length && !winner.length) continue
     koSlotDist[b.slot] = {
       homeSeed: b.homeSeed,
       awaySeed: b.awaySeed,
       home,
       away,
+      winner,
       actualHome: actualHomeBySlot[b.slot] ?? null,
       actualAway: actualAwayBySlot[b.slot] ?? null,
+      actualWinner: actualWinners[b.slot] ?? null,
     }
   }
 

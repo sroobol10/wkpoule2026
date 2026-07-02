@@ -17,7 +17,7 @@ export default async function SpelHubPage() {
   // Leaderboards voor de beschikbare spellen
   const boards: Record<string, LeaderEntry[]> = {}
   for (const g of PADEL_GAMES) {
-    if (g.available) boards[g.slug] = await getPadelLeaderboard(g.slug)
+    if (g.available && !g.noLeaderboard) boards[g.slug] = await getPadelLeaderboard(g.slug)
   }
 
   return (

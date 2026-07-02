@@ -33,7 +33,8 @@ type Props = {
   totalDeelnemers: number
   bonusQuestionStats: BonusQuestionStat[]
   teamFlags: Record<string, string> // landnaam → vlag-URL
-  eliminatedCountries?: string[]    // uitgeschakelde landen → grijs
+  eliminatedCountries?: string[]    // uitgeschakelde landen → grijs (bonusvragen)
+  preSemiEliminatedCountries?: string[] // vóór de halve finale gesneuveld → grijs (kampioen-muur)
 }
 
 // flagcdn-URLs in de database zijn w80 (80px breed) — voor grote tegels te wazig
@@ -104,8 +105,12 @@ export default function StatsClient({
   bonusQuestionStats,
   teamFlags,
   eliminatedCountries = [],
+  preSemiEliminatedCountries = [],
 }: Props) {
   const eliminatedSet = new Set(eliminatedCountries)
+  // Kampioen-muur: alleen grijs als het land vóór de halve finale sneuvelde
+  // (een halvefinalist die later verliest blijft dus normaal gekleurd).
+  const champGraySet = new Set(preSemiEliminatedCountries.length ? preSemiEliminatedCountries : eliminatedCountries)
   const preBonusStats = bonusQuestionStats
     .filter((q) => q.type === 'pre_tournament')
     .sort((a, b) => preBonusIndex(a.question) - preBonusIndex(b.question))
@@ -189,7 +194,7 @@ export default function StatsClient({
               <div className="grid grid-cols-4 sm:grid-cols-6 auto-rows-[68px] sm:auto-rows-[76px] gap-1.5">
                 {kampioenStats.map(({ answer, count, flag_url }, i) => {
                   const pct = totalDeelnemers > 0 ? Math.round((count / totalDeelnemers) * 100) : 0
-                  const elim = eliminatedSet.has(answer)   // uitgeschakeld land → grijs
+                  const elim = champGraySet.has(answer)   // vóór de halve finale uit → grijs
                   const isTop = i === 0
                   const span = isTop
                     ? 'col-span-2 row-span-2'

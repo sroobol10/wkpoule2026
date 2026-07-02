@@ -254,13 +254,27 @@ export default async function StatistiekenPage({
   // Uitgeschakelde landen → grijs bij de bonusvragen
   const [{ data: aliveGroupM }, { data: aliveKoM }] = await Promise.all([
     supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered, home_team:teams!matches_home_team_id_fkey(id, name, group_name), away_team:teams!matches_away_team_id_fkey(id, name, group_name)').eq('stage', 'group'),
-    supabase.from('matches').select('home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id').in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']),
+    supabase.from('matches').select('stage, home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id').in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final']),
   ])
   const aliveSet = computeAliveTeamIds(
     (aliveGroupM ?? []) as unknown as AliveGroupMatch[],
     (aliveKoM ?? []) as unknown as AliveKoMatch[],
   )
   const eliminatedCountries = (allTeamsForFlags ?? []).filter((t) => !aliveSet.has(t.id)).map((t) => t.name)
+
+  // Landen die (minimaal) de halve finale haalden = deelnemers in een sf/troostfinale/finale.
+  // De toernooiwinnaar haalt historisch altijd minstens de halve finale, dus alleen landen die
+  // VÓÓR de halve finale sneuvelen worden bij de kampioen-muur uitgegrijsd.
+  const reachedSemiIds = new Set<string>()
+  for (const m of (aliveKoM ?? []) as unknown as { stage: string; home_team_id: string | null; away_team_id: string | null }[]) {
+    if (m.stage === 'sf' || m.stage === 'third_place' || m.stage === 'final') {
+      if (m.home_team_id) reachedSemiIds.add(m.home_team_id)
+      if (m.away_team_id) reachedSemiIds.add(m.away_team_id)
+    }
+  }
+  const preSemiEliminatedCountries = (allTeamsForFlags ?? [])
+    .filter((t) => !aliveSet.has(t.id) && !reachedSemiIds.has(t.id))
+    .map((t) => t.name)
 
   return (
     <StatsClient
@@ -272,6 +286,7 @@ export default async function StatistiekenPage({
       bonusQuestionStats={bonusQuestionStats}
       teamFlags={teamFlags}
       eliminatedCountries={eliminatedCountries}
+      preSemiEliminatedCountries={preSemiEliminatedCountries}
     />
   )
 }

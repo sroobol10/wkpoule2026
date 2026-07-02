@@ -285,6 +285,12 @@ function koWinner(m: Match): TeamRef {
   if (m.shootout_winner_id && m.shootout_winner_id === m.away_team?.id) return m.away_team
   return null
 }
+// Werkelijke KO-uitslag als tekst: "1-1, na pen." of "1-2" (null als nog niet gespeeld).
+function koScoreText(m: Match): string | null {
+  if (!m.result_entered || m.home_score == null || m.away_score == null) return null
+  const pens = m.home_score === m.away_score && !!m.shootout_winner_id
+  return `${m.home_score}-${m.away_score}${pens ? ', na pen.' : ''}`
+}
 
 function FlagImg({ team }: { team: NonNullable<TeamRef> }) {
   if (!team.flag_url) return null
@@ -298,7 +304,7 @@ function MyChoice({ teams }: { teams: NonNullable<TeamRef>[] }) {
     return <b className="ml-1 inline-flex items-center gap-1.5 text-wk-soft align-middle"><FlagImg team={teams[0]} />{teams[0].name}</b>
   }
   return (
-    <b className="ml-1 inline-flex items-center gap-1.5 text-wk-soft align-middle">
+    <b className="ml-1 inline-flex items-center gap-2.5 text-wk-soft align-middle">
       <FlagImg team={teams[0]} /><span className="text-wk-muted font-normal">&</span><FlagImg team={teams[1]} />
     </b>
   )
@@ -308,8 +314,9 @@ function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; k
   const isKo = m.stage !== 'group'
   const pts = isKo ? (koPts ?? null) : (pred?.points_awarded ?? null)
   const winner = koWinner(m)
+  const score = koScoreText(m)
   return (
-    <div className="px-4 py-3">
+    <div className="px-4 py-4">
       <div className="flex items-center gap-2.5">
         <span className="font-mono text-xs text-wk-muted w-10 shrink-0">{formatInAmsterdam(m.kickoff_at, 'HH:mm')}</span>
         <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -319,21 +326,30 @@ function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; k
         </div>
         <PtsBadge pts={pts} joker={joker} />
       </div>
-      <div className="pl-12 mt-1.5 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
+      {/* Mijn keuze en uitslag altijd op aparte regels. */}
+      <div className="pl-12 mt-2 flex flex-col items-start gap-1.5 text-xs sm:text-[13px] text-wk-muted">
         {isKo ? (
           <>
-            <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
-            {/* KO: geen doorklik (de wedstrijdpagina toont hier niets relevants) */}
-            <span className="inline-flex items-center">
+            <span className="inline-flex items-center gap-2">
+              <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
+              {joker && <JokerTag />}
+            </span>
+            <span className="inline-flex flex-wrap items-center">
               Uitslag{' '}
               {winner
-                ? <b className="ml-1 inline-flex items-center gap-1.5 text-wk-text align-middle"><FlagImg team={winner} />{winner.name}</b>
+                ? <b className="ml-1 inline-flex items-center gap-1.5 text-wk-text align-middle">
+                    <FlagImg team={winner} />{winner.name}
+                    {score && <span className="ml-1.5 font-normal text-white">(<span className="text-wk-gold">{score}</span>)</span>}
+                  </b>
                 : <b className="ml-1 text-wk-text">—</b>}
             </span>
           </>
         ) : (
           <>
-            <span>Voorspeld <b className="ml-1 text-wk-soft">{groupPredText(pred) ?? '—'}</b></span>
+            <span className="inline-flex items-center gap-2">
+              <span>Voorspeld <b className="ml-1 text-wk-soft">{groupPredText(pred) ?? '—'}</b></span>
+              {joker && <JokerTag />}
+            </span>
             <Link href={`/wedstrijd/${m.id}`} className="group/uitslag" title="Bekijk wie wat koos">
               Uitslag{' '}
               <b className="ml-1 text-wk-text underline decoration-wk-muted/50 underline-offset-2 group-hover/uitslag:decoration-wk-gold transition-colors">
@@ -342,7 +358,6 @@ function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; k
             </Link>
           </>
         )}
-        {joker && <JokerTag />}
       </div>
     </div>
   )
@@ -352,7 +367,7 @@ function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; joker:
   const isKo = m.stage !== 'group'
   const voorspeld = groupPredText(pred)
   return (
-    <div className="px-4 py-3">
+    <div className="px-4 py-4">
       <div className="flex items-center gap-2.5">
         <span className="font-mono text-xs text-wk-muted w-10 shrink-0">{formatInAmsterdam(m.kickoff_at, 'HH:mm')}</span>
         <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -361,7 +376,7 @@ function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; joker:
           <Team team={m.away_team} />
         </div>
       </div>
-      <div className="pl-12 mt-1.5 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
+      <div className="pl-12 mt-2 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
         {isKo
           ? <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
           : <span>Voorspeld <b className={`ml-1 ${voorspeld ? 'text-wk-soft' : 'text-wk-muted/50'}`}>{voorspeld ?? '—'}</b></span>}

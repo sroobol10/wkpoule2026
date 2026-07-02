@@ -12,14 +12,17 @@ type Team = { id: string; name: string; flag_url: string; group_name: string }
 type AdvancementEntry = { team_id: string; predicted_position: number }
 type BracketPickEntry = { slot: number; predicted_team_id: string; points_awarded?: number | null }
 
-// "Wie koos wat" per slot: verdeling op de thuis-seed en op de uit-seed.
+// "Wie koos wat" per slot: verdeling op de thuis-seed en op de uit-seed (als wedstrijd),
+// plus de verdeling van wie als WINNAAR van dit slot is getipt.
 export type SlotDist = {
   homeSeed: string
   awaySeed: string
   home: { teamId: string; count: number }[]
   away: { teamId: string; count: number }[]
+  winner: { teamId: string; count: number }[]
   actualHome: string | null
   actualAway: string | null
+  actualWinner: string | null
 }
 
 type Props = {
@@ -359,6 +362,7 @@ function BracketMatchCard({
               advanced={advancedTeams.has(homeTeam.id)}
               eliminated={eliminatedTeams.has(homeTeam.id)}
               stageHasResults={stageHasResults}
+              pts={pts}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(homeTeam.id)}
@@ -373,6 +377,7 @@ function BracketMatchCard({
               advanced={advancedTeams.has(awayTeam.id)}
               eliminated={eliminatedTeams.has(awayTeam.id)}
               stageHasResults={stageHasResults}
+              pts={pts}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(awayTeam.id)}
@@ -382,7 +387,7 @@ function BracketMatchCard({
       </div>
 
       {/* Wie koos wat — verdeling over je eigen league (inklapbaar, auto-dicht na 48u) */}
-      {dist && (dist.home.length > 0 || dist.away.length > 0) && (
+      {dist && (dist.home.length > 0 || dist.away.length > 0 || dist.winner.length > 0) && (
         <div className="border-t border-white/5">
           <button
             type="button"
@@ -393,9 +398,24 @@ function BracketMatchCard({
             <span className={`text-[10px] text-wk-muted transition-transform ${distOpen ? 'rotate-180' : ''}`}>▾</span>
           </button>
           {distOpen && (
-            <div className="px-4 pb-3.5 grid grid-cols-2 gap-x-3 sm:gap-x-6">
-              <SeedDist label="Thuis" seed={dist.homeSeed} rows={dist.home} ownId={match.home} actualId={dist.actualHome} teamMap={teamMap} />
-              <SeedDist label="Uit" seed={dist.awaySeed} rows={dist.away} ownId={match.away} actualId={dist.actualAway} teamMap={teamMap} />
+            <div className="px-4 pb-3.5 space-y-3.5">
+              {/* 1) Als wedstrijd: wie werd op elke seed van dit duel getipt */}
+              {(dist.home.length > 0 || dist.away.length > 0) && (
+                <div>
+                  <p className="font-mono text-[9px] text-wk-gold/70 tracking-[0.16em] uppercase mb-2">Als wedstrijd</p>
+                  <div className="grid grid-cols-2 gap-x-3 sm:gap-x-6">
+                    <SeedDist label="Thuis" seed={dist.homeSeed} rows={dist.home} ownId={match.home} actualId={dist.actualHome} teamMap={teamMap} />
+                    <SeedDist label="Uit" seed={dist.awaySeed} rows={dist.away} ownId={match.away} actualId={dist.actualAway} teamMap={teamMap} />
+                  </div>
+                </div>
+              )}
+              {/* 2) Als winnaar: hoe vaak elk team als winnaar van dit slot is getipt */}
+              {dist.winner.length > 0 && (
+                <div className={dist.home.length > 0 || dist.away.length > 0 ? 'border-t border-white/5 pt-3' : ''}>
+                  <p className="font-mono text-[9px] text-wk-gold/70 tracking-[0.16em] uppercase mb-2">Als winnaar</p>
+                  <SeedDist label="Winnaar" seed="" rows={dist.winner} ownId={match.winner} actualId={dist.actualWinner} teamMap={teamMap} />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -438,7 +458,7 @@ function SeedDist({
   return (
     <div className="min-w-0">
       <p className="font-mono text-[8px] text-wk-muted/70 tracking-[0.12em] uppercase mb-2">
-        {label} · <span className="text-wk-muted">{seedLabel(seed)}</span>
+        {label}{seed ? <> · <span className="text-wk-muted">{seedLabel(seed)}</span></> : ''}
       </p>
       <div className="space-y-1.5">
         {rows.map(({ teamId, count }) => {
@@ -468,24 +488,25 @@ function TeamBtn({
   advanced,
   eliminated,
   stageHasResults,
+  pts,
   disabled,
   isPending,
   onClick,
 }: {
   team: Team
   selected: boolean
-  isActualWinner: boolean   // won this specific match (for display)
-  advanced: boolean         // reached the next round (for scoring)
-  eliminated: boolean       // is dit team uit het toernooi? → rood
-  stageHasResults: boolean  // is this stage concluded?
+  isActualWinner: boolean   // won dit exacte slot (uitslag)
+  advanced: boolean         // door naar de volgende ronde (in werkelijkheid)
+  eliminated: boolean       // uit het toernooi
+  stageHasResults: boolean  // is deze ronde gespeeld?
+  pts: number | null        // slot-punten (alleen op de gekozen tegel getoond)
   disabled: boolean
   isPending: boolean
   onClick: () => void
 }) {
-  const pickCorrect = selected && stageHasResults && advanced
-  // Uit het toernooi (en niet via deze ronde doorgegaan) → rood, ook in latere slots
-  const out = eliminated && !advanced
-  const pickWrong   = out && selected
+  const out = eliminated && !advanced        // definitief uitgeschakeld
+  const wonHere = isActualWinner             // won deze wedstrijd (juiste plek)
+  const wonElsewhere = advanced && !isActualWinner // door, maar niet via deze wedstrijd → verkeerde plek
 
   // Pop-animatie wanneer team net geselecteerd wordt
   const [popping, setPopping] = useState(false)
@@ -499,25 +520,31 @@ function TeamBtn({
     prevSelected.current = selected
   }, [selected])
 
+  // Vulkleur + statuslabel. Jouw keuze: groen (winnaar) / rood (uit) / goud (nog geen uitslag).
+  // Niet jouw keuze: geel (winnaar op goede plek) / oranje (winnaar elders) / grijs (uitgeschakeld).
   let colorClass: string
-  if (pickCorrect) {
-    colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'
+  let statusLabel: string | null = null
+  let statusClass = 'text-wk-muted'
+  if (selected) {
+    if (out) { colorClass = 'border-wk-red/45 bg-wk-red/10 text-wk-muted'; statusLabel = 'Uitgeschakeld'; statusClass = 'text-wk-red' }
+    else if (stageHasResults && advanced) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusLabel = 'Winnaar'; statusClass = 'text-wk-green' }
+    else colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
+  } else if (wonHere) {
+    colorClass = 'border-wk-gold/55 bg-wk-gold/20 text-wk-soft'; statusLabel = 'Winnaar'
+  } else if (wonElsewhere) {
+    colorClass = 'border-[#E8842A]/55 bg-[#E8842A]/20 text-wk-soft'; statusLabel = 'Winnaar elders'
   } else if (out) {
-    colorClass = 'border-wk-red/40 bg-wk-red/5 text-wk-muted'
-  } else if (selected) {
-    colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
-  } else if (stageHasResults && advanced && !selected) {
-    // Doorgegaan, maar niet de pick van de gebruiker
-    colorClass = 'border-wk-gold/30 bg-wk-bg2 text-wk-soft'
+    colorClass = 'border-white/10 bg-wk-bg2 text-wk-soft'; statusLabel = 'Uitgeschakeld'
   } else {
     colorClass = 'border-white/10 bg-wk-bg2 text-wk-soft'
   }
+  const notMyPick = !selected && !!statusLabel
 
   return (
     <button
       onClick={onClick}
       disabled={disabled || isPending}
-      className={`flex-1 flex flex-col items-center gap-2 px-3 py-3 rounded-lg border transition-colors disabled:cursor-default ${colorClass} ${
+      className={`flex-1 flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border transition-colors disabled:cursor-default ${colorClass} ${
         !disabled ? 'hover:border-white/25 hover:bg-white/5 cursor-pointer' : ''
       } ${popping ? 'animate-pop' : ''}`}
     >
@@ -531,18 +558,24 @@ function TeamBtn({
       <span className={`font-mono text-[10px] tracking-[0.12em] uppercase text-center leading-tight ${out ? 'line-through opacity-60' : ''}`}>
         {team.name}
       </span>
-      {/* Altijd "mijn keuze" bij jouw gekozen land — los van resultaat/correct */}
+      {/* Jouw keuze — altijd tonen bij je eigen pick */}
       {selected && (
         <span className="font-mono text-[9px] tracking-widest uppercase text-wk-gold">★ Mijn keuze</span>
       )}
-      {pickCorrect && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-green">✓ Correct</span>
+      {/* Niet jouw keuze — boven het statuslabel (grijszwart) */}
+      {notMyPick && (
+        <span className="font-mono text-[8px] tracking-widest uppercase text-wk-muted/60">Niet jouw keuze</span>
       )}
-      {pickWrong && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-red">✗ Uitgeschakeld</span>
+      {statusLabel && (
+        <span className={`font-mono text-[9px] tracking-widest uppercase ${selected ? statusClass : 'text-wk-muted'}`}>
+          {statusLabel}
+        </span>
       )}
-      {!selected && isActualWinner && (
-        <span className="font-mono text-[9px] tracking-widest uppercase text-wk-muted">Uitslag</span>
+      {/* Punten op de gekozen tegel: rood bij uitschakeling, anders grijs (0) / groen (>0) */}
+      {selected && pts !== null && (
+        <span className={`font-mono text-[9px] font-bold tracking-widest uppercase ${out ? 'text-wk-red' : pts > 0 ? 'text-wk-green' : 'text-wk-muted'}`}>
+          {pts} pt
+        </span>
       )}
     </button>
   )

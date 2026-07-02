@@ -431,3 +431,39 @@
   height: auto !important;
   margin: 0 auto !important;
 }
+
+/* Sensi Soccer — full-screen goal-viering */
+@keyframes goal-flash {
+  0%   { opacity: 0; }
+  15%  { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+@keyframes goal-sweep {
+  from { background-position: 0 0; }
+  to   { background-position: 600px 0; }
+}
+@keyframes goal-pop {
+  0%   { transform: scale(0.3); opacity: 0; }
+  60%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes goal-rise {
+  from { transform: translateY(18px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+@keyframes goal-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes goal-rays {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+@keyframes goal-rays-rev {
+  from { transform: translate(-50%, -50%) rotate(360deg); }
+  to   { transform: translate(-50%, -50%) rotate(0deg); }
+}
+@keyframes goal-ring {
+  0%   { transform: translate(-50%, -50%) scale(0.2); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+}

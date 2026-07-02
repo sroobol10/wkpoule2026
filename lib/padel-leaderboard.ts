@@ -10,7 +10,8 @@ export type LeaderEntry = {
 }
 
 // Beschikbare mini-games (voor de spel-hub).
-export const PADEL_GAMES: { slug: string; title: string; emoji: string; tagline: string; available: boolean }[] = [
+// noLeaderboard = spel zonder high-score-klassement.
+export const PADEL_GAMES: { slug: string; title: string; emoji: string; tagline: string; available: boolean; noLeaderboard?: boolean }[] = [
   { slug: 'whack', title: 'Whack-a-flyer', emoji: '🎯', tagline: 'Tik de figuren · ontwijk Rick · 30s', available: true },
   { slug: 'flappy', title: 'Flappy Padel', emoji: '🎾', tagline: 'Tik om te fladderen · ontwijk de netten', available: true },
   { slug: 'penalty', title: 'Strafschoppen', emoji: '⚽', tagline: 'Mik op de hoeken · klop de keeper · hoeveel op rij?', available: true },
