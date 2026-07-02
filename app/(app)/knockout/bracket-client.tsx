@@ -241,7 +241,6 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
               advancedTeams={advancedSet}
               eliminatedTeams={eliminatedSet}
-              stageHasResults={(advancedFromStage[matchDef.stage] ?? []).length > 0}
               pts={ptsPerSlot[matchDef.slot] ?? null}
               dist={slotDist[matchDef.slot] ?? null}
             />
@@ -281,7 +280,6 @@ function BracketMatchCard({
   kickoffAt,
   advancedTeams,
   eliminatedTeams,
-  stageHasResults,
   pts,
   dist,
 }: {
@@ -294,7 +292,6 @@ function BracketMatchCard({
   kickoffAt: string | null
   advancedTeams: Set<string>
   eliminatedTeams: Set<string>
-  stageHasResults: boolean
   pts: number | null
   dist: SlotDist | null
 }) {
@@ -307,11 +304,11 @@ function BracketMatchCard({
   // "Wie koos wat" standaard open; klapt 48u na de aftrap automatisch in
   const collapsedByTime = !!kickoffAt && Date.now() > new Date(kickoffAt).getTime() + 48 * 60 * 60 * 1000
   const [distOpen, setDistOpen] = useState(!collapsedByTime)
-  // Correct = jouw pick ging deze ronde door; Fout = jouw pick is uitgeschakeld.
-  // (Niet "stageHasResults && niet doorgegaan" — dan kleurden nog-niet-gespeelde
-  //  wedstrijden ten onrechte rood zodra één duel in de ronde gespeeld was.)
-  const isCorrect = !!userPick && advancedTeams.has(userPick)
-  const isWrong   = !!userPick && eliminatedTeams.has(userPick)
+  // Correct = jouw pick won dit exacte duel (uitslag); Fout = jouw pick is uitgeschakeld en
+  // won dit duel niet. Sturen op de uitslag (actualWinnerId/eliminated), niet op `advanced`
+  // (= aanwezig in de volgende ronde) — dat loopt achter op een net gewonnen/verloren duel.
+  const isCorrect = !!userPick && actualWinnerId === userPick
+  const isWrong   = !!userPick && eliminatedTeams.has(userPick) && actualWinnerId !== userPick
   const resultIn  = actualWinnerId != null   // uitslag ingevoerd → datum weg, ruimte voor punten
 
   return (
@@ -361,7 +358,6 @@ function BracketMatchCard({
               isActualWinner={actualWinnerId === homeTeam.id}
               advanced={advancedTeams.has(homeTeam.id)}
               eliminated={eliminatedTeams.has(homeTeam.id)}
-              stageHasResults={stageHasResults}
               pts={pts}
               disabled={locked || !bothKnown}
               isPending={isPending}
@@ -376,7 +372,6 @@ function BracketMatchCard({
               isActualWinner={actualWinnerId === awayTeam.id}
               advanced={advancedTeams.has(awayTeam.id)}
               eliminated={eliminatedTeams.has(awayTeam.id)}
-              stageHasResults={stageHasResults}
               pts={pts}
               disabled={locked || !bothKnown}
               isPending={isPending}
@@ -487,7 +482,6 @@ function TeamBtn({
   isActualWinner,
   advanced,
   eliminated,
-  stageHasResults,
   pts,
   disabled,
   isPending,
@@ -498,15 +492,18 @@ function TeamBtn({
   isActualWinner: boolean   // won dit exacte slot (uitslag)
   advanced: boolean         // door naar de volgende ronde (in werkelijkheid)
   eliminated: boolean       // uit het toernooi
-  stageHasResults: boolean  // is deze ronde gespeeld?
   pts: number | null        // slot-punten (alleen op de gekozen tegel getoond)
   disabled: boolean
   isPending: boolean
   onClick: () => void
 }) {
-  const out = eliminated && !advanced        // definitief uitgeschakeld
+  // Kleuren sturen op de daadwerkelijke uitslag (isActualWinner / eliminated), niet op
+  // `advanced` (= aanwezig in de volgende ronde). Dat laatste loopt achter: een net gewonnen
+  // team staat nog niet in de volgende ronde, en een team dat de volgende ronde haalde maar dáár
+  // verloor blijft ten onrechte "advanced". Vandaar deze twee betrouwbare signalen.
   const wonHere = isActualWinner             // won deze wedstrijd (juiste plek)
-  const wonElsewhere = advanced && !isActualWinner // door, maar niet via deze wedstrijd → verkeerde plek
+  const out = eliminated && !wonHere         // uitgeschakeld, en niet de winnaar van dit duel
+  const wonElsewhere = advanced && !isActualWinner && !eliminated // nog in het toernooi, maar via een ander duel
 
   // Pop-animatie wanneer team net geselecteerd wordt
   const [popping, setPopping] = useState(false)
@@ -526,8 +523,8 @@ function TeamBtn({
   let statusLabel: string | null = null
   let statusClass = 'text-wk-muted'
   if (selected) {
-    if (out) { colorClass = 'border-wk-red/45 bg-wk-red/10 text-wk-muted'; statusLabel = 'Uitgeschakeld'; statusClass = 'text-wk-red' }
-    else if (stageHasResults && advanced) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusLabel = 'Winnaar'; statusClass = 'text-wk-green' }
+    if (wonHere) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusLabel = 'Winnaar'; statusClass = 'text-wk-green' }
+    else if (out) { colorClass = 'border-wk-red/45 bg-wk-red/10 text-wk-muted'; statusLabel = 'Uitgeschakeld'; statusClass = 'text-wk-red' }
     else colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
   } else if (wonHere) {
     colorClass = 'border-wk-gold/55 bg-wk-gold/20 text-wk-soft'; statusLabel = 'Winnaar'
