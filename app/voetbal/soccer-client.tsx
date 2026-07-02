@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import ImmersiveToggle from './immersive-toggle'
 import {
   FIXED_DT, MAX_STEPS_PER_FRAME, CONTROL_RADIUS, PLAYER_RADIUS, MAX_CHARGE_TIME,
-  PENALTY_W, PENALTY_H, PITCH_LENGTH, PITCH_WIDTH, PLAYERS_PER_TEAM,
+  PENALTY_W, PENALTY_H, PITCH_LENGTH, PITCH_WIDTH, PLAYERS_PER_TEAM, SLOWMO_TIME,
 } from '@/lib/soccer/constants'
 import {
   createInitialState, teamDir, KITS, COUNTRIES, PLAYER_POOL, FORMATIONS, formationById, buildTeamMeta, randomAiTeam, ensureDistinctKit,
@@ -28,8 +28,9 @@ type Role = 'host' | 'guest' | null
 type Overlay = null | 'goal' | 'halftime' | 'fulltime'
 type Scorer = { team: TeamId; name: string; ownGoal: boolean; clock: number; half: number }
 type MatchStats = { possPct: [number, number]; shots: [number, number]; tackles: [number, number]; pannas: [number, number] }
-type PanelInfo = { title: string; score: [number, number]; result?: 'win' | 'loss' | 'draw'; scorers: Scorer[]; note?: string; motm?: string; stats?: MatchStats }
-type GoalInfo = { name: string; face: string | null; team: TeamId; ownGoal: boolean; color: string; kind: 'normal' | 'screamer' | 'owngoal' }
+type Mvp = { name: string; face: string | null; team: TeamId; line: string }
+type PanelInfo = { title: string; score: [number, number]; result?: 'win' | 'loss' | 'draw'; scorers: Scorer[]; note?: string; motm?: Mvp; stats?: MatchStats }
+type GoalInfo = { name: string; teamName: string; face: string | null; team: TeamId; ownGoal: boolean; color: string; kind: 'normal' | 'screamer' | 'owngoal' }
 
 const GOAL_SOUNDS = ['/sfx/goal.mp3', '/sfx/goal2.mp3', '/sfx/goal3.mp3']
 const KICK_SOUNDS = ['/sfx/kick.mp3']       // trap/pass-plof (Steve levert clips; werkt stil tot dan)
@@ -37,16 +38,44 @@ const WHISTLE_SOUNDS = ['/sfx/whistle.mp3'] // scheidsfluit (aftrap/overtreding/
 const TACKLE_SOUNDS = ['/sfx/tackle.mp3']   // dreun bij een sliding-tackle die iemand omver loopt
 const YELLOWCARD_SOUNDS = ['/sfx/yellowcard.mp3'] // bij een gele kaart
 const REDCARD_SOUNDS = ['/sfx/redcard.mp3']       // bij een rode kaart
+// Voorgeladen audio-pool → geen decode-vertraging bij de eerste keer (bijv. de kaartfluit).
+const audioPool = new Map<string, HTMLAudioElement>()
+function primeSound(src: string) {
+  if (typeof window === 'undefined' || audioPool.has(src)) return
+  try { const a = new Audio(); a.preload = 'auto'; a.src = src; a.load(); audioPool.set(src, a) } catch { /* geen audio */ }
+}
 function playSound(srcs: string[], volume = 0.8) {
   if (typeof window === 'undefined' || srcs.length === 0) return
+  const src = srcs[Math.floor(Math.random() * srcs.length)]
   try {
-    const a = new Audio(srcs[Math.floor(Math.random() * srcs.length)])
+    const base = audioPool.get(src)
+    // Hergebruik het voorgeladen element als 't vrij is (direct af); anders een kloon voor overlap.
+    const a = base && base.paused ? base : new Audio(src)
+    if (a === base) a.currentTime = 0
+    else if (!audioPool.has(src)) audioPool.set(src, a)
     a.volume = volume
     void a.play().catch(() => {})
   } catch {
     /* geen audio beschikbaar */
   }
 }
+
+// ── Commentaar-quips (naam-bewust, luchtig — het is een spel onder collega's) ──────
+const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+function goalQuip(name: string, team: string, kind: 'normal' | 'screamer' | 'owngoal'): string {
+  if (kind === 'owngoal') return pick([`😅 EIGEN GOAL van ${name}! ${team} lacht in z'n vuistje.`, `🙈 ${name} verlengt 'm in eigen doel… au.`, `📎 ${name} scoort… aan de verkeerde kant!`])
+  if (kind === 'screamer') return pick([`🚀 ${name} met een PEGEL — boven in de kruising!`, `💥 ${name} ramt 'm er vanaf afstand in!`, `😱 Wat een knal van ${name}!`])
+  return pick([`⚽ ${name} scoort voor ${team}!`, `🎯 ${name} maakt 'm ijskoud af.`, `🔥 ${name}!! Daar is de goal.`, `🙌 ${name} tekent voor de treffer.`])
+}
+function cardQuip(name: string, red: boolean): string {
+  return red
+    ? pick([`🟥 ROOD! ${name} mag gaan douchen 🚿`, `🟥 ${name} vliegt eruit — dat was 'm.`, `🟥 Rode kaart voor ${name}. Domme actie.`])
+    : pick([`🟨 Geel voor ${name}. Even dimmen.`, `🟨 ${name} op de bon.`, `🟨 De ref waarschuwt ${name}.`])
+}
+const PANNA_QUIPS = ['🪄 PANNA! Door de benen — meedogenloos 💀', '🪄 Poortje! Iemand een pleister?', '🪄 PANNA! Dat doet pijn.']
+const SAVE_QUIPS = ['🧤 REDDING! Van de lijn gehaald.', '🧤 Wat een keeper!', '🧤 Gepareerd — sterk werk.']
+const STREAKER_QUIPS = ['🏃 Een veldbestormer! Beveiliging, actie!', '🏃 Wie liet die los?!', '🏃 Streaker op het veld 😳']
+const FOUL_QUIPS = ['😤 Overtreding! De ref fluit.', '🦵 Daar gaat-ie neer — vrije trap.', '😬 Dat mag niet, hoor.']
 // Loopend omgevingsgeluid (publiek / regen). Faalt stil als het bestand ontbreekt.
 function startLoop(src: string, volume: number): HTMLAudioElement | null {
   if (typeof window === 'undefined') return null
@@ -67,9 +96,9 @@ const HALF_OPTIONS = [
   { label: '5 min', sec: 300 },
 ]
 const DIFFICULTY = [
-  { label: 'Makkelijk', val: 0.35 },
-  { label: 'Normaal', val: 0.6 },
-  { label: 'Pittig', val: 0.85 },
+  { label: '🔥', val: 0.35 },
+  { label: '🔥🔥', val: 0.6 },
+  { label: '🔥🔥🔥', val: 0.85 },
 ]
 
 const RESTART_LABEL: Record<string, string> = {
@@ -81,7 +110,61 @@ const RESTART_LABEL: Record<string, string> = {
 
 const SETUP_KEY = 'kopstukken:setup:v1' // lokaal bewaarde team-setup + settings
 const RESULTS_KEY = 'kopstukken:results:v1' // lokale geschiedenis van gespeelde wedstrijden
-type MatchResult = { a: string; b: string; ca: string; cb: string; sa: number; sb: number; pens?: 0 | 1; ts: number }
+type MatchResult = {
+  a: string; b: string; ca: string; cb: string; sa: number; sb: number; pens?: 0 | 1; ts: number
+  // Uitgebreid (nieuwe wedstrijden) → voedt de Erelijst. Oude entries missen dit; val netjes terug.
+  na?: string; nb?: string // volledige teamnamen
+  you?: 0 | 1              // welke kant de mens speelde (0 = links/team A)
+  sc?: { n: string; t: 0 | 1 }[] // doelpuntenmakers (naam + team), eigen goals uitgezonderd
+  mvp?: string             // man of the match
+}
+
+// Erelijst: verdicht de lokale wedstrijdgeschiedenis tot carrière-stats vanuit JOUW perspectief.
+// Oude entries zonder `you`/`sc` vallen netjes terug (you=0, geen scorers).
+type Career = {
+  played: number; w: number; d: number; l: number; gf: number; ga: number
+  winStreak: number
+  biggest: { text: string } | null
+  topScorers: [string, number][]
+  nemesis: { name: string; l: number } | null
+}
+function computeCareer(results: MatchResult[]): Career {
+  let w = 0, d = 0, l = 0, gf = 0, ga = 0
+  let biggest: { margin: number; text: string } | null = null
+  const scorerTally = new Map<string, number>()
+  const oppTally = new Map<string, { p: number; w: number; l: number }>()
+  // Uitslag vanuit jouw kant, inclusief strafschoppen-beslissing bij gelijkspel.
+  const outcomes: ('w' | 'd' | 'l')[] = [] // in opslagvolgorde (nieuwste eerst)
+  for (const r of results) {
+    const you: 0 | 1 = r.you ?? 0
+    const mine = you === 0 ? r.sa : r.sb
+    const opp = you === 0 ? r.sb : r.sa
+    gf += mine; ga += opp
+    let res: 'w' | 'd' | 'l'
+    if (mine > opp) res = 'w'
+    else if (mine < opp) res = 'l'
+    else res = r.pens === undefined ? 'd' : (r.pens === you ? 'w' : 'l')
+    outcomes.push(res)
+    if (res === 'w') w++; else if (res === 'l') l++; else d++
+    const oppName = (you === 0 ? (r.nb ?? r.b) : (r.na ?? r.a)) || '?'
+    if (res === 'w' && (!biggest || mine - opp > biggest.margin)) biggest = { margin: mine - opp, text: `${mine}–${opp} vs ${oppName}` }
+    for (const g of r.sc ?? []) if (g.t === you) scorerTally.set(g.n, (scorerTally.get(g.n) ?? 0) + 1)
+    const o = oppTally.get(oppName) ?? { p: 0, w: 0, l: 0 }
+    o.p++; if (res === 'w') o.w++; else if (res === 'l') o.l++
+    oppTally.set(oppName, o)
+  }
+  // Langste zegereeks: chronologisch = omgekeerde opslagvolgorde.
+  let streak = 0, best = 0
+  for (let i = outcomes.length - 1; i >= 0; i--) { if (outcomes[i] === 'w') { streak++; best = Math.max(best, streak) } else streak = 0 }
+  const topScorers = [...scorerTally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+  const nemEntry = [...oppTally.entries()].filter(([, o]) => o.l > 0).sort((a, b) => b[1].l - a[1].l)[0]
+  return {
+    played: results.length, w, d, l, gf, ga, winStreak: best,
+    biggest: biggest ? { text: biggest.text } : null,
+    topScorers,
+    nemesis: nemEntry ? { name: nemEntry[0], l: nemEntry[1].l } : null,
+  }
+}
 
 const SNAPSHOT_EVERY = 3
 const GUEST_SEND_MS = 33
@@ -157,11 +240,13 @@ export default function SoccerClient() {
   const [matchTeams, setMatchTeams] = useState<[TeamMeta, TeamMeta] | null>(null)
   const [scoreFlash, setScoreFlash] = useState<[number, number] | null>(null)
   const [setpieceLabel, setSetpieceLabel] = useState<string | null>(null)
-  const [cardFlash, setCardFlash] = useState<{ red: boolean; name: string } | null>(null)
+  const [cardFlash, setCardFlash] = useState<{ red: boolean; name: string; teamName: string; n: number } | null>(null)
   const [foulFlash, setFoulFlash] = useState(false)
   const [countdown, setCountdown] = useState<number | 'GO' | null>(null)
   const [hintDone, setHintDone] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  // Commentaar-feed: korte, naam-bewuste quips die onderin oplopen en vanzelf vervagen.
+  const [commentary, setCommentary] = useState<{ id: number; text: string }[]>([])
   const [ready, setReady] = useState(false)
   const [results, setResults] = useState<MatchResult[]>([])
   const [showResults, setShowResults] = useState(false)
@@ -175,6 +260,8 @@ export default function SoccerClient() {
   const [kit, setKit] = useState<TeamColors>(() => ({ shirt: KITS[0].shirt, trim: KITS[0].trim, keeper: KITS[0].keeper }))
   const [formationId, setFormationId] = useState('2-3-1')
   const [giantBall, setGiantBall] = useState(false)
+  const [bigHeads, setBigHeads] = useState(false)
+  const [slippery, setSlippery] = useState(false)
   const [lineup, setLineup] = useState<(PoolPlayer | null)[]>(() => Array.from({ length: PLAYERS_PER_TEAM }, (_, i) => PLAYER_POOL[i % PLAYER_POOL.length]))
   // Opgepakte speler: uit de pool (from=null) of van een veldplek (from=slotindex, voor swap).
   const [picked, setPicked] = useState<{ player: PoolPlayer; from: number | null } | null>(null)
@@ -191,6 +278,8 @@ export default function SoccerClient() {
   const pausedRef = useRef<boolean>(false)
   const difficultyRef = useRef<number>(difficulty)
   const giantBallRef = useRef<boolean>(giantBall)
+  const bigHeadsRef = useRef<boolean>(bigHeads)
+  const slipperyRef = useRef<boolean>(slippery)
   const humanTeamRef = useRef<TeamId>(0)
   const overlayRef = useRef<Overlay>(null)
   const score0Ref = useRef<HTMLSpanElement | null>(null)
@@ -219,12 +308,16 @@ export default function SoccerClient() {
   const prevTackleRef = useRef<number>(0)
   const prevSaveRef = useRef<number>(0)
   const prevPannaRef = useRef<number>(0)
+  const prevBicycleRef = useRef<number>(0)
+  const slowmoUntilRef = useRef<number>(0) // performance.now() tot wanneer de sim vertraagd loopt (omhaal)
   const prevStreakerRef = useRef<boolean>(false)
   const toastTimerRef = useRef<number | null>(null)
   const goalOverlayTimerRef = useRef<number | null>(null)
   const cardTimerRef = useRef<number | null>(null)
   const prevPhaseUiRef = useRef<string | null>(null)
   const countdownTimersRef = useRef<number[]>([])
+  const commentaryIdRef = useRef<number>(0)
+  const commentaryTimersRef = useRef<number[]>([])
   const foulTimerRef = useRef<number | null>(null)
   const hydratedRef = useRef<boolean>(false)
   const venueRef = useRef<{ venue: 'stadion' | 'zaal' | 'strand' | 'sneeuw'; weather: 'clear' | 'rain' | 'snow' } | null>(null)
@@ -234,6 +327,8 @@ export default function SoccerClient() {
 
   useEffect(() => { difficultyRef.current = difficulty }, [difficulty])
   useEffect(() => { giantBallRef.current = giantBall }, [giantBall])
+  useEffect(() => { bigHeadsRef.current = bigHeads }, [bigHeads])
+  useEffect(() => { slipperyRef.current = slippery }, [slippery])
 
   // Bewaarde team-setup + settings inladen (lokaal, per apparaat). Alles wordt gevalideerd
   // tegen de huidige pool/kits/formaties zodat een oude opslag nooit kapotgaat.
@@ -258,6 +353,8 @@ export default function SoccerClient() {
         if (typeof s.halfSec === 'number' && HALF_OPTIONS.some((o) => o.sec === s.halfSec)) setHalfSec(s.halfSec)
         if (typeof s.difficulty === 'number' && DIFFICULTY.some((o) => o.val === s.difficulty)) setDifficulty(s.difficulty)
         if (typeof s.giantBall === 'boolean') setGiantBall(s.giantBall)
+        if (typeof s.bigHeads === 'boolean') setBigHeads(s.bigHeads)
+        if (typeof s.slippery === 'boolean') setSlippery(s.slippery)
       }
     } catch {
       /* corrupte opslag → gewoon de standaardwaarden */
@@ -270,11 +367,11 @@ export default function SoccerClient() {
   useEffect(() => {
     if (!hydratedRef.current) return
     try {
-      localStorage.setItem(SETUP_KEY, JSON.stringify({ teamName, kit, formationId, lineup, halfSec, difficulty, giantBall }))
+      localStorage.setItem(SETUP_KEY, JSON.stringify({ teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery }))
     } catch {
       /* private mode / quota → stil overslaan */
     }
-  }, [teamName, kit, formationId, lineup, halfSec, difficulty, giantBall])
+  }, [teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery])
 
   // Uitslagen-geschiedenis inladen (lokaal, per apparaat) — mount-time, geen hydration-mismatch.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -327,6 +424,12 @@ export default function SoccerClient() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
+  // Geluiden + kaart-afbeeldingen voorladen → geen vertraging/blanco beeld bij de eerste kaart.
+  useEffect(() => {
+    for (const src of [...GOAL_SOUNDS, ...KICK_SOUNDS, ...WHISTLE_SOUNDS, ...TACKLE_SOUNDS, ...YELLOWCARD_SOUNDS, ...REDCARD_SOUNDS]) primeSound(src)
+    for (const src of ['/spelers/ref-yellow.png', '/spelers/ref-red.png']) { const im = new window.Image(); im.src = src }
+  }, [])
+
   const resizeRenderer = useCallback(() => {
     const wrap = wrapRef.current
     const r = rendererRef.current
@@ -374,6 +477,14 @@ export default function SoccerClient() {
     }
   }, [updateHud])
 
+  // Voeg een commentaar-regel toe (max 3 zichtbaar, elk ~4,6s) — naam-bewuste match-narratie.
+  const pushComment = useCallback((text: string) => {
+    const id = ++commentaryIdRef.current
+    setCommentary((cur) => [...cur, { id, text }].slice(-3))
+    const t = window.setTimeout(() => setCommentary((cur) => cur.filter((c) => c.id !== id)), 4600)
+    commentaryTimersRef.current.push(t)
+  }, [])
+
   const syncOverlay = useCallback((s: GameState) => {
     // Set-piece-label (ingooi/hoekschop/doeltrap/vrije trap) tijdens de setpiece-fase.
     const rk = s.phase === 'setpiece' ? s.restartKind : null
@@ -397,7 +508,8 @@ export default function SoccerClient() {
         cardJustAdded = true
         const c = s.cards[s.cards.length - 1]
         cardHoldMs = c.red ? 4500 : 5000
-        setCardFlash({ red: c.red, name: s.players[c.player]?.name ?? '' })
+        setCardFlash({ red: c.red, name: s.players[c.player]?.name ?? '', teamName: s.teams[c.team]?.name ?? '', n: s.cards.length })
+        pushComment(cardQuip(s.players[c.player]?.name ?? 'iemand', c.red))
         playSound(c.red ? REDCARD_SOUNDS : YELLOWCARD_SOUNDS, 0.75)
         if (cardTimerRef.current) clearTimeout(cardTimerRef.current)
         cardTimerRef.current = window.setTimeout(() => setCardFlash(null), cardHoldMs)
@@ -410,6 +522,7 @@ export default function SoccerClient() {
       prevFoulRef.current = s.foulCount
       if (increased) {
         setFoulFlash(true)
+        if (!cardJustAdded) pushComment(pick(FOUL_QUIPS)) // bij een kaart praat de kaart-quip al
         playSound(WHISTLE_SOUNDS, 0.6)
         if (roleRef.current !== 'guest') pausedRef.current = true
         if (foulTimerRef.current) clearTimeout(foulTimerRef.current)
@@ -432,6 +545,7 @@ export default function SoccerClient() {
       prevSaveRef.current = s.saveCount
       if (more) {
         setToast('Wat een redding! 🧤')
+        pushComment(pick(SAVE_QUIPS))
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
         toastTimerRef.current = window.setTimeout(() => setToast(null), 1600)
       }
@@ -442,6 +556,7 @@ export default function SoccerClient() {
       prevStreakerRef.current = hasStreaker
       if (hasStreaker) {
         setToast('🏃 Veldbestormer!')
+        pushComment(pick(STREAKER_QUIPS))
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
         toastTimerRef.current = window.setTimeout(() => setToast(null), 2000)
       }
@@ -452,8 +567,21 @@ export default function SoccerClient() {
       prevPannaRef.current = s.pannaCount
       if (more) {
         setToast('PANNA! 🪄')
+        pushComment(pick(PANNA_QUIPS))
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
         toastTimerRef.current = window.setTimeout(() => setToast(null), 1600)
+      }
+    }
+    // Omhaal → korte slow-motion + "OMHAAL!"-popup (client vertraagt de sim heel even).
+    if (s.bicycleCount !== prevBicycleRef.current) {
+      const more = s.bicycleCount > prevBicycleRef.current
+      prevBicycleRef.current = s.bicycleCount
+      if (more && roleRef.current !== 'guest') {
+        slowmoUntilRef.current = performance.now() + SLOWMO_TIME * 1000
+        setToast('🚲 OMHAAL!')
+        pushComment('🚲 OMHAAL! Wat een actie!')
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+        toastTimerRef.current = window.setTimeout(() => setToast(null), 1800)
       }
     }
     // Fase-overgangen: aftel-animatie bij (her)start, korte overtredings-flits bij een vrije trap,
@@ -493,7 +621,8 @@ export default function SoccerClient() {
     if (desired === 'goal') {
       const g = s.goals[s.goals.length - 1]
       const p = g && g.scorer >= 0 ? s.players[g.scorer] : null
-      setGoalInfo(g ? { name: p?.name ?? '', face: p?.face ?? null, team: g.team, ownGoal: g.ownGoal, color: s.teams[g.team].shirt, kind: s.lastGoalKind } : null)
+      setGoalInfo(g ? { name: p?.name ?? '', teamName: s.teams[g.team]?.name ?? '', face: p?.face ?? null, team: g.team, ownGoal: g.ownGoal, color: s.teams[g.team].shirt, kind: s.lastGoalKind } : null)
+      if (g) pushComment(goalQuip(p?.name ?? 'Iemand', s.teams[g.team]?.name ?? 'het team', g.ownGoal ? 'owngoal' : s.lastGoalKind))
       playSound(GOAL_SOUNDS)
       // Eerst een korte on-pitch viering laten zien; dan pas het full-screen goalscherm.
       if (goalOverlayTimerRef.current) clearTimeout(goalOverlayTimerRef.current)
@@ -514,14 +643,19 @@ export default function SoccerClient() {
         clock: s.halfLengthSec > 0 ? Math.min(45, (g.clock / s.halfLengthSec) * 45) * 60 : g.clock,
         half: g.half,
       }))
-      // Man of the Match (bij einde): speler met de meeste (echte) goals.
-      let motm: string | undefined
+      // Man of the Match (bij einde): speler met de meeste (echte) goals + een speels lijntje.
+      let motm: Mvp | undefined
       if (desired === 'fulltime') {
         const tally: Record<number, number> = {}
         for (const g of s.goals) if (!g.ownGoal && g.scorer >= 0) tally[g.scorer] = (tally[g.scorer] ?? 0) + 1
         let bestId = -1, bestN = 0
         for (const [id, n] of Object.entries(tally)) if (n > bestN) { bestN = n; bestId = Number(id) }
-        if (bestId >= 0) motm = `${s.players[bestId]?.name ?? '?'} (${bestN})`
+        if (bestId >= 0) {
+          const pl = s.players[bestId]
+          const tag = PLAYER_POOL.find((pp) => pp.face === pl?.face)?.tag
+          const praise = bestN >= 3 ? 'hattrick-held 🎩' : bestN >= 2 ? 'onhoudbaar 🔥' : 'clinical'
+          motm = { name: pl?.name ?? '?', face: pl?.face ?? null, team: pl?.team ?? 0, line: `${bestN} goal${bestN > 1 ? 's' : ''} · ${tag ?? praise}` }
+        }
       }
       // Post-match stats (alleen op het eindscherm).
       let matchStats: MatchStats | undefined
@@ -548,7 +682,13 @@ export default function SoccerClient() {
       // Uitslag vastleggen (één keer per wedstrijd, lokaal bewaard).
       if (desired === 'fulltime' && !matchRecordedRef.current) {
         matchRecordedRef.current = true
-        const entry: MatchResult = { a: s.teams[0].short, b: s.teams[1].short, ca: s.teams[0].shirt, cb: s.teams[1].shirt, sa: s.score[0], sb: s.score[1], ts: Date.now() }
+        const entry: MatchResult = {
+          a: s.teams[0].short, b: s.teams[1].short, ca: s.teams[0].shirt, cb: s.teams[1].shirt,
+          sa: s.score[0], sb: s.score[1], ts: Date.now(),
+          na: s.teams[0].name, nb: s.teams[1].name, you: humanTeamRef.current,
+          sc: scorers.filter((g) => !g.ownGoal).map((g) => ({ n: g.name, t: g.team })),
+          mvp: motm?.name,
+        }
         setResults((prev) => {
           const next = [entry, ...prev].slice(0, 40)
           try { localStorage.setItem(RESULTS_KEY, JSON.stringify(next)) } catch { /* quota */ }
@@ -556,7 +696,7 @@ export default function SoccerClient() {
         })
       }
     }
-  }, [])
+  }, [pushComment])
 
   const advance = useCallback((frameDt: number) => {
     const s = stateRef.current
@@ -599,7 +739,9 @@ export default function SoccerClient() {
     if (manualHoldRef.current > 0) manualHoldRef.current = Math.max(0, manualHoldRef.current - frameDt)
 
     if (!pausedRef.current) {
-      accRef.current += frameDt
+      // Slow-motion na een omhaal: minder sim-tijd per frame → alles beweegt heel even vertraagd.
+      const slow = performance.now() < slowmoUntilRef.current
+      accRef.current += frameDt * (slow ? 0.3 : 1)
       let steps = 0
       while (accRef.current >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
         // Online: AI-teamgenoten altijd op 'Normaal' (geen difficulty-keuze in 1v1).
@@ -635,7 +777,7 @@ export default function SoccerClient() {
 
   // Match starten met concrete team-configs. `cosmetic` = venue/weer opgelegd door de host
   // (voor de gast); zonder → zelf willekeurig kiezen (lokaal/host).
-  const beginMatch = useCallback((r: Role, metas: [TeamMeta, TeamMeta], hs: number, cosmetic?: { venue: 'stadion' | 'zaal' | 'strand' | 'sneeuw'; weather: 'clear' | 'rain' | 'snow'; ballScale?: number }) => {
+  const beginMatch = useCallback((r: Role, metas: [TeamMeta, TeamMeta], hs: number, cosmetic?: { venue: 'stadion' | 'zaal' | 'strand' | 'sneeuw'; weather: 'clear' | 'rain' | 'snow'; ballScale?: number; bigHeads?: boolean; slippery?: boolean }) => {
     const humanTeam: TeamId = r === 'guest' ? 1 : 0
     roleRef.current = r
     setRole(r)
@@ -651,7 +793,7 @@ export default function SoccerClient() {
     } else {
       const VENUES = ['stadion', 'stadion', 'strand', 'zaal', 'sneeuw'] as const
       venue = VENUES[Math.floor(Math.random() * VENUES.length)]
-      weather = venue === 'sneeuw' ? 'snow' : (venue !== 'zaal' && Math.random() < 0.3 ? 'rain' : 'clear')
+      weather = venue === 'sneeuw' ? 'snow' : (venue !== 'zaal' && Math.random() < 0.4 ? 'rain' : 'clear')
     }
     s.surface = venue === 'zaal' ? 'zaal' : venue === 'strand' ? 'strand' : venue === 'sneeuw' ? 'sneeuw' : 'gras'
     // Wind: volledig willekeurig van richting én kracht — meestal mild, maar met pech flink
@@ -659,7 +801,13 @@ export default function SoccerClient() {
     const windMag = r === 'guest' || venue === 'zaal' ? 0 : Math.pow(Math.random(), 1.7) * 150
     const wa = Math.random() * Math.PI * 2
     s.wind = { x: Math.cos(wa) * windMag, y: Math.sin(wa) * windMag }
+    // Startweer + windvlaag-doel; daarna verandert het weer dynamisch tijdens het spel (sim).
+    s.weather = weather
+    s.windTarget = { x: s.wind.x, y: s.wind.y }
+    s.weatherTimer = 5 + Math.random() * 6
     s.ballScale = cosmetic ? (cosmetic.ballScale ?? 1) : (giantBallRef.current ? 2 : 1)
+    s.bigHeads = cosmetic ? !!cosmetic.bigHeads : bigHeadsRef.current
+    s.slippery = cosmetic ? !!cosmetic.slippery : slipperyRef.current
     venueRef.current = { venue, weather }
     placeForKickoff(s, s.kickoffTeam)
     controlledRef.current = r === 'guest' ? -1 : nearestTeammateToBall(s, humanTeam)
@@ -679,10 +827,15 @@ export default function SoccerClient() {
     prevTackleRef.current = 0
     prevSaveRef.current = 0
     prevPannaRef.current = 0
+    prevBicycleRef.current = 0
+    slowmoUntilRef.current = 0
     prevStreakerRef.current = false
     matchRecordedRef.current = false
     setPaused(false)
     setToast(null)
+    setCommentary([])
+    commentaryTimersRef.current.forEach((t) => clearTimeout(t))
+    commentaryTimersRef.current = []
     setCardFlash(null)
     if (cardTimerRef.current) clearTimeout(cardTimerRef.current)
     // Aftel-/hint-/overtredings-state resetten voor de nieuwe wedstrijd.
@@ -739,7 +892,7 @@ export default function SoccerClient() {
   const startHostMatch = useCallback((teams: [TeamMeta, TeamMeta], hs: number) => {
     if (stateRef.current) return
     beginMatch('host', teams, hs) // kiest venue/weer (zet venueRef) → daarna naar de gast sturen
-    netRef.current?.sendStart({ teams, halfSec: hs, venue: venueRef.current?.venue, weather: venueRef.current?.weather, ballScale: giantBallRef.current ? 2 : 1 })
+    netRef.current?.sendStart({ teams, halfSec: hs, venue: venueRef.current?.venue, weather: venueRef.current?.weather, ballScale: giantBallRef.current ? 2 : 1, bigHeads: bigHeadsRef.current, slippery: slipperyRef.current })
   }, [beginMatch])
 
   const hostGame = () => {
@@ -770,10 +923,10 @@ export default function SoccerClient() {
     setLobby('joining')
     setNetMsg('Verbinden…')
     startedGuestRef.current = false
-    const enterGuest = (payload: { teams: [TeamMeta, TeamMeta]; halfSec: number; venue?: 'stadion' | 'zaal' | 'strand' | 'sneeuw'; weather?: 'clear' | 'rain' | 'snow'; ballScale?: number }) => {
+    const enterGuest = (payload: { teams: [TeamMeta, TeamMeta]; halfSec: number; venue?: 'stadion' | 'zaal' | 'strand' | 'sneeuw'; weather?: 'clear' | 'rain' | 'snow'; ballScale?: number; bigHeads?: boolean; slippery?: boolean }) => {
       if (startedGuestRef.current) return
       startedGuestRef.current = true
-      const cosmetic = payload.venue && payload.weather ? { venue: payload.venue, weather: payload.weather, ballScale: payload.ballScale ?? 1 } : undefined
+      const cosmetic = payload.venue && payload.weather ? { venue: payload.venue, weather: payload.weather, ballScale: payload.ballScale ?? 1, bigHeads: payload.bigHeads, slippery: payload.slippery } : undefined
       beginMatch('guest', payload.teams, payload.halfSec, cosmetic)
     }
     const net = new SoccerNet('guest', code, {
@@ -904,7 +1057,7 @@ export default function SoccerClient() {
             {results.length > 0 && (
               <button onClick={() => setShowResults(true)}
                 className="absolute left-10 top-1/2 -translate-y-1/2 rounded-full border border-white/15 bg-wk-surface/70 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-wk-soft hover:border-white/35 hover:text-wk-text">
-                🏆 Uitslagen ({results.length})
+                🏆 Erelijst ({results.length})
               </button>
             )}
           </header>
@@ -913,9 +1066,45 @@ export default function SoccerClient() {
             <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-6" onClick={() => setShowResults(false)}>
               <div className="flex max-h-[80vh] w-full max-w-md flex-col rounded-2xl border border-white/12 bg-wk-surface p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
                 <div className="mb-3 flex items-center justify-between">
-                  <h2 className="font-display text-lg uppercase tracking-[0.14em] text-wk-text">Uitslagen</h2>
+                  <h2 className="font-display text-lg uppercase tracking-[0.14em] text-wk-text">Erelijst</h2>
                   <button onClick={() => setShowResults(false)} className="font-mono text-[11px] uppercase tracking-widest text-wk-muted hover:text-wk-text">Sluiten ✕</button>
                 </div>
+                {(() => {
+                  const c = computeCareer(results)
+                  return (
+                    <div className="mb-3 shrink-0 space-y-2">
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <StatCell label="Gespeeld" value={c.played} />
+                        <StatCell label="Winst" value={c.w} tone="text-wk-green" />
+                        <StatCell label="Gelijk" value={c.d} tone="text-wk-gold" />
+                        <StatCell label="Verlies" value={c.l} tone="text-wk-red" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <StatCell label="Voor / Tegen" value={`${c.gf}–${c.ga}`} />
+                        <StatCell label="Zegereeks" value={c.winStreak} tone="text-wk-green" />
+                        <StatCell label="Grootste zege" value={c.biggest?.text ?? '—'} />
+                      </div>
+                      {c.topScorers.length > 0 && (
+                        <div className="rounded-lg bg-wk-bg2/60 px-3 py-2">
+                          <p className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-wk-muted">⚽ Topscorers (jouw teams)</p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                            {c.topScorers.map(([name, n], i) => (
+                              <span key={name} className="font-mono text-[11px] text-wk-soft">
+                                <span className="text-wk-gold">{i + 1}.</span> {name} <span className="text-wk-muted">({n})</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {c.nemesis && (
+                        <p className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-wk-muted">
+                          😤 Angstgegner: <span className="text-wk-red">{c.nemesis.name}</span> ({c.nemesis.l}× verloren)
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
+                <p className="mb-1.5 shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-wk-muted">Wedstrijden</p>
                 <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto scrollbar-none">
                   {results.map((r, i) => (
                     <div key={i} className="flex items-center gap-3 rounded-lg bg-wk-bg2/60 px-3 py-2">
@@ -960,7 +1149,7 @@ export default function SoccerClient() {
                   <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto scrollbar-none pr-0.5">
                     <Field label="Teamnaam">
                       <input value={teamName} onChange={(e) => setTeamName(e.target.value.slice(0, 18))} placeholder="bijv. Padel Kings"
-                        className="w-full rounded-xl border border-white/15 bg-wk-bg2 px-4 py-2.5 font-display text-lg uppercase tracking-wide text-wk-text outline-none focus:border-wk-gold" />
+                        className="w-full rounded-xl border border-white/15 bg-wk-bg2 px-4 py-2.5 font-score text-2xl uppercase tracking-[0.08em] text-wk-text outline-none placeholder:font-mono placeholder:text-sm placeholder:tracking-normal placeholder:normal-case placeholder:text-wk-muted focus:border-wk-gold" />
                     </Field>
                     <Field label="Tenue">
                       <div className="flex flex-wrap gap-2.5">
@@ -1032,12 +1221,13 @@ export default function SoccerClient() {
                         {picked ? <span className="text-wk-gold">{picked.player.name} → {picked.from === null ? 'klik een plek' : 'klik een plek om te wisselen'}</span> : 'Klik een speler of veldplek'}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-5 justify-items-center gap-2">
                       {PLAYER_POOL.map((p) => {
                         const inTeam = lineup.some((l) => l?.face === p.face)
                         const isPicked = picked?.player.face === p.face && picked.from === null
                         return (
-                          <button key={p.face} onClick={() => setPicked(isPicked ? null : { player: p, from: null })} title={p.name}
+                          <button key={p.face} onClick={() => setPicked(isPicked ? null : { player: p, from: null })}
+                            title={`${p.name} — ${p.tag}\nSnelheid ${p.traits.pace}/5 · Schot ${p.traits.shot}/5 · Tackle ${p.traits.tackle}/5`}
                             className="group flex flex-col items-center">
                             <span className={`relative block h-12 w-12 overflow-hidden rounded-full border-2 transition ${isPicked ? 'scale-110 border-wk-gold ring-2 ring-wk-gold/50' : inTeam ? 'border-wk-gold/60' : 'border-white/15 opacity-80 group-hover:opacity-100'}`}>
                               <Image src={`/spelers/${p.face}`} alt={p.name} width={48} height={48} className="h-full w-full object-cover" />
@@ -1046,6 +1236,7 @@ export default function SoccerClient() {
                               )}
                             </span>
                             <span className="mt-1 max-w-[52px] truncate font-mono text-[9px] uppercase tracking-wide text-wk-soft">{p.name}</span>
+                            <span className="max-w-[52px] truncate font-mono text-[8px] uppercase tracking-wide text-wk-gold/70">{p.tag}</span>
                           </button>
                         )
                       })}
@@ -1060,20 +1251,30 @@ export default function SoccerClient() {
                     <div className="flex flex-1 flex-col gap-5">
                       <Field label="Helft"><Segmented options={HALF_OPTIONS.map((o) => o.label)} value={HALF_OPTIONS.findIndex((o) => o.sec === halfSec)} onChange={(i) => setHalfSec(HALF_OPTIONS[i].sec)} /></Field>
                       {mode === 'local' && (
-                        <Field label="Moeilijkheid"><Segmented vertical options={DIFFICULTY.map((o) => o.label)} value={DIFFICULTY.findIndex((o) => o.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} /></Field>
+                        <Field label="Moeilijkheid"><Segmented options={DIFFICULTY.map((o) => o.label)} value={DIFFICULTY.findIndex((o) => o.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} /></Field>
                       )}
                       <Field label="Bal"><Segmented options={['Normaal', '⚽ Giant']} value={giantBall ? 1 : 0} onChange={(i) => setGiantBall(i === 1)} /></Field>
+                      {mode !== 'penalty' && (
+                        <Field label="Chaos">
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setBigHeads(!bigHeads)}
+                              className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${bigHeads ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>🗿 Grote koppen</button>
+                            <button type="button" onClick={() => setSlippery(!slippery)}
+                              className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${slippery ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>⛸️ Gladde mat</button>
+                          </div>
+                        </Field>
+                      )}
 
                       <div className="mt-auto space-y-3 pt-4">
                         {mode === 'penalty' ? (
                           <>
                             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">Serie strafschoppen vs. de computer</p>
-                            <button onClick={startPenalties} className={`${btn} w-full !py-4 !text-lg`}>Start penalty&apos;s 🧤</button>
+                            <button onClick={startPenalties} className={`${btnCool} w-full py-4 text-3xl`}>Penalty&apos;s 🧤</button>
                           </>
                         ) : mode === 'local' ? (
                           <>
                             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">Tegenstander: willekeurig land</p>
-                            <button onClick={startLocal} className={`${btn} w-full !py-4 !text-lg`}>Aftrap →</button>
+                            <button onClick={startLocal} className={`${btnCool} w-full py-4 text-3xl`}>Aftrap →</button>
                           </>
                         ) : (
                           <>
@@ -1136,11 +1337,11 @@ export default function SoccerClient() {
               <div className="relative flex items-center gap-2 bg-[#12151c] px-3 py-2">
                 {matchTeams[0].flag && <span className="text-base leading-none">{matchTeams[0].flag}</span>}
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: matchTeams[0].shirt }} />
-                <span className="text-sm uppercase tracking-wide text-white">{matchTeams[0].short}</span>
+                <span className="font-score text-base uppercase leading-none tracking-[0.02em] text-white">{matchTeams[0].short}</span>
                 <span ref={score0Ref} className="ml-1 inline-block min-w-[0.85em] text-center font-score text-xl leading-none text-white tabular-nums">0</span>
                 <span className="mx-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-wk-gold text-[13px] leading-none shadow-inner">⚽</span>
                 <span ref={score1Ref} className="mr-1 inline-block min-w-[0.85em] text-center font-score text-xl leading-none text-white tabular-nums">0</span>
-                <span className="text-sm uppercase tracking-wide text-white">{matchTeams[1].short}</span>
+                <span className="font-score text-base uppercase leading-none tracking-[0.02em] text-white">{matchTeams[1].short}</span>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: matchTeams[1].shirt }} />
                 {matchTeams[1].flag && <span className="text-base leading-none">{matchTeams[1].flag}</span>}
                 {/* team-gekleurde accentlijn onderaan */}
@@ -1191,8 +1392,20 @@ export default function SoccerClient() {
 
           {/* Commentaar-popup (bijv. "Wat een redding!") */}
           {overlay === null && !setpieceLabel && toast && (
-            <div className="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2" style={{ animation: 'goal-pop 0.4s cubic-bezier(0.2,1.5,0.4,1) both' }}>
-              <span className="rounded-full bg-wk-gold px-5 py-2 font-display text-lg uppercase tracking-wide text-wk-bg shadow-[0_6px_24px_rgba(0,0,0,0.5)]">{toast}</span>
+            <div className="pointer-events-none absolute top-20 left-1/2 -translate-x-1/2" style={{ animation: 'goal-pop 0.4s cubic-bezier(0.2,1.5,0.4,1) both' }}>
+              <span className="block font-score text-5xl sm:text-6xl uppercase tracking-[0.04em] text-wk-gold text-center drop-shadow-[0_3px_0_rgba(0,0,0,0.55)] [text-shadow:0_0_22px_rgba(244,185,46,0.55)]">{toast}</span>
+            </div>
+          )}
+
+          {/* Commentaar-feed: laatste 3 quips, oplopend, links onderin */}
+          {commentary.length > 0 && (
+            <div className="pointer-events-none absolute bottom-20 left-4 flex max-w-[62%] flex-col gap-1.5 sm:max-w-sm">
+              {commentary.map((c) => (
+                <span key={c.id} className="w-fit rounded-lg border border-white/10 bg-black/65 px-3 py-1.5 text-sm font-medium text-white shadow-lg backdrop-blur-sm"
+                  style={{ animation: 'goal-pop 0.35s cubic-bezier(0.2,1.4,0.4,1) both' }}>
+                  {c.text}
+                </span>
+              ))}
             </div>
           )}
 
@@ -1211,7 +1424,7 @@ export default function SoccerClient() {
           )}
 
           {/* Kaart-animatie (langer + cooler dan een normale overtreding) */}
-          {cardFlash && <CardCelebration key={cardFlash.red ? 'red' : 'yellow'} card={cardFlash} />}
+          {cardFlash && <CardCelebration key={`${cardFlash.red ? 'red' : 'yellow'}-${cardFlash.n}`} card={cardFlash} />}
 
           {/* Aftellen 3-2-1-GO voor de aftrap */}
           {countdown !== null && <Countdown value={countdown} />}
@@ -1282,6 +1495,8 @@ export default function SoccerClient() {
 // ── UI-fragmenten ────────────────────────────────────────────────────────────
 const btn = 'font-display text-base uppercase tracking-wide px-7 py-2.5 rounded-full bg-wk-gold text-wk-bg hover:brightness-110 active:scale-95 transition cursor-pointer'
 const btnGhost = 'font-display text-base uppercase tracking-wide px-6 py-2.5 rounded-full border border-white/20 text-wk-soft hover:text-wk-text hover:border-white/40 transition cursor-pointer'
+// Stoere primaire CTA (aftrap/penalty): scorebord-font, groter, met lichte gloed.
+const btnCool = 'font-score uppercase tracking-[0.1em] rounded-full bg-wk-gold text-wk-bg shadow-[0_6px_24px_rgba(244,185,46,0.35)] hover:brightness-110 active:scale-95 transition cursor-pointer'
 
 // Veld met de opstelling: klikbare posities uit de gekozen formatie (jouw kant).
 function FormationPitch({
@@ -1295,7 +1510,7 @@ function FormationPitch({
 }) {
   const slots = formationById(formationId).slots
   return (
-    <div className="relative aspect-[16/10] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/15 shadow-2xl ring-1 ring-black/30"
+    <div className="relative aspect-[16/8] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/15 shadow-2xl ring-1 ring-black/30"
       style={{ background: 'repeating-linear-gradient(90deg,#1f7a37 0 8%,#237e3b 8% 16%)' }}>
       {/* lichtval + vignette voor diepte */}
       <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(120% 90% at 30% 20%, rgba(255,255,255,0.10), transparent 55%)' }} />
@@ -1354,11 +1569,11 @@ function LoadingScreen({ teams }: { teams: [TeamMeta, TeamMeta] }) {
     <div className="absolute inset-0 z-[75] flex flex-col items-center justify-center gap-6 bg-wk-bg px-6">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-2 font-display text-base uppercase tracking-wide text-white sm:text-lg">
-          <span className="h-3 w-3 rounded-full" style={{ background: teams[0].shirt }} />{teams[0].name}{teams[0].flag && <span>{teams[0].flag}</span>}
+          <TeamCrest short={teams[0].short} shirt={teams[0].shirt} trim={teams[0].trim} size={34} />{teams[0].name}{teams[0].flag && <span>{teams[0].flag}</span>}
         </span>
         <span className="font-score text-2xl uppercase tracking-widest text-wk-muted">vs</span>
         <span className="flex items-center gap-2 font-display text-base uppercase tracking-wide text-white sm:text-lg">
-          {teams[1].flag && <span>{teams[1].flag}</span>}{teams[1].name}<span className="h-3 w-3 rounded-full" style={{ background: teams[1].shirt }} />
+          {teams[1].flag && <span>{teams[1].flag}</span>}{teams[1].name}<TeamCrest short={teams[1].short} shirt={teams[1].shirt} trim={teams[1].trim} size={34} />
         </span>
       </div>
       {/* mini-veld: opstellingen op positie, tegenover elkaar */}
@@ -1396,7 +1611,7 @@ function Countdown({ value }: { value: number | 'GO' }) {
 }
 
 // Kaart-animatie — full-screen, langer/coole dan een normale overtreding.
-function CardCelebration({ card }: { card: { red: boolean; name: string } }) {
+function CardCelebration({ card }: { card: { red: boolean; name: string; teamName: string; n: number } }) {
   const col = card.red ? '#E11D2E' : '#F5C518'
   // Optionele scheids-afbeelding (kaart omhoog); valt terug op een getekende kaart als 't bestand ontbreekt.
   const [imgFailed, setImgFailed] = useState(false)
@@ -1429,6 +1644,11 @@ function CardCelebration({ card }: { card: { red: boolean; name: string } }) {
         {card.name && (
           <p className="font-score text-3xl sm:text-4xl uppercase tracking-wide text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]" style={{ animation: 'goal-rise 0.5s ease-out 0.12s both' }}>
             {card.name}
+          </p>
+        )}
+        {card.teamName && (
+          <p className="font-mono text-sm uppercase tracking-[0.24em] text-white/70 drop-shadow" style={{ animation: 'goal-rise 0.5s ease-out 0.2s both' }}>
+            {card.teamName}
           </p>
         )}
       </div>
@@ -1637,6 +1857,11 @@ function GoalCelebration({ info }: { info: GoalInfo | null }) {
             {info.ownGoal && <span className="text-white/70 text-2xl"> (e.o.)</span>}
           </p>
         )}
+        {info?.teamName && (
+          <p className="font-mono text-sm uppercase tracking-[0.24em] text-white/70 drop-shadow" style={{ animation: 'goal-rise 0.5s ease-out 0.2s both' }}>
+            {info.teamName}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -1664,20 +1889,33 @@ function BreakPanel({ info, teams, children }: { info: PanelInfo; teams: [TeamMe
           <h2 className="font-score text-7xl uppercase leading-[0.9] tracking-tight text-white drop-shadow-[0_4px_28px_rgba(0,0,0,0.85)] sm:text-8xl">{info.title}</h2>
         </div>
         {/* strakke score-strip — team-codes wit (kleur zit in de stip) voor leesbaarheid */}
-        <div className="flex items-center gap-4 rounded-2xl bg-black/45 px-6 py-3 ring-1 ring-white/15">
-          <span className="flex items-center gap-2 font-display text-lg uppercase tracking-wide text-white">
-            <span className="h-3.5 w-3.5 rounded-full ring-1 ring-white/40" style={{ background: teams[0].shirt }} />{teams[0].short}
+        <div className="flex items-center gap-4 rounded-2xl bg-black/45 px-6 py-4 ring-1 ring-white/15">
+          <span className="flex items-center gap-2 font-score text-2xl uppercase leading-none tracking-[0.02em] text-white">
+            <TeamCrest short={teams[0].short} shirt={teams[0].shirt} trim={teams[0].trim} size={30} />{teams[0].short}
           </span>
-          <span className="font-score text-5xl leading-none text-white tabular-nums">{info.score[0]}<span className="mx-2 text-white/60">:</span>{info.score[1]}</span>
-          <span className="flex items-center gap-2 font-display text-lg uppercase tracking-wide text-white">
-            {teams[1].short}<span className="h-3.5 w-3.5 rounded-full ring-1 ring-white/40" style={{ background: teams[1].shirt }} />
+          <span className="font-score text-5xl leading-none tracking-tight text-white tabular-nums">{info.score[0]}<span className="mx-2 text-white/60">:</span>{info.score[1]}</span>
+          <span className="flex items-center gap-2 font-score text-2xl uppercase leading-none tracking-[0.02em] text-white">
+            {teams[1].short}<TeamCrest short={teams[1].short} shirt={teams[1].shirt} trim={teams[1].trim} size={30} />
           </span>
         </div>
-        {(resultTxt || info.note || info.motm) && (
+        {(resultTxt || info.note) && (
           <div className="flex flex-wrap items-center justify-center gap-2">
             {resultTxt && <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-wk-soft">{resultTxt}</span>}
             {info.note && <span className="rounded-full bg-wk-gold/15 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-wk-gold">{info.note}</span>}
-            {info.motm && <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-wk-soft">★ MOTM: <span className="text-wk-gold">{info.motm}</span></span>}
+          </div>
+        )}
+        {/* MVP-kaart: topscorer met foto + speels lijntje */}
+        {info.motm && (
+          <div className="flex items-center gap-4 rounded-2xl bg-black/45 px-5 py-3 ring-1 ring-wk-gold/40"
+            style={{ animation: 'goal-pop 0.5s cubic-bezier(0.2,1.5,0.4,1) both' }}>
+            <span className="relative block h-14 w-14 shrink-0 overflow-hidden rounded-full ring-2" style={{ boxShadow: `0 0 0 2px ${teams[info.motm.team].shirt}` }}>
+              <Image src={`/spelers/${info.motm.face ?? 'default.png'}`} alt={info.motm.name} width={56} height={56} className="h-full w-full object-cover" />
+            </span>
+            <div className="text-left">
+              <span className="font-mono text-[10px] uppercase tracking-[0.32em] text-wk-gold/90">★ Man of the Match</span>
+              <p className="font-display text-xl uppercase leading-tight text-white">{info.motm.name}</p>
+              <p className="font-mono text-[11px] uppercase tracking-wide text-wk-soft">{info.motm.line}</p>
+            </div>
           </div>
         )}
         <div className="grid w-full grid-cols-2 gap-6 pt-1">
@@ -1717,6 +1955,36 @@ function BreakPanel({ info, teams, children }: { info: PanelInfo; teams: [TeamMe
         )}
         <div className="pt-2">{children}</div>
       </div>
+    </div>
+  )
+}
+
+// Contrast-kleur (wit/donker) op basis van de helderheid van een hex-kleur.
+function contrastOn(hex: string): string {
+  const h = hex.replace('#', '')
+  const s = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
+  const n = parseInt(s || '000000', 16)
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#111418' : '#ffffff'
+}
+
+// Procedureel teamwapen: schild in de shirtkleur met de teamcode. Geeft elk team een identiteit.
+function TeamCrest({ short, shirt, trim, size = 40 }: { short: string; shirt: string; trim: string; size?: number }) {
+  const txt = contrastOn(shirt)
+  return (
+    <svg width={size} height={size * 1.1} viewBox="0 0 40 44" aria-hidden className="shrink-0 drop-shadow">
+      <path d="M20 2 L37 8 V21 C37 33 29 40 20 43 C11 40 3 33 3 21 V8 Z" fill={shirt} stroke={trim} strokeWidth="2.5" strokeLinejoin="round" />
+      <path d="M3 15 H37" stroke={trim} strokeWidth="1.4" opacity="0.55" />
+      <text x="20" y="29" textAnchor="middle" fontSize="12" fontWeight="900" fontFamily="Arial, sans-serif" fill={txt} letterSpacing="0.5">{short.slice(0, 3)}</text>
+    </svg>
+  )
+}
+
+function StatCell({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+  return (
+    <div className="flex flex-col items-center rounded-lg bg-wk-bg2/60 px-2 py-2">
+      <span className={`font-score text-xl leading-none tabular-nums ${tone ?? 'text-wk-text'}`}>{value}</span>
+      <span className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-wk-muted">{label}</span>
     </div>
   )
 }

@@ -22,6 +22,8 @@ export type StartPayload = {
   venue?: 'stadion' | 'zaal' | 'strand' | 'sneeuw'
   weather?: 'clear' | 'rain' | 'snow'
   ballScale?: number
+  bigHeads?: boolean
+  slippery?: boolean
 }
 
 // Compacte snapshot (afgeronde ints om bandbreedte te sparen).
@@ -163,7 +165,7 @@ export function lerpSnapshotInto(target: GameState, a: Snapshot, b: Snapshot, al
     const both = a.sk.length >= 2
     const sx = both ? a.sk[0] + (b.sk[0] - a.sk[0]) * t : b.sk[0]
     const sy = both ? a.sk[1] + (b.sk[1] - a.sk[1]) * t : b.sk[1]
-    target.streaker = { pos: { x: sx, y: sy }, vel: { x: 0, y: 0 }, target: { x: b.sk[0], y: b.sk[1] }, timer: 0, variant: (b.sk[2] === 1 ? 1 : 0), caught: false }
+    target.streaker = { pos: { x: sx, y: sy }, vel: { x: 0, y: 0 }, target: { x: b.sk[0], y: b.sk[1] }, timer: 0, variant: (b.sk[2] === 2 ? 2 : b.sk[2] === 1 ? 1 : 0), caught: false }
   } else {
     target.streaker = null
   }

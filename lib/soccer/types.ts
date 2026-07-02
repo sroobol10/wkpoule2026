@@ -5,6 +5,10 @@ export type TeamId = 0 | 1
 // Rollen bepalen formatie-ankers en AI-gedrag.
 export type Role = 'GK' | 'DEF' | 'MID' | 'FWD'
 
+// Per-speler eigenschappen op een 1..5-schaal (3 = gemiddeld). Bepalen kleine multipliers
+// in de sim zodat elke collega net anders speelt (snel/schutter/sloper).
+export type PlayerTraits = { pace: number; shot: number; tackle: number }
+
 export type PlayerState = {
   id: number
   team: TeamId
@@ -14,6 +18,9 @@ export type PlayerState = {
   // Genormaliseerd formatie-anker (x: 0 eigen doel → 1 tegenstander, y: 0 boven → 1 onder).
   // Statisch per speler; AI keert hiernaartoe terug.
   anchor: Vec2
+  // Statische speler-eigenschappen (1..5) die het spel per persoon laten verschillen.
+  // pace = loopsnelheid, shot = schotkracht, tackle = tackle-bereik. Zie teams.ts.
+  traits: PlayerTraits
   pos: Vec2
   vel: Vec2
   facing: Vec2 // laatste loeprichting (genormaliseerd) — schotrichting bij stilstand
@@ -36,6 +43,7 @@ export type BallState = {
   vz: number // verticale snelheid
   lastTouch: number // player.id die de bal het laatst raakte
   prevTouch: number // de aanraker daarvóór (voor doelpunt-toewijzing bij afketsers)
+  spin: number // zijwaartse curve (Magnus): >0/<0 = bal krult, dooft uit; 0 = recht
 }
 
 // Platte, serialiseerbare besturing per speler. inputs[i] hoort bij players[i].
@@ -89,7 +97,7 @@ export type StreakerState = {
   vel: Vec2
   target: Vec2 // waar-ie naartoe rent (net buiten het veld → hij loopt eraf)
   timer: number // resterende leeftijd (s); veiligheids-timeout
-  variant: 0 | 1 // welke van de twee streaker-koppen
+  variant: 0 | 1 | 2 // welke van de drie streaker-koppen
   caught: boolean // door de beveiliger gepakt → samen op weg naar de tribune (rand)
 }
 
@@ -101,18 +109,29 @@ export type GameState = {
   streakerCooldown: number // seconden tot een nieuwe bestorming mag spawnen
   security: { pos: Vec2; vel: Vec2 } | null // beveiliger die de bestormer achterna zit
   wind: Vec2 // windvector (duwt de bal, sterker als-ie in de lucht is); {0,0} = geen wind
+  // Dynamisch weer: de wind kruipt naar `windTarget`, en elke `weatherTimer` sec valt er een
+  // nieuwe vlaag (en soms begint/stopt de regen). `weather` stuurt de regen-/sneeuw-overlay.
+  weather: 'clear' | 'rain' | 'snow'
+  windTarget: Vec2
+  weatherTimer: number
   surface: 'gras' | 'zaal' | 'strand' | 'sneeuw' // ondergrond → balwrijving (rolt korter op zand/sneeuw)
   ballScale: number // 1 = normaal, >1 = giant-ball-modus (grotere bal + botsradius)
+  // Chaos-mutators (fun, vooraf in te stellen): grote koppen (render) + gladde mat (spelers glijden).
+  bigHeads: boolean
+  slippery: boolean
   // Wedstrijdstatistieken per team [team0, team1] (voor het eindscherm).
   stats: { shots: [number, number]; tackles: [number, number]; pannas: [number, number]; possMs: [number, number] }
   cards: CardEvent[] // kaartenlog (voor overlay + rust/eind)
   foulCount: number // telt overtredingen (client hangt hier de pauze/animatie aan — robuust)
   foulCooldown: number // >0 = even geen nieuwe overtreding (voorkomt dubbele in 1 frame)
+  foulStreak: number // aantal overtredingen binnen het lopende venster (voor kaart-escalatie)
+  foulStreakTimer: number // sim-seconden tot de streak vervalt (reset bij elke overtreding)
   // Overtreding met vertraging: eerst de tumble-animatie tonen, dán de fluit/kaart toekennen.
   pendingFoul: { slider: number; victim: number; behind: boolean; spot: Vec2; delay: number } | null
   tackleCount: number // telt tackle-inslagen (voor het tackle-geluidje)
   saveCount: number // telt knappe keeperreddingen (voor "WAT EEN REDDING!"-popup)
   pannaCount: number // telt geslaagde panna's (voor de "PANNA!"-popup)
+  bicycleCount: number // telt omhalen (client hangt hier de slow-motion + "OMHAAL!"-popup aan)
   lastGoalKind: 'normal' | 'screamer' | 'owngoal' // soort laatste doelpunt (voor de banner)
   restartKind: RestartKind | null // type van de huidige set-piece (voor de overlay)
   score: [number, number]

@@ -23,11 +23,14 @@ import {
   PITCH_LENGTH,
   PITCH_WIDTH,
   PLAYER_RADIUS,
+  PLAYERS_PER_TEAM,
   TUMBLE_TIME,
 } from './constants'
 import type { GameState, MatchPhase, PlayerState, TeamMeta } from './types'
 
 const VIEW_WORLD_H = 545 // wereld-eenheden verticaal in beeld → zoom (lager = verder ingezoomd; ~10% ingezoomd t.o.v. 600)
+const CINE_DUR = 1.0 // duur van de cinematische omhaal-zoom (s): soepel in en weer uit
+const CINE_PEAK = 0.42 // hoeveel extra ingezoomd op de piek van de omhaal
 const FACES_DIR = '/spelers'
 const GRASS_DARK = 0x1f7a37
 const GRASS_LIGHT = 0x249041
@@ -84,6 +87,9 @@ export class PixiSoccerRenderer {
   private netRipple: { dir: number; t: number } | null = null // trillend net na een goal
   private shakeMag = 0 // camera-shake (decayt)
   private zoomPunch = 0 // korte zoom-in (decayt)
+  private bikePrev = 0 // laatst gerenderde bicycleCount (voor de cinematische zoom)
+  private cineTime = 0 // resterende tijd van de omhaal-zoom (s)
+  private cineZoom = 0 // extra zoom tijdens de omhaal (0..CINE_PEAK)
   private cam = { x: PITCH_LENGTH / 2, y: PITCH_WIDTH / 2 }
   private started = false
   private prevPhase: MatchPhase | null = null
@@ -94,6 +100,10 @@ export class PixiSoccerRenderer {
   private venue: 'stadion' | 'zaal' | 'strand' | 'sneeuw' = 'stadion'
   private weather: 'clear' | 'rain' | 'snow' = 'clear'
   private ballScale = 1
+  private headScale = 1 // >1 = grote-koppen-modus (chaos-mutator)
+  private adTop: any = null // scrollende bovenboarding (ennovate-logo's)
+  private adTopStep = 0
+  private adTopOffset = 0
   private rainGfx: any = null
   private lightning: any = null
   private rainMood: any = null
@@ -107,6 +117,7 @@ export class PixiSoccerRenderer {
     const PIXI = await import('pixi.js')
     this.PIXI = PIXI
     this.ballScale = opts?.ballScale ?? state.ballScale ?? 1
+    this.headScale = state.bigHeads ? 1.7 : 1
     // Venue + weer: meegegeven (door de client) of willekeurig (cosmetisch, geen invloed op de sim).
     const VENUES: ('stadion' | 'zaal' | 'strand' | 'sneeuw')[] = ['stadion', 'stadion', 'zaal', 'strand', 'sneeuw']
     this.venue = opts?.venue ?? VENUES[(Math.random() * VENUES.length) | 0]
@@ -142,8 +153,8 @@ export class PixiSoccerRenderer {
       }
     }
 
-    // Scheids- + streaker-koppen (optioneel; vallen terug op een getekend kopje).
-    for (const u of [`${FACES_DIR}/ref.png`, `${FACES_DIR}/streaker-1.png`, `${FACES_DIR}/streaker-2.png`]) {
+    // Scheids-, streaker-, beveiliger- + sponsor-assets (optioneel; vallen terug op tekst/figuurtjes).
+    for (const u of [`${FACES_DIR}/ref.png`, `${FACES_DIR}/streaker-1.png`, `${FACES_DIR}/streaker-2.png`, `${FACES_DIR}/streaker-3.png`, `${FACES_DIR}/mbappe.png`, '/ennovate.png']) {
       try {
         await PIXI.Assets.load(u)
       } catch {
@@ -196,15 +207,10 @@ export class PixiSoccerRenderer {
       // Zaal: donkere hal met een lichte boarding-rand rond het veld.
       g.rect(-D, -D, L + 2 * D, W + 2 * D).fill(0x0c0f14)
       g.rect(-D * 0.5, -D * 0.5, L + 2 * D * 0.5, W + 2 * D * 0.5).fill(0x141922)
-      // reclame-boarding (dikkere band als een zaalhek)
       const bw = 12
-      const ad = 0x243247
       g.rect(-RUNOFF, -RUNOFF, L + 2 * RUNOFF, W + 2 * RUNOFF).fill(0x11151d) // vloerrand
-      g.rect(-bw, -bw, L + 2 * bw, bw).fill(ad)
-      g.rect(-bw, W, L + 2 * bw, bw).fill(ad)
-      g.rect(-bw, 0, bw, W).fill(ad)
-      g.rect(L, 0, bw, W).fill(ad)
       this.world.addChild(g)
+      this.buildAdBoards(bw) // gesegmenteerde reclame-boarding (zaalhek)
       // schaars publiek achter de boarding (donkerder)
       const crowd = new PIXI.Graphics()
       const inRunoff = (x: number, y: number) => x > -RUNOFF - bw && x < L + RUNOFF + bw && y > -RUNOFF - bw && y < W + RUNOFF + bw
@@ -216,6 +222,7 @@ export class PixiSoccerRenderer {
         }
       }
       this.world.addChild(crowd)
+      this.buildDugouts()
       return
     }
 
@@ -225,12 +232,8 @@ export class PixiSoccerRenderer {
       g.rect(-D * 0.66, -D * 0.66, L + 2 * D * 0.66, W + 2 * D * 0.66).fill(0x3a4757)
       g.rect(-D * 0.33, -D * 0.33, L + 2 * D * 0.33, W + 2 * D * 0.33).fill(0xc7d2dc)
       g.rect(-RUNOFF, -RUNOFF, L + 2 * RUNOFF, W + 2 * RUNOFF).fill(0xeef3f7) // sneeuw-uitloop
-      const ad = 0x8a97a5, aw = 7
-      g.rect(-RUNOFF, -aw, L + 2 * RUNOFF, aw).fill(ad)
-      g.rect(-RUNOFF, W, L + 2 * RUNOFF, aw).fill(ad)
-      g.rect(-aw, 0, aw, W).fill(ad)
-      g.rect(L, 0, aw, W).fill(ad)
       this.world.addChild(g)
+      this.buildAdBoards(9)
       // ingepakt publiek (donkerder stipjes)
       const crowd = new PIXI.Graphics()
       const inRunoff = (x: number, y: number) => x > -RUNOFF && x < L + RUNOFF && y > -RUNOFF && y < W + RUNOFF
@@ -242,6 +245,7 @@ export class PixiSoccerRenderer {
         }
       }
       this.world.addChild(crowd)
+      this.buildDugouts()
       return
     }
 
@@ -250,13 +254,8 @@ export class PixiSoccerRenderer {
     g.rect(-D * 0.66, -D * 0.66, L + 2 * D * 0.66, W + 2 * D * 0.66).fill(0x1b2430)
     g.rect(-D * 0.33, -D * 0.33, L + 2 * D * 0.33, W + 2 * D * 0.33).fill(0x222c3a)
     g.rect(-RUNOFF, -RUNOFF, L + 2 * RUNOFF, W + 2 * RUNOFF).fill(0x1c8039)
-    const ad = 0x0e3b6b
-    const aw = 7
-    g.rect(-RUNOFF, -aw, L + 2 * RUNOFF, aw).fill(ad)
-    g.rect(-RUNOFF, W, L + 2 * RUNOFF, aw).fill(ad)
-    g.rect(-aw, 0, aw, W).fill(ad)
-    g.rect(L, 0, aw, W).fill(ad)
     this.world.addChild(g)
+    this.buildAdBoards(10)
 
     // publiek: raster van gekleurde stipjes op de tribunes (alles buiten de uitloop)
     const crowd = new PIXI.Graphics()
@@ -271,6 +270,104 @@ export class PixiSoccerRenderer {
       }
     }
     this.world.addChild(crowd)
+    this.buildDugouts()
+  }
+
+  // Reclameborden: donkere boarding rondom (het witte/transparante Ennovate-logo leest daarop),
+  // met herhaalde ennovate.png. De bovenboarding scrollt (LED-stijl). `aw` = boarding-dikte.
+  private buildAdBoards(aw: number) {
+    const PIXI = this.PIXI
+    const L = PITCH_LENGTH, W = PITCH_WIDTH
+    const x0 = -RUNOFF, x1 = L + RUNOFF
+    // Doelopening (+ marge): daar lopen de zij-borden NIET doorheen.
+    const gy0 = W / 2 - GOAL_WIDTH / 2 - 8
+    const gy1 = W / 2 + GOAL_WIDTH / 2 + 8
+    const boardCol = 0x121821
+    const boards = new PIXI.Graphics()
+    boards.rect(x0, -aw, x1 - x0, aw).fill(boardCol) // boven
+    boards.rect(x0, W, x1 - x0, aw).fill(boardCol)   // onder
+    boards.rect(-aw, 0, aw, gy0).fill(boardCol); boards.rect(-aw, gy1, aw, W - gy1).fill(boardCol) // links (doelgat)
+    boards.rect(L, 0, aw, gy0).fill(boardCol); boards.rect(L, gy1, aw, W - gy1).fill(boardCol)     // rechts (doelgat)
+    boards.rect(x0, -aw, x1 - x0, 1.4).fill({ color: 0xffffff, alpha: 0.08 }) // subtiele glans boven
+    this.world.addChild(boards)
+
+    const tex = PIXI.Assets.get('/ennovate.png') || null
+    if (!tex) return
+    const logoH = aw * 0.8
+    const logoW = logoH * ((tex.width || 1) / (tex.height || 1))
+    const step = logoW + logoW * 1.4 // logo + tussenruimte
+    const addLogo = (parent: any, cx: number, cy: number) => {
+      const s = new PIXI.Sprite(tex); s.anchor.set(0.5); s.width = logoW; s.height = logoH; s.position.set(cx, cy); parent.addChild(s)
+    }
+    // Statische logo's op de onderboarding.
+    const bottom = new PIXI.Container()
+    for (let x = x0 + step / 2; x < x1; x += step) addLogo(bottom, x, W + aw / 2)
+    this.world.addChild(bottom)
+    // Scrollende logo's op de bovenboarding (iets buiten de randen getegeld → naadloos loopen).
+    const top = new PIXI.Container()
+    for (let x = x0 - step; x < x1 + step; x += step) addLogo(top, x, -aw / 2)
+    this.world.addChild(top)
+    this.adTop = top
+    this.adTopStep = step
+    this.adTopOffset = 0
+  }
+
+  // Bovenboarding laten scrollen (LED-stijl). Wrap per `step` → naadloze lus.
+  private updateAdBoards(dt: number) {
+    if (!this.adTop) return
+    this.adTopOffset = (this.adTopOffset - 70 * dt) % this.adTopStep
+    this.adTop.position.x = this.adTopOffset
+  }
+
+  // Twee dugouts (bank + afdak) op de onderste zijlijn, links en rechts van de middenstip.
+  // In de teamkleuren, met een rij zittende wisselspelers + coach.
+  private buildDugouts() {
+    const PIXI = this.PIXI
+    const L = PITCH_LENGTH, W = PITCH_WIDTH
+    const g = new PIXI.Graphics()
+    const dw = 172, dh = 30
+    const topY = W + 14 // net achter de onderlijn/boarding
+    const cA: string = this.teams?.[0]?.shirt ?? '#2d6be5'
+    const cB: string = this.teams?.[1]?.shirt ?? '#e63946'
+    const draw = (cx: number, color: string) => {
+      const x = cx - dw / 2
+      g.roundRect(x, topY, dw, dh, 6).fill(0x11151c).stroke({ width: 2, color: 0x2a3341, alpha: 0.9 }) // afdak
+      g.rect(x + 5, topY + 3, dw - 10, 4).fill(color) // team-accent naar het veld
+      g.roundRect(x + 10, topY + dh - 11, dw - 20, 7, 2).fill(0x2b3644) // bank
+      for (let i = 0; i < 5; i++) { const px = x + 24 + i * ((dw - 48) / 4); g.circle(px, topY + dh - 8, 3.6).fill(i === 0 ? 0x1a1a1a : color) } // coach + 4 subs
+    }
+    draw(L / 2 - dw * 0.7, cA)
+    draw(L / 2 + dw * 0.7, cB)
+    this.world.addChild(g)
+    this.buildCrowdBanners() // spandoeken + vlaggetjes op de tribune
+  }
+
+  // Sfeer op de tribune: spandoeken met de teamnaam/-code (in teamkleur) + wat kleine vlaggetjes.
+  // Fans van team A clusteren achter het linkerdoel + linkerhelft, team B rechts.
+  private buildCrowdBanners() {
+    const PIXI = this.PIXI
+    const L = PITCH_LENGTH, W = PITCH_WIDTH, D = STAND_DEPTH
+    const A = this.teams?.[0], B = this.teams?.[1]
+    if (!A || !B) return
+    const g = new PIXI.Graphics()
+    const banner = (cx: number, cy: number, w: number, h: number, color: string, label: string) => {
+      g.moveTo(cx - w / 2, cy - h / 2).lineTo(cx + w / 2, cy - h / 2).stroke({ width: 1.5, color: 0x0a0a0a, alpha: 0.5 }) // ophangdraad
+      g.roundRect(cx - w / 2, cy - h / 2, w, h, 3).fill(color).stroke({ width: 2, color: 0x0a0a0a, alpha: 0.55 })
+      const t = new PIXI.Text({ text: label, style: { fontFamily: 'Arial', fontSize: 26, fontWeight: '900', fill: 0xffffff, letterSpacing: 1, stroke: { color: 0x0a0a0a, width: 4 } } })
+      t.anchor.set(0.5)
+      t.scale.set(Math.min((h * 0.6) / t.height, (w * 0.86) / t.width))
+      t.position.set(cx, cy)
+      this.world.addChild(g)
+      this.world.addChild(t)
+    }
+    // Grote spandoeken achter het eigen doel (naam), kleinere op de zijtribunes (code).
+    banner(-D * 0.58, W * 0.42, 168, 52, A.shirt, A.name.toUpperCase().slice(0, 12))
+    banner(L + D * 0.58, W * 0.58, 168, 52, B.shirt, B.name.toUpperCase().slice(0, 12))
+    banner(L * 0.26, -D * 0.6, 108, 40, A.shirt, A.short)
+    banner(L * 0.74, -D * 0.6, 108, 40, B.shirt, B.short)
+    banner(L * 0.3, W + D * 0.6, 108, 40, A.shirt, A.short)
+    banner(L * 0.7, W + D * 0.6, 108, 40, B.shirt, B.short)
+    this.world.addChild(g)
   }
 
   // Willekeurig punt op de tribune (voor de knipperende flitsen).
@@ -418,10 +515,17 @@ export class PixiSoccerRenderer {
     const torso = new PIXI.Graphics()
     torso.roundRect(-r * 0.86, -r * 0.86, r * 1.72, r * 1.56, r * 0.3).fill(kit).stroke({ width: 2, color: meta.trim, alpha: 0.95 })
     torso.poly([-r * 0.26, -r * 0.86, r * 0.26, -r * 0.86, 0, -r * 0.46]).fill(0xffffff)
+    // Rugnummer op de onderkant van het shirt (keeper = 1). Kind van de torso → bobt vanzelf mee.
+    const shirtNo = (p.id % PLAYERS_PER_TEAM) + 1
+    const num = new PIXI.Text({ text: String(shirtNo), style: { fontFamily: 'Arial', fontSize: 18, fontWeight: '900', fill: 0xffffff, stroke: { color: 0x000000, width: 3.5 } } })
+    num.anchor.set(0.5)
+    num.scale.set((r * 0.7) / 18)
+    num.position.set(0, r * 0.18)
+    torso.addChild(num)
 
     // hoofd: het volledige transparante gezicht-PNG (GEEN crop, GEEN cirkel); 3 kijkrichtingen.
     const headGroup = new PIXI.Container()
-    const headR = r * HEAD_FACTOR
+    const headR = r * HEAD_FACTOR * this.headScale
     const texOf = (url: string): any => PIXI.Assets.get(url) || null
     const v = p.face && faces.includes(p.face) ? faceVariants(p.face) : null
     const texFront = v ? texOf(v.front) : null
@@ -441,9 +545,9 @@ export class PixiSoccerRenderer {
       headGroup.addChild(head)
     }
 
-    // arms achter de torso zodat de schouder netjes onder het shirt zit, maar de onderarm/hand
-    // steekt aan de zijkant duidelijk uit; torso ervóór.
-    c.addChild(ring, legL, legR, armL, armR, torso, headGroup)
+    // arms vóór de torso zodat ze altijd zichtbaar blijven (ook wanneer ze bij het rennen
+    // naar binnen zwaaien); daarna pas de kop bovenop.
+    c.addChild(ring, legL, legR, torso, armL, armR, headGroup)
     this.entityLayer.addChild(c)
     this.legPhase[p.id] = 0
     this.nodes[p.id] = { c, headGroup, head, tex, torso, legL, legR, armL, armR, ring }
@@ -480,17 +584,17 @@ export class PixiSoccerRenderer {
         else if (n.tex.left) { t = n.tex.left; mirror = true }
       }
       if (n.head.texture !== t) n.head.texture = t
-      const mag = (r * HEAD_FACTOR * 2) / (t.width || 1)
+      const mag = (r * HEAD_FACTOR * this.headScale * 2) / (t.width || 1)
       n.head.scale.set(mirror ? -mag : mag, mag)
     }
 
     const bob = moving ? Math.abs(Math.sin(ph * 2)) * r * 0.1 : 0
     n.torso.position.set(0, r * 0.05 - bob)
     // armpjes: iets gespreid in rust, en zwaaien tegengesteld aan de beentjes tijdens 't rennen
-    const armAmp = moving ? 0.55 : 0
-    const OUT = 0.18
-    n.armL.position.set(-r * 0.82, -r * 0.5 - bob)
-    n.armR.position.set(r * 0.82, -r * 0.5 - bob)
+    const armAmp = moving ? 0.5 : 0
+    const OUT = 0.24
+    n.armL.position.set(-r * 0.9, -r * 0.5 - bob)
+    n.armR.position.set(r * 0.9, -r * 0.5 - bob)
     if (this.celebrateTeam === p.team) {
       // juichen: armen omhoog + zwaaien
       const wave = Math.sin(ph * 1.4) * 0.28
@@ -501,7 +605,7 @@ export class PixiSoccerRenderer {
       n.armR.rotation = OUT + Math.sin(ph) * armAmp
     }
     // kop iets meedraaien met de looprichting (subtiel; de plaatjes doen het meeste werk)
-    n.headGroup.position.set(fx * r * 0.1, -r * 1.0 - bob)
+    n.headGroup.position.set(fx * r * 0.1, -r * 1.5 - bob)
     // tuimel-pose: omvergelopen → tuimelt over de kop (2,4 slag, uitdempend), ledematen spartelen,
     // en een squash bij de landing. Anders: sliding-pose (bijna plat) of rechtop.
     n.c.scale.set(1, 1)
@@ -576,28 +680,51 @@ export class PixiSoccerRenderer {
     const armR = new PIXI.Graphics(); armR.roundRect(-r * 0.16, -r * 0.62, r * 0.32, r * 0.7, r * 0.15).fill(skin); armR.position.set(r * 0.5, -r * 0.32)
     // zwart censuurbalkje
     const bar = new PIXI.Graphics(); bar.roundRect(-r * 0.42, r * 0.16, r * 0.84, r * 0.34, r * 0.08).fill(0x0a0a0a)
-    // twee koppen (variant 0/1); we togglen de zichtbaarheid per bestorming
+    // drie koppen (variant 0/1/2); we togglen de zichtbaarheid per bestorming
     const head0 = this.headSprite(`${FACES_DIR}/streaker-1.png`, r, skin)
     const head1 = this.headSprite(`${FACES_DIR}/streaker-2.png`, r, skin)
+    const head2 = this.headSprite(`${FACES_DIR}/streaker-3.png`, r, skin)
     head1.visible = false
-    c.addChild(sh, legL, legR, torso, bar, armL, armR, head0, head1)
+    head2.visible = false
+    c.addChild(sh, legL, legR, torso, bar, armL, armR, head0, head1, head2)
     c.visible = false
     c.scale.set(1.56) // flink groter dan de spelers → goed zichtbaar
     this.entityLayer.addChild(c)
-    this.streakerNode = { c, legL, legR, armL, armR, heads: [head0, head1] }
+    this.streakerNode = { c, legL, legR, armL, armR, heads: [head0, head1, head2] }
   }
 
-  // Beveiliger: gedrongen figuur in hi-vis hesje + petje, rennende beentjes/armpjes.
+  // Beveiliger die op de streaker jaagt. Bij voorkeur het meegeleverde mbappe.png (legerpak
+  // t/m de billen, ZONDER benen) als bovenlijf-sprite; we tekenen er rennende benen onder.
+  // Ontbreekt de asset, dan valt-ie terug op een getekend hi-vis-figuurtje.
   private buildSecurity() {
     const PIXI = this.PIXI
     const r = PLAYER_RADIUS
     const skin = 0xd9a877
-    const vest = 0xf7e017 // hi-vis geel
     const c = new PIXI.Container()
+    c.scale.set(1.2) // iets groter dan de spelers → duidelijk zichtbaar
     const sh = new PIXI.Graphics()
-    sh.ellipse(0, r * 1.1, r * 0.85, r * 0.4).fill({ color: 0x000000, alpha: 0.25 })
-    const legL = new PIXI.Graphics(); legL.roundRect(-r * 0.19, 0, r * 0.38, r * 0.6, r * 0.14).fill(0x22262e); legL.position.set(-r * 0.24, r * 0.42)
-    const legR = new PIXI.Graphics(); legR.roundRect(-r * 0.19, 0, r * 0.38, r * 0.6, r * 0.14).fill(0x22262e); legR.position.set(r * 0.24, r * 0.42)
+    sh.ellipse(0, r * 1.32, r * 0.85, r * 0.4).fill({ color: 0x000000, alpha: 0.25 })
+    // Benen (broek): getekend, rennend + wat langer — bij beide varianten onder het bovenlijf.
+    const trouser = 0x3c4a2f // legergroen (past bij het legerpak)
+    const legL = new PIXI.Graphics(); legL.roundRect(-r * 0.2, 0, r * 0.4, r * 0.92, r * 0.14).fill(trouser); legL.position.set(-r * 0.26, r * 0.4)
+    const legR = new PIXI.Graphics(); legR.roundRect(-r * 0.2, 0, r * 0.4, r * 0.92, r * 0.14).fill(trouser); legR.position.set(r * 0.26, r * 0.4)
+
+    const tex = PIXI.Assets.get(`${FACES_DIR}/mbappe.png`) || null
+    if (tex) {
+      // Bovenlijf-sprite: onderkant op de heuplijn, strekt naar boven (kop + romp + armen zitten erin).
+      const body = new PIXI.Sprite(tex)
+      body.anchor.set(0.5, 1)
+      body.scale.set((r * 2.3) / (tex.width || 1))
+      body.position.set(0, r * 0.6)
+      c.addChild(sh, legL, legR, body)
+      c.visible = false
+      this.entityLayer.addChild(c)
+      this.securityNode = { c, legL, legR, body }
+      return
+    }
+
+    // Terugval: getekend hi-vis-figuurtje met petje + zwaaiende armen.
+    const vest = 0xf7e017 // hi-vis geel
     const armL = new PIXI.Graphics(); armL.roundRect(-r * 0.15, 0, r * 0.3, r * 0.6, r * 0.13).fill(skin); armL.position.set(-r * 0.78, -r * 0.42)
     const armR = new PIXI.Graphics(); armR.roundRect(-r * 0.15, 0, r * 0.3, r * 0.6, r * 0.13).fill(skin); armR.position.set(r * 0.78, -r * 0.42)
     const torso = new PIXI.Graphics()
@@ -717,6 +844,22 @@ export class PixiSoccerRenderer {
     }
   }
 
+  // Weer live wisselen (dynamisch weer vanuit de sim): oude regen-/onweerlagen opruimen en
+  // opnieuw opbouwen voor de nieuwe toestand. Sneeuwvelden blijven sneeuwen.
+  private setWeather(w: 'clear' | 'rain' | 'snow') {
+    if (w === this.weather) return
+    this.weather = w
+    for (const n of [this.rainGfx, this.rainMood, this.lightning]) {
+      if (n) { try { this.app.stage.removeChild(n) } catch { /* al weg */ } n.destroy() }
+    }
+    this.rainGfx = null
+    this.rainMood = null
+    this.lightning = null
+    this.rainDrops = []
+    this.lightFlash = 0
+    this.buildWeather()
+  }
+
   resize(vw: number, vh: number) {
     if (!this.ready || (vw === this.vw && vh === this.vh)) return
     this.vw = vw
@@ -736,7 +879,15 @@ export class PixiSoccerRenderer {
     // juice: korte zoom-in + camera-shake (beide dempen uit)
     this.zoomPunch *= Math.max(0, 1 - dt * 4)
     this.shakeMag *= Math.max(0, 1 - dt * 6)
-    const zoom = (this.vh / VIEW_WORLD_H) * (1 + this.zoomPunch)
+    // Cinematische omhaal-zoom: geleidelijk inzoomen op de piek en weer soepel terug (sin-bump).
+    if (state.bicycleCount > this.bikePrev) this.cineTime = CINE_DUR
+    this.bikePrev = state.bicycleCount
+    if (this.cineTime > 0) {
+      this.cineTime = Math.max(0, this.cineTime - dt)
+      const p = 1 - this.cineTime / CINE_DUR // 0 → 1 over de duur
+      this.cineZoom = Math.sin(p * Math.PI) ** 0.8 * CINE_PEAK
+    } else this.cineZoom = 0
+    const zoom = (this.vh / VIEW_WORLD_H) * (1 + this.zoomPunch + this.cineZoom)
     const viewW = this.vw / zoom
     const viewH = this.vh / zoom
 
@@ -788,9 +939,10 @@ export class PixiSoccerRenderer {
     const sk = this.streakerNode
     if (state.streaker) {
       sk.c.visible = true
-      const vi = state.streaker.variant === 1 ? 1 : 0
+      const vi = state.streaker.variant
       sk.heads[0].visible = vi === 0
       sk.heads[1].visible = vi === 1
+      sk.heads[2].visible = vi === 2
       sk.c.position.set(state.streaker.pos.x, state.streaker.pos.y)
       sk.c.zIndex = state.streaker.pos.y
       const spd = Math.hypot(state.streaker.vel.x, state.streaker.vel.y)
@@ -816,8 +968,10 @@ export class PixiSoccerRenderer {
       const sw = Math.sin(this.securityPhase)
       se.legL.rotation = sw * 0.8
       se.legR.rotation = -sw * 0.8
-      se.armL.rotation = -sw * 0.6
-      se.armR.rotation = sw * 0.6
+      if (se.armL) se.armL.rotation = -sw * 0.6
+      if (se.armR) se.armR.rotation = sw * 0.6
+      // mbappe-sprite: licht wiebelen + voorover leunen alsof-ie sprint
+      if (se.body) { se.body.rotation = sw * 0.05; se.body.position.y = PLAYER_RADIUS * 0.6 - Math.abs(sw) * PLAYER_RADIUS * 0.06 }
     } else if (se.c.visible) {
       se.c.visible = false
     }
@@ -858,7 +1012,9 @@ export class PixiSoccerRenderer {
     this.updateNets(dt)
     this.updateFlashes(dt)
     this.updateFireworks(dt)
+    if (state.weather !== this.weather) this.setWeather(state.weather) // dynamisch weer volgen
     this.updateWeather(dt)
+    this.updateAdBoards(dt)
 
     this.app.render()
   }

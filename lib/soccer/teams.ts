@@ -1,5 +1,5 @@
 import { PITCH_LENGTH, PITCH_WIDTH, PLAYERS_PER_TEAM, STREAKER_MIN_GAP } from './constants'
-import type { GameState, PlayerState, Role, TeamId, TeamMeta } from './types'
+import type { GameState, PlayerState, PlayerTraits, Role, TeamId, TeamMeta } from './types'
 import type { Vec2 } from './vec'
 
 // Default-speler-gezicht (fallback als een speler geen gezicht heeft).
@@ -14,6 +14,12 @@ export const KITS: Kit[] = [
   { id: 'groen', label: 'Groen', shirt: '#2EA84B', trim: '#06301A', keeper: '#F4B92E' },
   { id: 'paars', label: 'Paars', shirt: '#7C3AED', trim: '#1E0A3A', keeper: '#F4B92E' },
   { id: 'zwart', label: 'Zwart', shirt: '#2B2F38', trim: '#000000', keeper: '#E63946' },
+  { id: 'oranje', label: 'Oranje', shirt: '#E8641C', trim: '#3A1400', keeper: '#111418' },
+  { id: 'wit', label: 'Wit', shirt: '#ECECEC', trim: '#1A2536', keeper: '#E63946' },
+  { id: 'lichtblauw', label: 'Lichtblauw', shirt: '#4FA8E0', trim: '#0A2A44', keeper: '#E8641C' },
+  { id: 'roze', label: 'Roze', shirt: '#E8519A', trim: '#3A0A22', keeper: '#111418' },
+  { id: 'turquoise', label: 'Turquoise', shirt: '#1FB6A6', trim: '#04302B', keeper: '#E63946' },
+  { id: 'bordeaux', label: 'Bordeaux', shirt: '#7A1F2B', trim: '#1A0206', keeper: '#F4B92E' },
 ]
 export const kitById = (id: string): Kit => KITS.find((k) => k.id === id) ?? KITS[0]
 
@@ -34,22 +40,40 @@ export const COUNTRIES: Country[] = [
   { name: 'Argentinië', short: 'ARG', flag: '🇦🇷', shirt: '#75AADB', trim: '#0A1A3A', keeper: '#111418' },
   { name: 'Kroatië', short: 'KRO', flag: '🇭🇷', shirt: '#C8102E', trim: '#111111', keeper: '#1E3A8A' },
   { name: 'Marokko', short: 'MAR', flag: '🇲🇦', shirt: '#B01E28', trim: '#06301A', keeper: '#2EA84B' },
+  { name: 'Japan', short: 'JAP', flag: '🇯🇵', shirt: '#0B3EA0', trim: '#0A1024', keeper: '#E63946' },
+  { name: 'Mexico', short: 'MEX', flag: '🇲🇽', shirt: '#0A7D3B', trim: '#04301A', keeper: '#E63946' },
+  { name: 'Nigeria', short: 'NGA', flag: '🇳🇬', shirt: '#12A150', trim: '#04301A', keeper: '#ECECEC' },
+  { name: 'Verenigde Staten', short: 'USA', flag: '🇺🇸', shirt: '#1B2A6B', trim: '#7A1220', keeper: '#ECECEC' },
+  { name: 'Zwitserland', short: 'SUI', flag: '🇨🇭', shirt: '#D52B1E', trim: '#2A0206', keeper: '#111418' },
+  { name: 'Senegal', short: 'SEN', flag: '🇸🇳', shirt: '#0B9444', trim: '#7A1220', keeper: '#F4B92E' },
+  { name: 'Zuid-Korea', short: 'KOR', flag: '🇰🇷', shirt: '#C8102E', trim: '#0A1A3A', keeper: '#111418' },
+  { name: 'Denemarken', short: 'DEN', flag: '🇩🇰', shirt: '#C60C30', trim: '#2A0206', keeper: '#111418' },
 ]
 
 // ── Spelerspool (kiesbare gezichten uit /public/spelers) ─────────────────────
-export type PoolPlayer = { name: string; face: string }
+// Elke collega heeft een archetype (`tag`) + eigenschappen op 1..5 (pace/shot/tackle).
+// Die sturen kleine multipliers in de sim én de AI, zodat teamkeuze er echt toe doet.
+export type PoolPlayer = { name: string; face: string; tag: string; traits: PlayerTraits }
 export const PLAYER_POOL: PoolPlayer[] = [
-  { name: 'Stefan', face: 'steve.png' },
-  { name: 'Julia', face: 'julia.png' },
-  { name: 'Jeff', face: 'jeff.png' },
-  { name: 'Chris', face: 'chris.png' },
-  { name: 'Pim', face: 'pim.png' },
-  { name: 'Pawel', face: 'pawel.png' },
-  { name: 'Bram', face: 'bram.png' },
-  { name: 'Ozair', face: 'ozair.png' },
-  { name: 'Florian', face: 'florian.png' },
-  { name: 'Athena', face: 'athena.png' },
+  { name: 'Stefan', face: 'steve.png', tag: 'Sluipschutter', traits: { pace: 3, shot: 5, tackle: 2 } },
+  { name: 'Julia', face: 'julia.png', tag: 'Spelmaker', traits: { pace: 4, shot: 3, tackle: 2 } },
+  { name: 'Jeff', face: 'jeff.png', tag: 'Motor', traits: { pace: 3, shot: 3, tackle: 4 } },
+  { name: 'Chris', face: 'chris.png', tag: 'Muur', traits: { pace: 2, shot: 3, tackle: 5 } },
+  { name: 'Pim', face: 'pim.png', tag: 'Tank', traits: { pace: 2, shot: 4, tackle: 5 } },
+  { name: 'Pawel', face: 'pawel.png', tag: 'Raket', traits: { pace: 5, shot: 3, tackle: 3 } },
+  { name: 'Bram', face: 'bram.png', tag: 'Architect', traits: { pace: 3, shot: 5, tackle: 3 } },
+  { name: 'Ozair', face: 'ozair.png', tag: 'Terriër', traits: { pace: 4, shot: 2, tackle: 4 } },
+  { name: 'Florian', face: 'florian.png', tag: 'Flankspeler', traits: { pace: 5, shot: 3, tackle: 2 } },
+  { name: 'Athena', face: 'athena.png', tag: 'Ster', traits: { pace: 4, shot: 4, tackle: 3 } },
 ]
+
+// Gemiddeld profiel (AI-landen zonder poolgezicht, of onbekende gezichten).
+export const BALANCED_TRAITS: PlayerTraits = { pace: 3, shot: 3, tackle: 3 }
+export function traitsForFace(face: string | null | undefined): PlayerTraits {
+  if (!face) return BALANCED_TRAITS
+  const p = PLAYER_POOL.find((x) => x.face === face)
+  return p ? p.traits : BALANCED_TRAITS
+}
 
 // Formaties (elk PLAYERS_PER_TEAM=7 plekken; index 0 = keeper).
 // anchor genormaliseerd (x: 0 eigen doel → 1 tegenstander, y: 0 boven → 1 onder).
@@ -202,6 +226,7 @@ function makeTeam(team: TeamId, attackDir: 1 | -1, meta: TeamMeta): PlayerState[
       name: sel.name || `Speler ${i + 1}`,
       face: sel.face ?? DEFAULT_FACE,
       anchor: { ...f.anchor },
+      traits: traitsForFace(sel.face),
       pos: { ...pos },
       vel: { x: 0, y: 0 },
       facing: { x: d, y: 0 },
@@ -232,6 +257,7 @@ export function createInitialState(humanTeam: TeamId, halfLengthSec: number, tea
       vz: 0,
       lastTouch: -1,
       prevTouch: -1,
+      spin: 0,
     },
     score: [0, 0],
     teams: [teamA, teamB],
@@ -240,16 +266,24 @@ export function createInitialState(humanTeam: TeamId, halfLengthSec: number, tea
     streakerCooldown: STREAKER_MIN_GAP,
     security: null,
     wind: { x: 0, y: 0 },
+    weather: 'clear',
+    windTarget: { x: 0, y: 0 },
+    weatherTimer: 6,
     surface: 'gras',
     ballScale: 1,
+    bigHeads: false,
+    slippery: false,
     stats: { shots: [0, 0], tackles: [0, 0], pannas: [0, 0], possMs: [0, 0] },
     cards: [],
     foulCount: 0,
     foulCooldown: 0,
+    foulStreak: 0,
+    foulStreakTimer: 0,
     pendingFoul: null,
     tackleCount: 0,
     saveCount: 0,
     pannaCount: 0,
+    bicycleCount: 0,
     lastGoalKind: 'normal',
     restartKind: null,
     goals: [],

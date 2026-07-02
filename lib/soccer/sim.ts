@@ -16,6 +16,8 @@ import {
   FOUL_BEHIND_YELLOW,
   FOUL_FRONT_RED,
   FOUL_FRONT_YELLOW,
+  FOUL_STREAK_WINDOW,
+  FOUL_STREAK_LIMIT,
   FOUL_ANIM_DELAY,
   FOUL_COOLDOWN,
   FOUL_RADIUS,
@@ -57,6 +59,15 @@ import {
   SLIDE_SPEED,
   SLIDE_STEAL_RADIUS,
   SLIDE_TIME,
+  SHOT_SPRAY,
+  SHOT_SPIN,
+  CHIP_MIN_POWER,
+  CHIP_MAX_POWER,
+  BICYCLE_MIN_Z,
+  BICYCLE_POWER,
+  BICYCLE_LIFT,
+  SPIN_ACCEL,
+  SPIN_DECAY,
   RESTART_KEEP_RADIUS,
   TUMBLE_KNOCK,
   TUMBLE_TIME,
@@ -79,6 +90,7 @@ import {
   TRAP_MAX_SPEED,
   TRAP_MIN_SPEED,
   WALL_RESTITUTION,
+  traitMul,
 } from './constants'
 import { anchorToWorld, teamDir } from './teams'
 import type { BallState, GameState, InputCommand, PlayerState, RestartKind, TeamId } from './types'
@@ -108,6 +120,7 @@ export function placeForKickoff(state: GameState, kickoffTeam: TeamId): void {
   state.ball.vel = { x: 0, y: 0 }
   state.ball.z = 0
   state.ball.vz = 0
+  state.ball.spin = 0
   state.ball.lastTouch = -1
   state.ball.prevTouch = -1
   state.restartKind = null
@@ -162,6 +175,7 @@ function setPiece(state: GameState, team: TeamId, spot: Vec2, kind: RestartKind)
   state.ball.vel = { x: 0, y: 0 }
   state.ball.z = 0
   state.ball.vz = 0
+  state.ball.spin = 0
   state.ball.lastTouch = -1
   state.ball.prevTouch = -1
   state.kickoffTeam = team // hergebruikt als "herstart-team" voor de gating
@@ -211,6 +225,7 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
   moveRef(state, dt)
   updateStreaker(state, dt)
   if (state.foulCooldown > 0) state.foulCooldown = Math.max(0, state.foulCooldown - dt)
+  if (state.foulStreakTimer > 0) { state.foulStreakTimer = Math.max(0, state.foulStreakTimer - dt); if (state.foulStreakTimer === 0) state.foulStreak = 0 }
 
   // Spelers bewegen (met sprint/stamina), sliden, of starten een slide.
   for (const p of state.players) {
@@ -254,13 +269,17 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
     const sprinting = !!cmd.sprint && p.role !== 'GK' && p.stamina > SPRINT_MIN && moving
     p.stamina = sprinting ? Math.max(0, p.stamina - SPRINT_DRAIN * dt) : Math.min(1, p.stamina + STAMINA_REGEN * dt)
     let maxSpeed = p.role === 'GK' ? KEEPER_MAX_SPEED : PLAYER_MAX_SPEED
+    maxSpeed *= traitMul(p.traits.pace) // snelle collega's lopen iets harder
     if (sprinting) maxSpeed *= SPRINT_MULT
     if (p.tackleCooldown > 0) maxSpeed *= RECOVER_SPEED_MULT
-    movePlayer(p, cmd.move, dt, maxSpeed)
+    movePlayer(p, cmd.move, dt, maxSpeed, state.slippery ? 0.22 : 1)
 
+    // Tijdens een aftrap/vrije trap mag de tegenpartij (niet de nemer) de bal niet aanvallen
+    // tot er hervat is — dus geen slide/tackle starten.
+    const restartLock = (state.phase === 'kickoff' || state.phase === 'setpiece') && p.team !== state.kickoffTeam
     // Slide starten met Q = sliding-tackle, alléén zonder bal aan de voet
     // (mét bal gebruik je R voor een kap/dash — dat is de aanvallers-actie).
-    if (cmd.slide && !state.prevSlide[idx(p)] && p.tackleCooldown <= 0) {
+    if (cmd.slide && !state.prevSlide[idx(p)] && p.tackleCooldown <= 0 && !restartLock) {
       const hasBall = dist(p.pos, state.ball.pos) < CONTROL_RADIUS + PLAYER_RADIUS && state.ball.z < AIR_CONTROL_HEIGHT
       if (!hasBall) {
         let d = norm(cmd.move)
@@ -300,10 +319,13 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
   checkSlideFouls(state)
   resolvePendingFoul(state, dt)
 
+  // Dynamisch weer (wind kruipt/valt in vlagen, regen komt en gaat) — alleen tijdens spel.
+  if (state.phase === 'playing') updateWeather(state, dt)
+
   // Bal integreren, lichamen laten blokkeren, muren/goals/uit afhandelen.
   integrateBall(state, dt)
   collideBallBodies(state)
-  const scored = handleBoundsAndGoals(state)
+  const scored = handleBoundsAndGoals(state, dt)
 
   // Aftrap/set-piece wordt "spel" zodra de bal echt in beweging is.
   if (state.phase === 'kickoff') {
@@ -328,9 +350,10 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
   // Power-balk opladen (knop vastgehouden) + edge-detectie voor de volgende tick.
   // Gebeurt ná de trap zodat de loslaat-flank nog de opgebouwde charge kon uitlezen.
   for (const p of state.players) {
-    const held = inputs[idx(p)]?.kick ?? false
+    // Zowel de schiet-knop als E (stift) laden de power-balk → een lange bal is óók laadbaar.
+    const held = (inputs[idx(p)]?.kick ?? false) || (inputs[idx(p)]?.chip ?? false)
     p.charge = held ? Math.min(MAX_CHARGE_TIME, p.charge + dt) : 0
-    state.prevKick[idx(p)] = held
+    state.prevKick[idx(p)] = inputs[idx(p)]?.kick ?? false
     state.prevSlide[idx(p)] = inputs[idx(p)]?.slide ?? false
     state.prevChip[idx(p)] = inputs[idx(p)]?.chip ?? false
     state.prevFeint[idx(p)] = inputs[idx(p)]?.feint ?? false
@@ -340,7 +363,7 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
 
 // ── Onderdelen ─────────────────────────────────────────────────────────────────
 
-function movePlayer(p: PlayerState, move: Vec2, dt: number, maxSpeed: number) {
+function movePlayer(p: PlayerState, move: Vec2, dt: number, maxSpeed: number, frictionMul = 1) {
   const ml = Math.hypot(move.x, move.y)
   if (ml > 1e-3) {
     const dir = { x: move.x / ml, y: move.y / ml }
@@ -349,8 +372,8 @@ function movePlayer(p: PlayerState, move: Vec2, dt: number, maxSpeed: number) {
     p.vel.y += (target.y - p.vel.y) * Math.min(1, PLAYER_ACCEL * dt / maxSpeed)
     p.facing = dir
   } else {
-    // Uitlopen/afremmen.
-    const f = Math.max(0, 1 - PLAYER_FRICTION * dt)
+    // Uitlopen/afremmen (op een gladde mat remmen spelers veel langzamer af → ze glijden door).
+    const f = Math.max(0, 1 - PLAYER_FRICTION * frictionMul * dt)
     p.vel.x *= f
     p.vel.y *= f
   }
@@ -395,7 +418,7 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
   // Slide-tackle: een glijdende speler die de bal raakt, wipt 'm los in z'n glijrichting.
   for (const p of state.players) {
     if (p.slideTimer <= 0) continue
-    if (dist(p.pos, ball.pos) < SLIDE_STEAL_RADIUS + BALL_RADIUS) {
+    if (dist(p.pos, ball.pos) < SLIDE_STEAL_RADIUS * traitMul(p.traits.tackle) + BALL_RADIUS) {
       const d = norm(p.facing)
       ball.pos = add(p.pos, scale(d, PLAYER_RADIUS + BALL_RADIUS))
       ball.vel = scale(d, 250)
@@ -422,6 +445,9 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
   // Bij aftrap/set-piece mag alleen het nemende team de bal spelen.
   if ((state.phase === 'kickoff' || state.phase === 'setpiece') && best.team !== state.kickoffTeam) return
   touch(ball, best.id)
+  // Zodra een speler de bal weer onder controle heeft, dooft de curve (de schutter zelf is
+  // hier al uitgesloten via z'n kickCooldown → z'n schot blijft gewoon krullen).
+  ball.spin = 0
 
   const cmd = inputs[idx(best)] ?? { move: { x: 0, y: 0 }, kick: false }
   // LOSLAAT-flank: knop was ingedrukt en is nu los → trap met de opgebouwde power.
@@ -481,26 +507,33 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     return
   }
 
-  // Stift (E): gerichte lofte pass met assist, altijd omhoog → over de verdediging heen.
-  const chipEdge = !!cmd.chip && !state.prevChip[idx(best)]
-  if (chipEdge && best.kickCooldown <= 0) {
+  // Stift/lange bal (E): laadbaar → kort tikje = zacht lobje, vol geladen = harde lange bal.
+  // Vuurt op de LOSLAAT-flank (net als het schot), zodat de laadtijd de kracht bepaalt.
+  const chipReleaseEdge = state.prevChip[idx(best)] && !cmd.chip
+  if (chipReleaseEdge && best.kickCooldown <= 0) {
+    const ct = Math.min(1, best.charge / MAX_CHARGE_TIME)
     let dir = norm(cmd.move)
     if (dir.x === 0 && dir.y === 0) dir = best.facing
     if (dir.x === 0 && dir.y === 0) dir = { x: teamDir(best.team, state.attackDir), y: 0 }
-    let power = 470
-    const mate = bestPassTarget(state, best, dir)
-    if (mate) {
-      const rough = dist(ball.pos, mate.pos)
-      const travel = Math.min(0.7, rough / 520)
-      const lead = add(mate.pos, scale(mate.vel, travel))
-      dir = norm(sub(lead, ball.pos))
-      power = clamp(360 + dist(ball.pos, lead) * 1.15, PASS_POWER, KICK_POWER - 60)
+    let power = CHIP_MIN_POWER + (CHIP_MAX_POWER - CHIP_MIN_POWER) * ct
+    // Bij een zacht lobje richten we (assist) op een open medespeler; een geladen lange bal
+    // gaat strak in de ingedrukte richting (de ruimte in).
+    if (ct < 0.45) {
+      const mate = bestPassTarget(state, best, dir)
+      if (mate) {
+        const rough = dist(ball.pos, mate.pos)
+        const travel = Math.min(0.7, rough / 520)
+        const lead = add(mate.pos, scale(mate.vel, travel))
+        dir = norm(sub(lead, ball.pos))
+        power = clamp(360 + dist(ball.pos, lead) * 1.15, CHIP_MIN_POWER, CHIP_MAX_POWER)
+      }
     }
     const carry = Math.max(0, best.vel.x * dir.x + best.vel.y * dir.y)
     ball.vel = scale(dir, power + carry * 0.3)
     ball.pos = add(ball.pos, scale(dir, PLAYER_RADIUS + BALL_RADIUS))
     ball.z = 0
-    ball.vz = SHOT_LIFT_VZ * 0.92 // altijd lift → over verdedigers
+    ball.vz = SHOT_LIFT_VZ * (1.05 - 0.35 * ct) // zacht lobje = hogere boog, lange bal = vlakker
+    ball.spin = 0
     touch(ball, best.id)
     best.kickCooldown = KICK_COOLDOWN
     best.charge = 0
@@ -514,11 +547,38 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     if (dir.x === 0 && dir.y === 0) dir = best.facing
     if (dir.x === 0 && dir.y === 0) dir = { x: teamDir(best.team, state.attackDir), y: 0 }
 
+    // OMHAAL: een getimede knal op een bal die hoog in de lucht hangt → overhead kick richting
+    // het doel (auto-aim) + slow-motion (client haakt op state.bicycleCount).
+    const near = dist(best.pos, ball.pos) < CONTROL_RADIUS + PLAYER_RADIUS + 8
+    if (near && ball.z > BICYCLE_MIN_Z && best.charge >= PASS_CHARGE_MAX) {
+      const goalX = teamDir(best.team, state.attackDir) > 0 ? PITCH_LENGTH : 0
+      let bdir = norm(sub({ x: goalX, y: PITCH_WIDTH / 2 }, ball.pos))
+      const spray = (Math.random() * 2 - 1) * SHOT_SPRAY
+      const cs = Math.cos(spray), sn = Math.sin(spray)
+      bdir = { x: bdir.x * cs - bdir.y * sn, y: bdir.x * sn + bdir.y * cs }
+      ball.vel = scale(bdir, BICYCLE_POWER * traitMul(best.traits.shot))
+      ball.pos = add(ball.pos, scale(bdir, PLAYER_RADIUS + BALL_RADIUS))
+      ball.z = Math.max(ball.z, 4)
+      ball.vz = BICYCLE_LIFT
+      ball.spin = (Math.random() * 2 - 1) * SHOT_SPIN * 0.6
+      state.stats.shots[best.team] += 1
+      state.bicycleCount += 1
+      touch(ball, best.id)
+      best.kickCooldown = KICK_COOLDOWN
+      best.charge = 0
+      if (state.phase === 'kickoff') state.phase = 'playing'
+      return
+    }
+
     // Power schaalt met de laadtijd: korte tik → pass, vol → knal.
     const t = Math.min(1, best.charge / MAX_CHARGE_TIME)
     let power = PASS_POWER + (KICK_POWER - PASS_POWER) * t
-    // Een geladen trap (geen tik-pass) telt als schotpoging.
-    if (best.charge >= PASS_CHARGE_MAX) state.stats.shots[best.team] += 1
+    // Een geladen trap (geen tik-pass) telt als schotpoging + krijgt de schutter-trait mee
+    // (passes blijven onaangeroerd zodat de pass-assist accuraat blijft).
+    if (best.charge >= PASS_CHARGE_MAX) {
+      state.stats.shots[best.team] += 1
+      power *= traitMul(best.traits.shot)
+    }
 
     // Pass-assist: bij een korte tik richten we naar de best passende medespeler — en
     // mikken op waar die medespeler ZAL zijn (reistijd-lead), zodat lopende spelers 'm halen.
@@ -533,6 +593,15 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
         // Ruim genoeg kracht om aan te komen (de trap dempt 'm bij ontvangst).
         power = clamp(320 + d * 1.2, PASS_POWER, KICK_POWER - 10)
       }
+    }
+
+    // Harde, geladen schoten sprayen licht (je knalt keihard → niet perfect zuiver) en krijgen
+    // een kleine curve mee; beide schalen met de laadkracht `t`. Passes/tikken blijven zuiver.
+    if (best.charge >= PASS_CHARGE_MAX) {
+      const spray = (Math.random() * 2 - 1) * SHOT_SPRAY * t
+      const cs = Math.cos(spray), sn = Math.sin(spray)
+      dir = { x: dir.x * cs - dir.y * sn, y: dir.x * sn + dir.y * cs }
+      ball.spin = (Math.random() * 2 - 1) * SHOT_SPIN * t
     }
 
     const carry = Math.max(0, best.vel.x * dir.x + best.vel.y * dir.y)
@@ -639,6 +708,25 @@ function bestPassTarget(state: GameState, from: PlayerState, dir: Vec2): PlayerS
   return best
 }
 
+// Dynamisch weer (alleen buiten): de wind kruipt naar een doel-vector en elke paar seconden
+// valt er een nieuwe vlaag — soms fors — en begint/stopt de regen. Extra moeilijkheidsgraad:
+// een harde windvlaag trekt schoten en passes krom.
+function updateWeather(state: GameState, dt: number): void {
+  if (state.surface === 'zaal') { state.wind.x = 0; state.wind.y = 0; return } // binnen: windstil
+  state.weatherTimer -= dt
+  if (state.weatherTimer <= 0) {
+    state.weatherTimer = 6 + Math.random() * 8
+    const ang = Math.random() * Math.PI * 2
+    const mag = Math.pow(Math.random(), 1.7) * 200 // meestal mild, soms een flinke vlaag
+    state.windTarget = { x: Math.cos(ang) * mag, y: Math.sin(ang) * mag }
+    // Op sneeuw blijft het sneeuwen; elders komt/gaat de regen.
+    if (state.surface !== 'sneeuw') state.weather = Math.random() < 0.4 ? 'rain' : 'clear'
+  }
+  const k = Math.min(1, dt * 0.6) // soepel naar de nieuwe vlaag
+  state.wind.x += (state.windTarget.x - state.wind.x) * k
+  state.wind.y += (state.windTarget.y - state.wind.y) * k
+}
+
 function integrateBall(state: GameState, dt: number) {
   const { ball } = state
   // Ondergrond bepaalt de wrijving: zand/sneeuw remmen de bal harder, een zaalvloer minder.
@@ -652,6 +740,18 @@ function integrateBall(state: GameState, dt: number) {
   const windMul = onGround ? 0.3 : 1.6
   ball.vel.x += state.wind.x * windMul * dt
   ball.vel.y += state.wind.y * windMul * dt
+  // Curve (Magnus): een spinnende bal krult loodrecht op z'n bewegingsrichting; dooft uit.
+  if (ball.spin !== 0) {
+    const vx = ball.vel.x, vy = ball.vel.y
+    const spd = Math.hypot(vx, vy)
+    if (spd > 60) {
+      const mag = ball.spin * spd * SPIN_ACCEL * dt
+      ball.vel.x += (-vy / spd) * mag
+      ball.vel.y += (vx / spd) * mag
+    }
+    ball.spin *= Math.max(0, 1 - SPIN_DECAY * dt)
+    if (Math.abs(ball.spin) < 0.01) ball.spin = 0
+  }
   ball.vel = clampLen(ball.vel, BALL_MAX_SPEED)
   ball.pos.x += ball.vel.x * dt
   ball.pos.y += ball.vel.y * dt
@@ -668,11 +768,33 @@ function integrateBall(state: GameState, dt: number) {
 
 // Arcade-boarding: de bal blijft altijd in het spel en kaatst tegen de lijnen (gedempt).
 // Alleen in de doelopening loopt-ie door → goal. Retourneert true als er zojuist gescoord is.
-function handleBoundsAndGoals(state: GameState): boolean {
+function handleBoundsAndGoals(state: GameState, dt: number): boolean {
   const { ball } = state
   const L = PITCH_LENGTH
   const W = PITCH_WIDTH
   const br = BALL_RADIUS * state.ballScale // effectieve balstraal (giant-ball)
+
+  // Positie vóór deze stap → doorschiet-detectie: een snelle, schuine bal kan de doellijn
+  // kruisen binnen de mond terwijl z'n eindpositie deze frame al net naast de paal ligt.
+  // We testen daarom wáár het traject de lijn snijdt (i.p.v. alleen de eindpositie).
+  const px = ball.pos.x - ball.vel.x * dt
+  const py = ball.pos.y - ball.vel.y * dt
+  const mouth = goalHalf + br * 0.5 // iets ruimer dan de paal → schuine hoekschoten missen minder
+
+  // Linker doellijn (x=0).
+  if (ball.pos.x <= 0 || px <= 0) {
+    const denom = px - ball.pos.x
+    const f = denom !== 0 ? clamp(px / denom, 0, 1) : 0
+    const yAt = py + (ball.pos.y - py) * f
+    if (Math.abs(yAt - CENTER.y) < mouth) return awardGoal(state, teamDir(0, state.attackDir) < 0 ? 0 : 1)
+  }
+  // Rechter doellijn (x=L).
+  if (ball.pos.x >= L || px >= L) {
+    const denom = ball.pos.x - px
+    const f = denom !== 0 ? clamp((L - px) / denom, 0, 1) : 0
+    const yAt = py + (ball.pos.y - py) * f
+    if (Math.abs(yAt - CENTER.y) < mouth) return awardGoal(state, teamDir(0, state.attackDir) > 0 ? 0 : 1)
+  }
 
   // Zijlijnen (y) → kaatsen.
   if (ball.pos.y < br) {
@@ -683,21 +805,13 @@ function handleBoundsAndGoals(state: GameState): boolean {
     ball.vel.y = -Math.abs(ball.vel.y) * WALL_RESTITUTION
   }
 
-  const inMouth = Math.abs(ball.pos.y - CENTER.y) < goalHalf
-
-  // Linker doellijn (x=0): goal in de mond, anders kaatsen.
-  if (inMouth && ball.pos.x <= 0) {
-    return awardGoal(state, teamDir(0, state.attackDir) < 0 ? 0 : 1)
-  }
-  if (!inMouth && ball.pos.x < br) {
+  // Achterlijnen BUITEN de mond → kaatsen. (In de mond niet kaatsen, anders stuitert een bal
+  // die richting doel rolt af vóór hij de lijn haalt.)
+  const inMouthNow = Math.abs(ball.pos.y - CENTER.y) < mouth
+  if (!inMouthNow && ball.pos.x < br) {
     ball.pos.x = br
     ball.vel.x = Math.abs(ball.vel.x) * WALL_RESTITUTION
-  }
-  // Rechter doellijn (x=L): goal in de mond, anders kaatsen.
-  if (inMouth && ball.pos.x >= L) {
-    return awardGoal(state, teamDir(0, state.attackDir) > 0 ? 0 : 1)
-  }
-  if (!inMouth && ball.pos.x > L - br) {
+  } else if (!inMouthNow && ball.pos.x > L - br) {
     ball.pos.x = L - br
     ball.vel.x = -Math.abs(ball.vel.x) * WALL_RESTITUTION
   }
@@ -739,7 +853,7 @@ function updateStreaker(state: GameState, dt: number): void {
       const ang = Math.random() * Math.PI * 2
       const pos = streakerPointNear(b.x, b.y, ang, 330) // net binnen beeld, aan één kant van de bal
       const target = streakerPointNear(b.x, b.y, ang + Math.PI, 330) // dwars door de bal-omgeving
-      const variant: 0 | 1 = Math.random() < 0.5 ? 0 : 1
+      const variant = (Math.random() * 3 | 0) as 0 | 1 | 2
       state.streaker = { pos, vel: { x: 0, y: 0 }, target, timer: STREAKER_MAX_LIFE, variant, caught: false }
     }
     return
@@ -846,6 +960,7 @@ function keepOpponentsAway(state: GameState): void {
   const R = state.phase === 'kickoff' ? CENTER_CIRCLE_R + PLAYER_RADIUS : RESTART_KEEP_RADIUS
   for (const p of state.players) {
     if (p.sentOff || p.team === state.kickoffTeam) continue
+    p.slideTimer = 0 // geen glijdende tackle richting de bal tijdens de hervatting
     const dx = p.pos.x - ball.pos.x
     const dy = p.pos.y - ball.pos.y
     const d = Math.hypot(dx, dy)
@@ -855,7 +970,6 @@ function keepOpponentsAway(state: GameState): void {
       p.pos.x = clamp(ball.pos.x + nx * R, PLAYER_RADIUS, PITCH_LENGTH - PLAYER_RADIUS)
       p.pos.y = clamp(ball.pos.y + ny * R, PLAYER_RADIUS, PITCH_WIDTH - PLAYER_RADIUS)
       p.vel = { x: 0, y: 0 }
-      p.slideTimer = 0
     }
   }
 }
@@ -935,6 +1049,12 @@ function awardFoul(state: GameState, slider: PlayerState, victim: PlayerState, b
     if (r < FOUL_FRONT_RED) red = true
     else if (r < FOUL_FRONT_RED + FOUL_FRONT_YELLOW) yellow = true
   }
+  // Escalatie: telt de overtredingen binnen een kort venster; vanaf de 3e altijd minimaal geel
+  // (anders wordt 't een schoppartij). Reset-timer verlengt bij elke overtreding.
+  state.foulStreak = state.foulStreakTimer > 0 ? state.foulStreak + 1 : 1
+  state.foulStreakTimer = FOUL_STREAK_WINDOW
+  if (state.foulStreak >= FOUL_STREAK_LIMIT && !red) yellow = true
+
   if (yellow && slider.yellow) { yellow = false; red = true } // tweede geel = rood
   if (yellow) slider.yellow = true
   if (red) {
@@ -1032,7 +1152,7 @@ export function debugSpawnStreaker(state: GameState): void {
   const ang = Math.random() * Math.PI * 2
   const pos = streakerPointNear(b.x, b.y, ang, 330)
   const target = streakerPointNear(b.x, b.y, ang + Math.PI, 330)
-  state.streaker = { pos, vel: { x: 0, y: 0 }, target, timer: STREAKER_MAX_LIFE, variant: Math.random() < 0.5 ? 0 : 1, caught: false }
+  state.streaker = { pos, vel: { x: 0, y: 0 }, target, timer: STREAKER_MAX_LIFE, variant: (Math.random() * 3 | 0) as 0 | 1 | 2, caught: false }
   state.security = null
   state.streakerCooldown = 0
 }

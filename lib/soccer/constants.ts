@@ -18,6 +18,10 @@ export const MAX_STEPS_PER_FRAME = 5 // spiraal-van-de-dood-rem in de accumulato
 
 // ── Speler ──────────────────────────────────────────────────────────────────
 export const PLAYERS_PER_TEAM = 7 // 6 veldspelers + 1 keeper (2-3-1)
+// Speler-eigenschappen (pace/shot/tackle, 1..5): elk punt boven/onder 3 = ±deze fractie.
+// 0.06 → een 5 is +12% en een 1 is −12% t.o.v. gemiddeld. Subtiel maar voelbaar over een pot.
+export const TRAIT_STEP = 0.06
+export const traitMul = (rating: number): number => 1 + (rating - 3) * TRAIT_STEP
 export const PLAYER_RADIUS = 12
 export const PLAYER_ACCEL = 1700 // versnelling richting gewenste snelheid
 export const PLAYER_MAX_SPEED = 180 // rustiger tempo (~12% trager, 2026-07-02)
@@ -59,12 +63,26 @@ export const AIR_CONTROL_HEIGHT = 12 // boven deze hoogte vliegt de bal "over" s
 // ── Schot & pass (power-balk) ─────────────────────────────────────────────────
 // Kracht schaalt met hoe lang je de knop vasthoudt: tik = pass, vol geladen = knal.
 export const PASS_POWER = 370 // korte tik → zachte pass
-export const KICK_POWER = 720 // volledig geladen → hard schot
-export const MAX_CHARGE_TIME = 0.7 // seconden vasthouden voor volle kracht
+export const KICK_POWER = 820 // volledig geladen → keiharde knal (2026-07: iets harder)
+export const MAX_CHARGE_TIME = 0.95 // seconden vasthouden voor volle kracht (langer = meer skill)
 export const KICK_COOLDOWN = 0.28 // seconden tussen twee trappen door dezelfde speler
 export const PASS_ASSIST_CONE = 0.9 // radialen (~51°): passes binnen deze hoek snappen naar een medespeler
 export const PASS_ASSIST_RANGE = 560 // maximale pass-assist-afstand
 export const PASS_CHARGE_MAX = 0.34 // onder deze laadtijd geldt de trap als "pass" (assist aan)
+
+// ── Stift/lange bal (E, laadbaar) & omhaal ─────────────────────────────────────
+export const CHIP_MIN_POWER = 210 // korte tik E → zacht lobje (bewust traag → goed te timen)
+export const CHIP_MAX_POWER = 430 // vol geladen E → langere bal, maar nog steeds rustig
+export const BICYCLE_MIN_Z = 9 // bal minimaal zó hoog → een getimede knal wordt een omhaal
+export const BICYCLE_POWER = 860 // omhaal knalt hard richting doel
+export const BICYCLE_LIFT = 300 // opwaartse boog van de omhaal
+export const SLOWMO_TIME = 0.75 // seconden slow-motion na een omhaal (client vertraagt de sim even)
+
+// ── Curve & spray bij harde schoten (het "je knalt keihard"-gevoel) ────────────
+export const SHOT_SPRAY = 0.05 // max. willekeurige hoek-afwijking (rad, ~3°) bij een vol geladen schot
+export const SHOT_SPIN = 0.9 // max. curve die een geladen schot meekrijgt (grootte van ball.spin)
+export const SPIN_ACCEL = 0.9 // hoe sterk de spin de bal zijwaarts laat krullen (Magnus-factor)
+export const SPIN_DECAY = 1.6 // per seconde; de curve dooft geleidelijk uit
 
 // ── Sprint & sliding ──────────────────────────────────────────────────────────
 export const SPRINT_MULT = 1.42 // topsnelheid-boost tijdens sprint
@@ -110,6 +128,10 @@ export const FOUL_BEHIND_RED = 0.14
 export const FOUL_BEHIND_YELLOW = 0.5
 export const FOUL_FRONT_RED = 0.03
 export const FOUL_FRONT_YELLOW = 0.22
+// Escalatie: bij 3+ overtredingen binnen dit venster (sim-seconden) altijd minimaal geel
+// (voorkomt dat het een schoppartij wordt). De timer reset bij elke nieuwe overtreding.
+export const FOUL_STREAK_WINDOW = 22
+export const FOUL_STREAK_LIMIT = 3
 
 // ── Veldbestormer (fun) ─────────────────────────────────────────────────────
 export const STREAKER_RADIUS = 11
