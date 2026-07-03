@@ -240,6 +240,7 @@ function makeTeam(team: TeamId, attackDir: 1 | -1, meta: TeamMeta): PlayerState[
       slideTimer: 0,
       slideTackle: false,
       feintTimer: 0,
+      bicycleTimer: 0,
       tumbleTimer: 0,
       tackleCooldown: 0,
       yellow: false,

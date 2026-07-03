@@ -30,6 +30,7 @@ export type PlayerState = {
   slideTimer: number // >0 = aan het sliden (tackle of aanvallers-boost)
   slideTackle: boolean // true = echte tackle (poppetje ligt horizontaal); false = aanvallers-boost (blijft staan)
   feintTimer: number // >0 = bezig met een schijnbeweging/kap (R) — korte dash met de bal
+  bicycleTimer: number // >0 = bezig met een omhaal-salto (render: voeten boven, hoofd beneden + spin)
   tumbleTimer: number // >0 = omvergelopen door een tackle (tuimelt + even geen controle)
   tackleCooldown: number // >0 = herstellend na een slide (even trager)
   yellow: boolean // heeft al een gele kaart (2e geel = rood)

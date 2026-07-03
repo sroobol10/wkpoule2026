@@ -16,14 +16,41 @@ import {
 import { placeForKickoff, startSecondHalf, nearestTeammateToBall, step, debugSpawnStreaker, debugCard, debugGoal } from '@/lib/soccer/sim'
 import { computeAICommands } from '@/lib/soccer/ai'
 import { PixiSoccerRenderer } from '@/lib/soccer/pixi-renderer'
-import { KeyboardInput, DEFAULT_BINDINGS, loadBindings, saveBindings, activeGamepad, type Bindings, type ActionId } from '@/lib/soccer/input'
-import { SoccerNet, buildSnapshot, lerpSnapshotInto, makeRoomCode, type Snapshot } from '@/lib/soccer/net'
+import { KeyboardInput, DEFAULT_BINDINGS, KB_LEFT_BINDINGS, KB_RIGHT_BINDINGS, loadBindings, saveBindings, activeGamepad, connectedGamepadCount, type Bindings, type ActionId } from '@/lib/soccer/input'
+import { SoccerNet, buildSnapshot, lerpSnapshotInto, makeRoomCode, type Snapshot, type RosterMember, type SlotAssign } from '@/lib/soccer/net'
 import type { GameState, InputCommand, PlayerTraits, TeamId, TeamMeta } from '@/lib/soccer/types'
 import { dist } from '@/lib/soccer/vec'
 
 type Stage = 'menu' | 'match' | 'penalty'
-type Mode = 'local' | 'online' | 'penalty'
-type Lobby = 'idle' | 'hosting' | 'joining'
+type Mode = 'local' | 'local2p' | 'coop' | 'local2v2' | 'online' | 'penalty'
+// Toetsenbord-links (WASD) / toetsenbord-rechts (pijltjes) / controller 1-4.
+type InputDevice = 'kbL' | 'kbR' | 'pad1' | 'pad2' | 'pad3' | 'pad4'
+const DEVICE_IDS: InputDevice[] = ['kbL', 'kbR', 'pad1', 'pad2', 'pad3', 'pad4']
+// Metadata voor de apparaat-kiezer (icoon + duidelijke uitleg i.p.v. cryptische pijltjes).
+// pad = gamepad-index (undefined voor toetsenbord) → we tonen alleen verbonden controllers.
+const DEVICE_META: { id: InputDevice; icon: string; label: string; sub: string; pad?: number }[] = [
+  { id: 'kbL', icon: '⌨️', label: 'Toetsenbord', sub: 'WASD-kant' },
+  { id: 'kbR', icon: '⌨️', label: 'Toetsenbord', sub: 'Pijltjes-kant' },
+  { id: 'pad1', icon: '🎮', label: 'Controller 1', sub: 'Gamepad', pad: 0 },
+  { id: 'pad2', icon: '🎮', label: 'Controller 2', sub: 'Gamepad', pad: 1 },
+  { id: 'pad3', icon: '🎮', label: 'Controller 3', sub: 'Gamepad', pad: 2 },
+  { id: 'pad4', icon: '🎮', label: 'Controller 4', sub: 'Gamepad', pad: 3 },
+]
+// Multiplayer-modi als leesbare kaartjes (i.p.v. een propvolle 4-weg-segment). Standaard = 1v1.
+const MP_MODES: { id: Mode; label: string; desc: string }[] = [
+  { id: 'local2p', label: '1v1', desc: '2 spelers, zelfde pc' },
+  { id: 'coop', label: 'Co-op', desc: 'Samen vs computer' },
+  { id: 'local2v2', label: '2v2', desc: '4 spelers, zelfde pc' },
+  { id: 'online', label: 'Online', desc: 'Op afstand' },
+]
+// Apparaat → een input-bron. kbL/kbR = vaste toetsenbordhelft; padX = alleen die controller.
+function makePlayerInput(device: InputDevice): KeyboardInput {
+  if (device === 'kbL') return new KeyboardInput(KB_LEFT_BINDINGS, { keyboard: true, padIndex: -1 })
+  if (device === 'kbR') return new KeyboardInput(KB_RIGHT_BINDINGS, { keyboard: true, padIndex: -1 })
+  const idx = device === 'pad1' ? 0 : device === 'pad2' ? 1 : device === 'pad3' ? 2 : 3
+  return new KeyboardInput(loadBindings(), { keyboard: false, padIndex: idx })
+}
+type Lobby = 'idle' | 'hosting' | 'joining' | 'hosting2v2' | 'joining2v2'
 type Role = 'host' | 'guest' | null
 type Overlay = null | 'goal' | 'halftime' | 'fulltime'
 type Scorer = { team: TeamId; name: string; ownGoal: boolean; clock: number; half: number; face?: string | null }
@@ -212,6 +239,28 @@ function pickControlledForTeam(s: GameState, team: TeamId, curId: number): numbe
   return curId
 }
 
+// Co-op besturing: dichtstbijzijnde veldspeler van `team` bij de bal, maar NOOIT de speler die de
+// andere mens (`otherId`) al bestuurt. Hysterese zoals bij pickControlledForTeam.
+function pickCoop(s: GameState, team: TeamId, curId: number, otherId: number): number {
+  const b = s.ball
+  let nearest = -1
+  let nd = Infinity
+  for (const p of s.players) {
+    if (p.team !== team || p.role === 'GK' || p.sentOff || p.id === otherId) continue
+    const d = dist(p.pos, b.pos)
+    if (d < nd) { nd = d; nearest = p.id }
+  }
+  const cur = curId >= 0 ? s.players[curId] : null
+  if (!cur || cur.team !== team || cur.role === 'GK' || cur.sentOff || cur.id === otherId) return nearest
+  if (dist(cur.pos, b.pos) < CONTROL_RADIUS + PLAYER_RADIUS) return curId
+  if (nearest >= 0 && nearest !== curId) {
+    const dN = dist(s.players[nearest].pos, b.pos)
+    const dC = dist(cur.pos, b.pos)
+    if (dN + 20 < dC) return nearest
+  }
+  return curId
+}
+
 export default function SoccerClient() {
   const router = useRouter()
   const close = () => {
@@ -221,10 +270,24 @@ export default function SoccerClient() {
 
   const [stage, setStage] = useState<Stage>('menu')
   const [mode, setMode] = useState<Mode>('local')
+  // Lokaal 2-spelers: welk apparaat elke speler gebruikt (toetsenbord / controller 1 / controller 2).
+  const [p1Device, setP1Device] = useState<InputDevice>('pad1')
+  const [p2Device, setP2Device] = useState<InputDevice>('pad2')
+  const [p3Device, setP3Device] = useState<InputDevice>('kbL') // alleen 2v2
+  const [p4Device, setP4Device] = useState<InputDevice>('kbR') // alleen 2v2
+  const [padCount, setPadCount] = useState(0) // reactief aantal verbonden controllers (voor de apparaat-kiezer)
   const [role, setRole] = useState<Role>(null)
   const [lobby, setLobby] = useState<Lobby>('idle')
   const [roomCode, setRoomCode] = useState('')
   const [joinCode, setJoinCode] = useState('')
+  // Online 2v2 lobby: kamergrootte (2 = 1v1, 4 = 2v2) + roster + team-toewijzing per peer.
+  const [onlineSize, setOnlineSize] = useState<2 | 4>(2)
+  const [lobbyMembers, setLobbyMembers] = useState<RosterMember[]>([])
+  const [teamAssign, setTeamAssign] = useState<Record<string, 0 | 1>>({}) // host: peerId → team
+  const [myTeam, setMyTeam] = useState<0 | 1 | null>(null) // gast: eigen toegewezen team
+  const guestTeamsRef = useRef<Record<string, TeamMeta>>({}) // host: team-config per gast (peerId)
+  const slotInputsRef = useRef<Record<number, InputCommand>>({}) // host: laatste input per slot (2v2)
+  const mySlotRef = useRef<number>(-1) // gast: eigen slot in 2v2
   const [netMsg, setNetMsg] = useState('')
   const halfSec = HALF_SEC
   const [difficulty, setDifficulty] = useState(0.6)
@@ -247,6 +310,7 @@ export default function SoccerClient() {
   const [showResults, setShowResults] = useState(false)
   const [showControls, setShowControls] = useState(false)
   const [showTraits, setShowTraits] = useState(false)
+  const [showMatchSettings, setShowMatchSettings] = useState(false)
   // Zelf aangepaste traits per speler (face → traits); leeg = standaard uit de pool.
   const [customTraits, setCustomTraits] = useState<Record<string, PlayerTraits>>({})
   const traitsFor = useCallback((face: string): PlayerTraits => customTraits[face] ?? defaultTraitsFor(face), [customTraits])
@@ -277,6 +341,10 @@ export default function SoccerClient() {
   const accRef = useRef<number>(0)
   const pausedRef = useRef<boolean>(false)
   const difficultyRef = useRef<number>(difficulty)
+  const p1DeviceRef = useRef<InputDevice>(p1Device)
+  const p2DeviceRef = useRef<InputDevice>(p2Device)
+  const p3DeviceRef = useRef<InputDevice>(p3Device)
+  const p4DeviceRef = useRef<InputDevice>(p4Device)
   const giantBallRef = useRef<boolean>(giantBall)
   const bigHeadsRef = useRef<boolean>(bigHeads)
   const slipperyRef = useRef<boolean>(slippery)
@@ -303,6 +371,25 @@ export default function SoccerClient() {
   const manualHoldRef = useRef<number>(0)
   const prevCtrlRef = useRef<number>(-1)
   const prevCtrlGRef = useRef<number>(-1)
+  // Lokaal 2-spelers (zelfde PC): speler 2 = tweede input (controller 2), bestuurt team 1.
+  const twoPlayerRef = useRef<boolean>(false)
+  const coopRef = useRef<boolean>(false) // 2 mensen samen op team 0 vs AI (co-op)
+  const fourPlayerRef = useRef<boolean>(false) // 4 bestuurde spelers (lokaal 2v2 óf online-host 2v2)
+  const netHost2v2Ref = useRef<boolean>(false) // host 2v2 online: slots 1-3 komen van het netwerk
+  const net2v2GuestRef = useRef<boolean>(false) // gast in een 2v2-kamer
+  const input2Ref = useRef<KeyboardInput | null>(null)
+  const input3Ref = useRef<KeyboardInput | null>(null)
+  const input4Ref = useRef<KeyboardInput | null>(null)
+  const prevSwitch2Ref = useRef<boolean>(false)
+  const prevSwitch3Ref = useRef<boolean>(false)
+  const prevSwitch4Ref = useRef<boolean>(false)
+  const manualHold2Ref = useRef<number>(0)
+  const manualHold3Ref = useRef<number>(0)
+  const manualHold4Ref = useRef<number>(0)
+  const controlled3Ref = useRef<number>(-1) // team 1, speler 3 (2v2)
+  const controlled4Ref = useRef<number>(-1) // team 1, speler 4 (2v2)
+  const prevCtrl3Ref = useRef<number>(-1)
+  const prevCtrl4Ref = useRef<number>(-1)
   const setpieceRef = useRef<string | null>(null)
   const prevCardsRef = useRef<number>(0)
   const prevFoulRef = useRef<number>(0)
@@ -327,9 +414,29 @@ export default function SoccerClient() {
   const prevKickSpeedRef = useRef<number>(0)
 
   useEffect(() => { difficultyRef.current = difficulty }, [difficulty])
+  useEffect(() => { p1DeviceRef.current = p1Device }, [p1Device])
+  useEffect(() => { p2DeviceRef.current = p2Device }, [p2Device])
+  useEffect(() => { p3DeviceRef.current = p3Device }, [p3Device])
+  useEffect(() => { p4DeviceRef.current = p4Device }, [p4Device])
+  // Host 2v2-lobby: broadcast de (voorlopige) team-indeling zodat gasten hun kant live zien.
+  useEffect(() => {
+    if (lobby !== 'hosting2v2' || !netRef.current) return
+    const guests = lobbyMembers.filter((m) => m.role === 'guest')
+    const slots: SlotAssign[] = [{ peerId: netRef.current.peerId, slot: 0, team: 0 }]
+    guests.forEach((g, i) => slots.push({ peerId: g.peerId, slot: i + 1, team: (teamAssign[g.peerId] ?? 1) as 0 | 1 }))
+    netRef.current.sendLobby({ size: 4, slots })
+  }, [lobby, lobbyMembers, teamAssign])
   useEffect(() => { giantBallRef.current = giantBall }, [giantBall])
   useEffect(() => { bigHeadsRef.current = bigHeads }, [bigHeads])
   useEffect(() => { slipperyRef.current = slippery }, [slippery])
+  // Houd het aantal verbonden controllers bij (voor de apparaat-kiezer in de instellingen).
+  useEffect(() => {
+    const upd = () => setPadCount(connectedGamepadCount())
+    upd()
+    window.addEventListener('gamepadconnected', upd)
+    window.addEventListener('gamepaddisconnected', upd)
+    return () => { window.removeEventListener('gamepadconnected', upd); window.removeEventListener('gamepaddisconnected', upd) }
+  }, [])
 
   // Bewaarde team-setup + settings inladen (lokaal, per apparaat). Alles wordt gevalideerd
   // tegen de huidige pool/kits/formaties zodat een oude opslag nooit kapotgaat.
@@ -355,6 +462,10 @@ export default function SoccerClient() {
         if (typeof s.giantBall === 'boolean') setGiantBall(s.giantBall)
         if (typeof s.bigHeads === 'boolean') setBigHeads(s.bigHeads)
         if (typeof s.slippery === 'boolean') setSlippery(s.slippery)
+        if (DEVICE_IDS.includes(s.p1Device)) setP1Device(s.p1Device)
+        if (DEVICE_IDS.includes(s.p2Device)) setP2Device(s.p2Device)
+        if (DEVICE_IDS.includes(s.p3Device)) setP3Device(s.p3Device)
+        if (DEVICE_IDS.includes(s.p4Device)) setP4Device(s.p4Device)
       }
     } catch {
       /* corrupte opslag → gewoon de standaardwaarden */
@@ -387,11 +498,11 @@ export default function SoccerClient() {
   useEffect(() => {
     if (!hydratedRef.current) return
     try {
-      localStorage.setItem(SETUP_KEY, JSON.stringify({ teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery }))
+      localStorage.setItem(SETUP_KEY, JSON.stringify({ teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery, p1Device, p2Device, p3Device, p4Device }))
     } catch {
       /* private mode / quota → stil overslaan */
     }
-  }, [teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery])
+  }, [teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery, p1Device, p2Device, p3Device, p4Device])
 
   // Uitslagen-geschiedenis inladen (lokaal, per apparaat) — mount-time, geen hydration-mismatch.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -740,7 +851,10 @@ export default function SoccerClient() {
       const now = performance.now()
       if (inputRef.current && netRef.current && now - lastGuestSendRef.current > GUEST_SEND_MS) {
         lastGuestSendRef.current = now
-        netRef.current.sendInput(inputRef.current.command())
+        const cmd = inputRef.current.command()
+        // 2v2: input taggen met je eigen slot; 1v1: los versturen.
+        if (net2v2GuestRef.current) netRef.current.sendInputSlot(mySlotRef.current, cmd)
+        else netRef.current.sendInput(cmd)
       }
       const buf = snapBufRef.current
       if (buf.length > 0) {
@@ -753,7 +867,9 @@ export default function SoccerClient() {
         }
         if (a && b) lerpSnapshotInto(s, a.snap, b.snap, (renderAt - a.at) / Math.max(1, b.at - a.at))
         else { const last = buf[buf.length - 1]; lerpSnapshotInto(s, last.snap, last.snap, 0) }
-        controlledRef.current = buf[buf.length - 1].snap.cg
+        const latest = buf[buf.length - 1].snap
+        // 2v2: jouw bestuurde speler = cs[mijnSlot]; 1v1: cg.
+        controlledRef.current = net2v2GuestRef.current ? (latest.cs?.[mySlotRef.current] ?? -1) : latest.cg
         while (buf.length > 12) buf.shift()
       }
       syncOverlay(s)
@@ -770,6 +886,24 @@ export default function SoccerClient() {
     }
     prevSwitchRef.current = !!hcmd?.switch
     if (manualHoldRef.current > 0) manualHoldRef.current = Math.max(0, manualHoldRef.current - frameDt)
+    // Speler 2: lokaal van z'n apparaat, of (online 2v2) van slot 1 over het netwerk.
+    const p2cmd = netHost2v2Ref.current ? (slotInputsRef.current[1] ?? null) : (twoPlayerRef.current && input2Ref.current ? input2Ref.current.command() : null)
+    if (p2cmd?.switch && !prevSwitch2Ref.current) {
+      // Speler 2 zit op team 0 bij co-op én 2v2; alleen bij lokaal 1v1 op team 1.
+      controlledGuestRef.current = cycleTeammate(s, coopRef.current || fourPlayerRef.current ? 0 : 1, controlledGuestRef.current)
+      manualHold2Ref.current = 2
+    }
+    prevSwitch2Ref.current = !!p2cmd?.switch
+    if (manualHold2Ref.current > 0) manualHold2Ref.current = Math.max(0, manualHold2Ref.current - frameDt)
+    // Spelers 3 & 4 (team 1): lokaal van hun apparaat, of (online 2v2) van slot 2/3 over het netwerk.
+    const p3cmd = netHost2v2Ref.current ? (slotInputsRef.current[2] ?? null) : (fourPlayerRef.current && input3Ref.current ? input3Ref.current.command() : null)
+    if (p3cmd?.switch && !prevSwitch3Ref.current) { controlled3Ref.current = cycleTeammate(s, 1, controlled3Ref.current); manualHold3Ref.current = 2 }
+    prevSwitch3Ref.current = !!p3cmd?.switch
+    if (manualHold3Ref.current > 0) manualHold3Ref.current = Math.max(0, manualHold3Ref.current - frameDt)
+    const p4cmd = netHost2v2Ref.current ? (slotInputsRef.current[3] ?? null) : (fourPlayerRef.current && input4Ref.current ? input4Ref.current.command() : null)
+    if (p4cmd?.switch && !prevSwitch4Ref.current) { controlled4Ref.current = cycleTeammate(s, 1, controlled4Ref.current); manualHold4Ref.current = 2 }
+    prevSwitch4Ref.current = !!p4cmd?.switch
+    if (manualHold4Ref.current > 0) manualHold4Ref.current = Math.max(0, manualHold4Ref.current - frameDt)
 
     if (!pausedRef.current) {
       // Slow-motion na een omhaal: minder sim-tijd per frame → alles beweegt heel even vertraagd.
@@ -780,13 +914,37 @@ export default function SoccerClient() {
         // Online: AI-teamgenoten altijd op 'Normaal' (geen difficulty-keuze in 1v1).
         const aiDiff = roleRef.current === null ? difficultyRef.current : 0.6
         const inputs: InputCommand[] = computeAICommands(s, -1, aiDiff)
-        if (netRole === 'host') {
+        if (fourPlayerRef.current) {
+          // Lokaal 2v2: team 0 = speler 1+2, team 1 = speler 3+4 (elk paar nooit dezelfde speler).
+          const c1 = manualHoldRef.current > 0 ? controlledRef.current : pickCoop(s, 0, controlledRef.current, controlledGuestRef.current)
+          controlledRef.current = c1
+          const c2 = manualHold2Ref.current > 0 ? controlledGuestRef.current : pickCoop(s, 0, controlledGuestRef.current, c1)
+          controlledGuestRef.current = c2
+          const c3 = manualHold3Ref.current > 0 ? controlled3Ref.current : pickCoop(s, 1, controlled3Ref.current, controlled4Ref.current)
+          controlled3Ref.current = c3
+          const c4 = manualHold4Ref.current > 0 ? controlled4Ref.current : pickCoop(s, 1, controlled4Ref.current, c3)
+          controlled4Ref.current = c4
+          if (hcmd && c1 >= 0) { seedEdgesOnSwitch(s, c1, hcmd, prevCtrlRef); inputs[c1] = hcmd }
+          if (p2cmd && c2 >= 0) { seedEdgesOnSwitch(s, c2, p2cmd, prevCtrlGRef); inputs[c2] = p2cmd }
+          if (p3cmd && c3 >= 0) { seedEdgesOnSwitch(s, c3, p3cmd, prevCtrl3Ref); inputs[c3] = p3cmd }
+          if (p4cmd && c4 >= 0) { seedEdgesOnSwitch(s, c4, p4cmd, prevCtrl4Ref); inputs[c4] = p4cmd }
+        } else if (coopRef.current) {
+          // Co-op: beide mensen op team 0 (nooit dezelfde speler); team 1 volledig AI.
+          const c1 = manualHoldRef.current > 0 ? controlledRef.current : pickCoop(s, 0, controlledRef.current, controlledGuestRef.current)
+          controlledRef.current = c1
+          const c2 = manualHold2Ref.current > 0 ? controlledGuestRef.current : pickCoop(s, 0, controlledGuestRef.current, c1)
+          controlledGuestRef.current = c2
+          if (hcmd && c1 >= 0) { seedEdgesOnSwitch(s, c1, hcmd, prevCtrlRef); inputs[c1] = hcmd }
+          if (p2cmd && c2 >= 0) { seedEdgesOnSwitch(s, c2, p2cmd, prevCtrlGRef); inputs[c2] = p2cmd }
+        } else if (netRole === 'host' || twoPlayerRef.current) {
+          // Twee bestuurde spelers: team 0 = speler 1, team 1 = online-gast óf lokale speler 2.
           const cH = manualHoldRef.current > 0 ? controlledRef.current : pickControlledForTeam(s, 0, controlledRef.current)
-          const cG = pickControlledForTeam(s, 1, controlledGuestRef.current)
+          const cG = manualHold2Ref.current > 0 ? controlledGuestRef.current : pickControlledForTeam(s, 1, controlledGuestRef.current)
           controlledRef.current = cH
           controlledGuestRef.current = cG
           if (hcmd && cH >= 0) { seedEdgesOnSwitch(s, cH, hcmd, prevCtrlRef); inputs[cH] = hcmd }
-          if (cG >= 0) { seedEdgesOnSwitch(s, cG, guestInputRef.current, prevCtrlGRef); inputs[cG] = guestInputRef.current }
+          const t1cmd = twoPlayerRef.current ? p2cmd : guestInputRef.current
+          if (t1cmd && cG >= 0) { seedEdgesOnSwitch(s, cG, t1cmd, prevCtrlGRef); inputs[cG] = t1cmd }
         } else {
           const c = manualHoldRef.current > 0 ? controlledRef.current : pickControlledForTeam(s, team, controlledRef.current)
           controlledRef.current = c
@@ -798,7 +956,8 @@ export default function SoccerClient() {
         if (netRole === 'host') {
           tickRef.current++
           if (tickRef.current % SNAPSHOT_EVERY === 0) {
-            netRef.current?.sendSnapshot(buildSnapshot(s, tickRef.current, controlledGuestRef.current))
+            const cs = netHost2v2Ref.current ? [controlledRef.current, controlledGuestRef.current, controlled3Ref.current, controlled4Ref.current] : undefined
+            netRef.current?.sendSnapshot(buildSnapshot(s, tickRef.current, controlledGuestRef.current, cs))
           }
         }
       }
@@ -812,7 +971,8 @@ export default function SoccerClient() {
       if (now - lastPausedSendRef.current > 90) {
         lastPausedSendRef.current = now
         tickRef.current++
-        netRef.current.sendSnapshot(buildSnapshot(s, tickRef.current, controlledGuestRef.current))
+        const cs = netHost2v2Ref.current ? [controlledRef.current, controlledGuestRef.current, controlled3Ref.current, controlled4Ref.current] : undefined
+        netRef.current.sendSnapshot(buildSnapshot(s, tickRef.current, controlledGuestRef.current, cs))
       }
     }
     drawFrame(pausedRef.current ? 0 : frameDt)
@@ -903,9 +1063,47 @@ export default function SoccerClient() {
   const myTeamMeta = useCallback(() => buildTeamMeta(teamName, kit, lineup, formationId, customTraits), [teamName, kit, lineup, formationId, customTraits])
 
   const startLocal = () => {
+    twoPlayerRef.current = false
+    coopRef.current = false
+    fourPlayerRef.current = false
     const human = myTeamMeta()
     const ai = randomAiTeam(kit.shirt)
     beginMatch(null, [human, ai], halfSec)
+  }
+
+  // Lokaal 2 spelers (zelfde PC): jij (team 0) vs speler 2 (team 1, willekeurig land). Geen netcode;
+  // speler 2 speelt op z'n eigen apparaat. De AI vult op beide teams de niet-bestuurde spelers.
+  const startLocal2p = () => {
+    twoPlayerRef.current = true
+    coopRef.current = false
+    fourPlayerRef.current = false
+    const p1 = myTeamMeta()
+    const p2 = randomAiTeam(kit.shirt) // eigen, contrasterend team voor speler 2
+    beginMatch(null, [p1, p2], halfSec)
+  }
+
+  // Co-op: speler 1 + speler 2 SAMEN op team 0 (jouw team) tegen de AI (team 1). Elke mens bestuurt
+  // automatisch de dichtstbijzijnde teamgenoot — nooit dezelfde.
+  const startCoop = () => {
+    twoPlayerRef.current = true
+    coopRef.current = true
+    fourPlayerRef.current = false
+    const ours = myTeamMeta()
+    const ai = randomAiTeam(kit.shirt)
+    beginMatch(null, [ours, ai], halfSec)
+  }
+
+  // Lokaal 2v2 (4 mensen, zelfde PC): speler 1+2 op team 0, speler 3+4 op team 1. Elk mens
+  // bestuurt automatisch de dichtstbijzijnde teamgenoot (nooit dezelfde). Geen AI-tegenstander.
+  const start2v2 = () => {
+    twoPlayerRef.current = true
+    coopRef.current = false
+    fourPlayerRef.current = true
+    controlled3Ref.current = -1
+    controlled4Ref.current = -1
+    const a = myTeamMeta()
+    const b = randomAiTeam(kit.shirt)
+    beginMatch(null, [a, b], halfSec)
   }
 
   // Losse penalty-modus (geen veldwedstrijd): direct een strafschoppenserie tegen de AI.
@@ -929,11 +1127,18 @@ export default function SoccerClient() {
     setNetMsg('')
     setOverlay(null)
     overlayRef.current = null
+    netHost2v2Ref.current = false
+    net2v2GuestRef.current = false
   }, [])
 
   // ── Online ────────────────────────────────────────────────────────────────
   const startHostMatch = useCallback((teams: [TeamMeta, TeamMeta], hs: number) => {
     if (stateRef.current) return
+    twoPlayerRef.current = false
+    coopRef.current = false
+    fourPlayerRef.current = false
+    netHost2v2Ref.current = false
+    net2v2GuestRef.current = false
     beginMatch('host', teams, hs) // kiest venue/weer (zet venueRef) → daarna naar de gast sturen
     netRef.current?.sendStart({ teams, halfSec: hs, venue: venueRef.current?.venue, weather: venueRef.current?.weather, ballScale: giantBallRef.current ? 2 : 1, bigHeads: bigHeadsRef.current, slippery: slipperyRef.current })
   }, [beginMatch])
@@ -963,6 +1168,8 @@ export default function SoccerClient() {
     const code = joinCode.trim().toUpperCase()
     if (code.length < 4) { setNetMsg('Voer een geldige code in.'); return }
     const guestMeta = myTeamMeta()
+    net2v2GuestRef.current = false
+    netHost2v2Ref.current = false
     setLobby('joining')
     setNetMsg('Verbinden…')
     startedGuestRef.current = false
@@ -982,6 +1189,85 @@ export default function SoccerClient() {
     net.connect()
   }
 
+  // ── Online 2v2 ──────────────────────────────────────────────────────────────
+  const hostGame2v2 = () => {
+    const meta = myTeamMeta()
+    hostMetaRef.current = meta
+    guestTeamsRef.current = {}
+    slotInputsRef.current = {}
+    setTeamAssign({})
+    setLobbyMembers([])
+    const code = makeRoomCode(Math.floor(Math.random() * 1_000_000))
+    setRoomCode(code)
+    setLobby('hosting2v2')
+    setNetMsg('Wachten op 3 spelers…')
+    const net = new SoccerNet('host', code, {
+      onRoster: (members) => setLobbyMembers(members),
+      onJoin: (p) => { guestTeamsRef.current[p.peerId] = p.team },
+      onInputSlot: (slot, cmd) => { slotInputsRef.current[slot] = cmd },
+      onPeerLeft: () => setNetMsg('Een speler verliet de kamer.'),
+    }, meta.name)
+    netRef.current = net
+    net.connect()
+  }
+
+  // Host drukt op start: bouw slots (0=host A, 1=A-gast, 2+3=B-gasten), team B = team van de 1e B-speler.
+  const start2v2Online = () => {
+    const net = netRef.current
+    if (!net) return
+    const guests = lobbyMembers.filter((m) => m.role === 'guest')
+    const aG = guests.filter((g) => teamAssign[g.peerId] === 0)
+    const bG = guests.filter((g) => (teamAssign[g.peerId] ?? 1) === 1)
+    if (guests.length !== 3 || aG.length !== 1 || bG.length !== 2) return
+    const slots: SlotAssign[] = [
+      { peerId: net.peerId, slot: 0, team: 0 },
+      { peerId: aG[0].peerId, slot: 1, team: 0 },
+      { peerId: bG[0].peerId, slot: 2, team: 1 },
+      { peerId: bG[1].peerId, slot: 3, team: 1 },
+    ]
+    const teamA = hostMetaRef.current!
+    const teamB = ensureDistinctKit(guestTeamsRef.current[bG[0].peerId] ?? randomAiTeam(teamA.shirt), teamA.shirt)
+    twoPlayerRef.current = true
+    fourPlayerRef.current = true
+    coopRef.current = false
+    netHost2v2Ref.current = true
+    net2v2GuestRef.current = false
+    controlled3Ref.current = -1
+    controlled4Ref.current = -1
+    slotInputsRef.current = {}
+    beginMatch('host', [teamA, teamB], halfSec)
+    net.sendStart({ teams: [teamA, teamB], halfSec, venue: venueRef.current?.venue, weather: venueRef.current?.weather, ballScale: giantBallRef.current ? 2 : 1, bigHeads: bigHeadsRef.current, slippery: slipperyRef.current, slots })
+  }
+
+  const joinGame2v2 = () => {
+    const code = joinCode.trim().toUpperCase()
+    if (code.length < 4) { setNetMsg('Voer een geldige code in.'); return }
+    const guestMeta = myTeamMeta()
+    net2v2GuestRef.current = true
+    netHost2v2Ref.current = false
+    mySlotRef.current = -1
+    setMyTeam(null)
+    setLobby('joining2v2')
+    setNetMsg('Verbinden…')
+    startedGuestRef.current = false
+    const net = new SoccerNet('guest', code, {
+      onSubscribed: () => { setNetMsg('Verbonden — wachten op de indeling van de host…'); net.sendJoin({ peerId: net.peerId, name: guestMeta.name, team: guestMeta }) },
+      onLobby: (payload) => { const mine = payload.slots.find((sl) => sl.peerId === net.peerId); if (mine) { setMyTeam(mine.team); mySlotRef.current = mine.slot } },
+      onStart: (payload) => {
+        if (startedGuestRef.current) return
+        startedGuestRef.current = true
+        const mine = payload.slots?.find((sl) => sl.peerId === net.peerId)
+        const cosmetic = payload.venue && payload.weather ? { venue: payload.venue, weather: payload.weather, ballScale: payload.ballScale ?? 1, bigHeads: payload.bigHeads, slippery: payload.slippery } : undefined
+        beginMatch('guest', payload.teams, payload.halfSec, cosmetic)
+        if (mine) { mySlotRef.current = mine.slot; humanTeamRef.current = mine.team; setMyTeam(mine.team) }
+      },
+      onSnapshot: (snap) => { snapBufRef.current.push({ snap, at: performance.now() }) },
+      onPeerLeft: () => { setNetMsg('De host verliet het spel.'); backToMenu() },
+    }, guestMeta.name)
+    netRef.current = net
+    net.connect()
+  }
+
   const cancelLobby = () => {
     netRef.current?.leave()
     netRef.current = null
@@ -989,6 +1275,8 @@ export default function SoccerClient() {
     setRole(null)
     setLobby('idle')
     setNetMsg('')
+    netHost2v2Ref.current = false
+    net2v2GuestRef.current = false
   }
 
   useEffect(() => {
@@ -1001,9 +1289,16 @@ export default function SoccerClient() {
     const renderer = new PixiSoccerRenderer()
     rendererRef.current = renderer
     const faces = Array.from(new Set(s.players.map((p) => p.face).filter((f): f is string => !!f)))
-    const kb = new KeyboardInput()
+    // Speler 1: standaard toetsenbord+eerste controller; bij multiplayer het gekozen apparaat.
+    const kb = twoPlayerRef.current ? makePlayerInput(p1DeviceRef.current) : new KeyboardInput()
     kb.attach()
     inputRef.current = kb
+    const attachDev = (ref: typeof input2Ref, on: boolean, dev: InputDevice) => {
+      if (on) { const k = makePlayerInput(dev); k.attach(); ref.current = k } else { ref.current = null }
+    }
+    attachDev(input2Ref, twoPlayerRef.current, p2DeviceRef.current) // speler 2 (team 0 co-op/2v2, of team 1 bij 1v1)
+    attachDev(input3Ref, fourPlayerRef.current, p3DeviceRef.current) // 2v2: team 1 speler 3
+    attachDev(input4Ref, fourPlayerRef.current, p4DeviceRef.current) // 2v2: team 1 speler 4
     const ro = new ResizeObserver(() => resizeRenderer())
     if (wrapRef.current) ro.observe(wrapRef.current)
     const loop = (t: number) => {
@@ -1028,6 +1323,9 @@ export default function SoccerClient() {
       cancelled = true
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
       kb.detach()
+      input2Ref.current?.detach(); input2Ref.current = null
+      input3Ref.current?.detach(); input3Ref.current = null
+      input4Ref.current?.detach(); input4Ref.current = null
       ro.disconnect()
       renderer.destroy()
       rendererRef.current = null
@@ -1174,11 +1472,106 @@ export default function SoccerClient() {
           {showTraits && (
             <TraitsModal current={customTraits} onClose={() => setShowTraits(false)} onSave={setCustomTraits} />
           )}
+          {showMatchSettings && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-6" onClick={() => setShowMatchSettings(false)}>
+              <div className="flex max-h-[85vh] w-full max-w-md flex-col gap-5 overflow-y-auto rounded-2xl border border-white/12 bg-wk-surface p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between">
+                  <h2 className="font-display text-lg uppercase tracking-[0.14em] text-wk-text">Instellingen</h2>
+                  <button onClick={() => setShowMatchSettings(false)} className="font-mono text-[11px] uppercase tracking-widest text-wk-muted hover:text-wk-text">Sluiten ✕</button>
+                </div>
+
+                {mode === 'online' && (
+                  <Field label="Kamer"><Segmented options={['1v1', '2v2']} value={onlineSize === 2 ? 0 : 1} onChange={(i) => setOnlineSize(i === 0 ? 2 : 4)} /></Field>
+                )}
+
+                {(mode === 'local' || mode === 'coop') && (
+                  <Field label="Moeilijkheid"><Segmented options={DIFFICULTY.map((o) => o.label)} value={DIFFICULTY.findIndex((o) => o.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} /></Field>
+                )}
+
+                {(mode === 'local2p' || mode === 'coop') && (
+                  <>
+                    <Field label="Speler 1"><DevicePicker value={p1Device} onChange={setP1Device} padCount={padCount} /></Field>
+                    <Field label="Speler 2"><DevicePicker value={p2Device} onChange={setP2Device} padCount={padCount} /></Field>
+                  </>
+                )}
+                {mode === 'local2v2' && (
+                  <>
+                    <Field label="Speler 1 · team A"><DevicePicker value={p1Device} onChange={setP1Device} padCount={padCount} /></Field>
+                    <Field label="Speler 2 · team A"><DevicePicker value={p2Device} onChange={setP2Device} padCount={padCount} /></Field>
+                    <Field label="Speler 3 · team B"><DevicePicker value={p3Device} onChange={setP3Device} padCount={padCount} /></Field>
+                    <Field label="Speler 4 · team B"><DevicePicker value={p4Device} onChange={setP4Device} padCount={padCount} /></Field>
+                  </>
+                )}
+
+                {mode !== 'penalty' && (
+                  <>
+                    <Field label="Bal"><Segmented options={['Normaal', '⚽ Giant']} value={giantBall ? 1 : 0} onChange={(i) => setGiantBall(i === 1)} /></Field>
+                    <Field label="Chaos">
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setBigHeads(!bigHeads)}
+                          className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${bigHeads ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>🗿 Grote koppen</button>
+                        <button type="button" onClick={() => setSlippery(!slippery)}
+                          className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${slippery ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>⛸️ Gladde mat</button>
+                      </div>
+                    </Field>
+                  </>
+                )}
+
+                <Field label="Besturing">
+                  <button type="button" onClick={() => { setShowMatchSettings(false); setShowControls(true) }}
+                    className="w-full rounded-lg border border-white/15 px-3 py-2 font-mono text-[11px] uppercase tracking-wide text-wk-soft transition hover:border-white/35 hover:text-wk-text">
+                    🎮 Toetsen &amp; controller aanpassen
+                  </button>
+                </Field>
+
+                <button onClick={() => setShowMatchSettings(false)} className="mt-1 rounded-lg border border-wk-green/50 bg-wk-green/15 px-5 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-wk-green hover:bg-wk-green/25">Klaar</button>
+              </div>
+            </div>
+          )}
 
           {lobby !== 'idle' ? (
             <div className="relative flex flex-1 items-center justify-center px-8">
               <div className="flex w-full max-w-md flex-col items-center gap-5 rounded-2xl border border-white/10 bg-wk-surface/60 px-8 py-10 text-center backdrop-blur-sm animate-fade-up">
-                {lobby === 'hosting' ? (
+                {lobby === 'hosting2v2' ? (() => {
+                  const guests = lobbyMembers.filter((m) => m.role === 'guest')
+                  const aCount = guests.filter((g) => teamAssign[g.peerId] === 0).length
+                  const bCount = guests.filter((g) => (teamAssign[g.peerId] ?? 1) === 1).length
+                  const ready = guests.length === 3 && aCount === 1 && bCount === 2
+                  return (
+                    <>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-wk-muted">2v2 · deel deze code</p>
+                      <p className="font-score text-6xl tracking-[0.15em] text-wk-gold">{roomCode}</p>
+                      <div className="w-full space-y-1.5">
+                        <div className="flex items-center justify-between rounded-lg border border-wk-gold/40 bg-wk-gold/10 px-3 py-2">
+                          <span className="truncate font-mono text-[11px] text-wk-gold">{lobbyMembers.find((m) => m.role === 'host')?.name || 'Jij'} (host)</span>
+                          <span className="font-mono text-[10px] uppercase text-wk-gold">Team A</span>
+                        </div>
+                        {guests.map((g) => {
+                          const t = teamAssign[g.peerId] ?? 1
+                          return (
+                            <div key={g.peerId} className="flex items-center justify-between gap-2 rounded-lg border border-white/12 bg-wk-bg2/60 px-3 py-1.5">
+                              <span className="truncate font-mono text-[11px] text-wk-soft">{g.name || 'Speler'}</span>
+                              <div className="flex gap-1">
+                                <button onClick={() => setTeamAssign((m) => ({ ...m, [g.peerId]: 0 }))} className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${t === 0 ? 'bg-wk-gold/20 text-wk-gold ring-1 ring-wk-gold/40' : 'text-wk-muted hover:text-wk-soft'}`}>Team A</button>
+                                <button onClick={() => setTeamAssign((m) => ({ ...m, [g.peerId]: 1 }))} className={`rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${t === 1 ? 'bg-white/15 text-wk-text ring-1 ring-white/25' : 'text-wk-muted hover:text-wk-soft'}`}>Team B</button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                        {guests.length < 3 && <p className="font-mono text-[10px] uppercase tracking-wide text-wk-muted">Wachten op {3 - guests.length} speler(s)…</p>}
+                      </div>
+                      {guests.length === 3 && !ready && <p className="font-mono text-[10px] uppercase tracking-wide text-wk-red">Zet 1 speler in Team A en 2 in Team B.</p>}
+                      <button onClick={start2v2Online} disabled={!ready} className={`${btnCool} w-full py-3 text-2xl ${ready ? '' : 'opacity-40'}`}>Start 2v2 →</button>
+                    </>
+                  )
+                })() : lobby === 'joining2v2' ? (
+                  <>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-wk-muted">2v2-kamer</p>
+                    {myTeam == null
+                      ? <p className="text-sm text-wk-soft">Verbonden — wachten op de indeling van de host…</p>
+                      : <p className="text-sm text-wk-soft">Jij zit in <span className="font-bold text-wk-gold">Team {myTeam === 0 ? 'A' : 'B'}</span> · wachten op de aftrap…</p>}
+                  </>
+                ) : lobby === 'hosting' ? (
                   <>
                     <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-wk-muted">Deel deze code met je tegenstander</p>
                     <p className="font-score text-7xl tracking-[0.15em] text-wk-gold">{roomCode}</p>
@@ -1312,29 +1705,32 @@ export default function SoccerClient() {
 
                 {/* RECHTS — modus-keuze + wedstrijd-instellingen + start */}
                 <div className="flex min-h-0 flex-col gap-3 animate-fade-up" style={{ animationDelay: '120ms' }}>
-                  <div className="shrink-0"><Segmented options={['Computer', "Penalty's", 'Online']} value={mode === 'local' ? 0 : mode === 'penalty' ? 1 : 2} onChange={(i) => { setMode(i === 0 ? 'local' : i === 1 ? 'penalty' : 'online'); cancelLobby() }} /></div>
+                  <div className="shrink-0 space-y-2">
+                    <Segmented options={['Computer', 'Multiplayer']} value={mode === 'local' ? 0 : 1} onChange={(i) => { setMode(i === 0 ? 'local' : 'local2p'); cancelLobby() }} />
+                    {mode !== 'local' && mode !== 'penalty' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {MP_MODES.map((m) => {
+                          const active = mode === m.id
+                          return (
+                            <button key={m.id} type="button" onClick={() => { setMode(m.id); cancelLobby() }}
+                              className={`rounded-lg border px-3 py-2 text-left transition ${active ? 'border-wk-gold bg-wk-gold/15' : 'border-white/12 hover:border-white/35'}`}>
+                              <span className={`block font-display text-sm uppercase tracking-wide ${active ? 'text-wk-gold' : 'text-wk-text'}`}>{m.label}</span>
+                              <span className="block font-mono text-[9px] uppercase tracking-wide text-wk-muted">{m.desc}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <Panel title="Wedstrijd" className="flex-1">
                     <div className="flex flex-1 flex-col gap-5">
-                      {mode === 'local' && (
-                        <Field label="Moeilijkheid"><Segmented options={DIFFICULTY.map((o) => o.label)} value={DIFFICULTY.findIndex((o) => o.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} /></Field>
-                      )}
-                      <Field label="Bal"><Segmented options={['Normaal', '⚽ Giant']} value={giantBall ? 1 : 0} onChange={(i) => setGiantBall(i === 1)} /></Field>
-                      <Field label="Besturing">
-                        <button type="button" onClick={() => setShowControls(true)}
-                          className="w-full rounded-lg border border-white/15 px-3 py-2 font-mono text-[11px] uppercase tracking-wide text-wk-soft transition hover:border-white/35 hover:text-wk-text">
-                          🎮 Toetsen &amp; controller aanpassen
-                        </button>
-                      </Field>
-                      {mode !== 'penalty' && (
-                        <Field label="Chaos">
-                          <div className="flex flex-wrap gap-2">
-                            <button type="button" onClick={() => setBigHeads(!bigHeads)}
-                              className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${bigHeads ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>🗿 Grote koppen</button>
-                            <button type="button" onClick={() => setSlippery(!slippery)}
-                              className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${slippery ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>⛸️ Gladde mat</button>
-                          </div>
-                        </Field>
-                      )}
+                      <button type="button" onClick={() => setShowMatchSettings(true)}
+                        className="flex w-full items-center justify-between rounded-lg border border-white/15 px-3 py-2.5 font-mono text-[11px] uppercase tracking-wide text-wk-soft transition hover:border-white/35 hover:text-wk-text">
+                        <span>⚙ Instellingen</span>
+                        <span className="text-wk-muted">
+                          {[giantBall && '⚽', bigHeads && '🗿', slippery && '⛸️'].filter(Boolean).join(' ') || 'standaard'}
+                        </span>
+                      </button>
 
                       <div className="mt-auto space-y-3 pt-4">
                         {mode === 'penalty' ? (
@@ -1347,15 +1743,32 @@ export default function SoccerClient() {
                             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">Tegenstander: willekeurig land</p>
                             <button onClick={startLocal} className={`${btnCool} w-full py-4 text-3xl`}>Aftrap →</button>
                           </>
-                        ) : (
+                        ) : mode === 'local2p' || mode === 'coop' || mode === 'local2v2' ? (() => {
+                          const is2v2 = mode === 'local2v2'
+                          const devs: InputDevice[] = is2v2 ? [p1Device, p2Device, p3Device, p4Device] : [p1Device, p2Device]
+                          const dup = new Set(devs).size !== devs.length
+                          const hint = mode === 'coop' ? 'Samen op één team tegen de computer' : is2v2 ? '2 tegen 2 op dezelfde PC' : 'Speler 1 tegen speler 2, zelfde PC'
+                          return (
+                            <>
+                              <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">{hint} · apparaten via ⚙ instellingen</p>
+                              {dup && <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-wk-red">Kies voor elke speler een ander apparaat (⚙ instellingen).</p>}
+                              <button onClick={mode === 'coop' ? startCoop : is2v2 ? start2v2 : startLocal2p} disabled={dup} className={`${btnCool} w-full py-4 text-3xl ${dup ? 'opacity-50' : ''}`}>
+                                {mode === 'coop' ? 'Aftrap → co-op' : is2v2 ? 'Aftrap → 2v2' : 'Aftrap → 2 spelers'}
+                              </button>
+                            </>
+                          )
+                        })() : (
                           <>
-                            <button onClick={hostGame} className={`${btn} w-full !py-3.5`}>Nieuwe wedstrijd</button>
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">Kamer: {onlineSize === 4 ? '2 vs 2' : '1 vs 1'} · wijzig via ⚙ instellingen</p>
+                            <button onClick={onlineSize === 4 ? hostGame2v2 : hostGame} className={`${btn} w-full !py-3.5`}>Nieuwe wedstrijd</button>
                             <div className="flex items-center gap-2">
                               <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 4))} placeholder="CODE"
                                 className="min-w-0 flex-1 rounded-xl border border-white/15 bg-wk-bg2 px-3 py-3 text-center font-mono text-lg uppercase tracking-[0.25em] text-wk-text outline-none focus:border-wk-gold" />
-                              <button onClick={joinGame} className={btnGhost}>Join</button>
+                              <button onClick={onlineSize === 4 ? joinGame2v2 : joinGame} className={btnGhost}>Join</button>
                             </div>
-                            <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.12em] text-wk-muted">Host een wedstrijd en deel je code, of vul de code van je tegenstander in. Zelfde kleur? De host past die aan.</p>
+                            <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.12em] text-wk-muted">
+                              {onlineSize === 4 ? '2v2: host maakt de kamer en wijst de teams toe zodra 3 spelers joinen.' : 'Host een wedstrijd en deel je code, of vul de code van je tegenstander in.'}
+                            </p>
                           </>
                         )}
                       </div>
@@ -1621,12 +2034,12 @@ function PitchTeam({ meta, side }: { meta: TeamMeta; side: 0 | 1 }) {
         const xPct = (s.anchor.x / 0.8) * 46 // eigen helft = 0..46% van de breedte
         const left = side === 0 ? xPct : 100 - xPct
         return (
-          <div key={i} className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5"
+          <div key={i} className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"
             style={{ left: `${left}%`, top: `${s.anchor.y * 100}%` }}>
-            <span className="block h-8 w-8 overflow-hidden rounded-full border-2 bg-wk-bg2 shadow" style={{ borderColor: meta.shirt }}>
-              {p?.face && <Image src={`/spelers/${p.face}`} alt={p?.name ?? ''} width={32} height={32} className="h-full w-full object-cover" />}
+            <span className="block h-12 w-12 overflow-hidden rounded-full border-2 bg-wk-bg2 shadow-lg sm:h-14 sm:w-14" style={{ borderColor: meta.shirt }}>
+              {p?.face && <Image src={`/spelers/${p.face}`} alt={p?.name ?? ''} width={56} height={56} className="h-full w-full object-cover" />}
             </span>
-            <span className="max-w-[54px] truncate rounded bg-black/55 px-1 font-mono text-[7px] uppercase tracking-wide text-white">{p?.name ?? s.role}</span>
+            <span className="max-w-[72px] truncate rounded bg-black/60 px-1.5 py-px font-score text-[9px] uppercase tracking-wide text-white sm:text-[11px]">{p?.name ?? s.role}</span>
           </div>
         )
       })}
@@ -1638,20 +2051,28 @@ function PitchTeam({ meta, side }: { meta: TeamMeta; side: 0 | 1 }) {
 function LoadingScreen({ teams }: { teams: [TeamMeta, TeamMeta] }) {
   return (
     <div className="absolute inset-0 z-[75] flex flex-col items-center justify-center gap-6 bg-wk-bg px-6">
-      <div className="flex items-center gap-4">
-        <span className="flex items-center gap-2 font-display text-base uppercase tracking-wide text-white sm:text-lg">
-          <TeamCrest short={teams[0].short} shirt={teams[0].shirt} trim={teams[0].trim} size={34} />{teams[0].name}{teams[0].flag && <span>{teams[0].flag}</span>}
-        </span>
-        <span className="font-score text-2xl uppercase tracking-widest text-wk-muted">vs</span>
-        <span className="flex items-center gap-2 font-display text-base uppercase tracking-wide text-white sm:text-lg">
-          {teams[1].flag && <span>{teams[1].flag}</span>}{teams[1].name}<TeamCrest short={teams[1].short} shirt={teams[1].shirt} trim={teams[1].trim} size={34} />
-        </span>
+      <div className="flex w-full max-w-3xl items-center justify-center gap-4 sm:gap-7">
+        <div className="flex flex-1 items-center justify-end gap-3 text-right">
+          <div className="flex flex-col items-end gap-1">
+            <span className="font-score text-2xl uppercase leading-none tracking-tight text-white drop-shadow-[0_3px_16px_rgba(0,0,0,0.7)] sm:text-4xl">{teams[0].name}{teams[0].flag && <span className="ml-2">{teams[0].flag}</span>}</span>
+            <span className="h-1 w-14 rounded-full sm:w-20" style={{ background: teams[0].shirt }} />
+          </div>
+          <TeamCrest short={teams[0].short} shirt={teams[0].shirt} trim={teams[0].trim} size={62} />
+        </div>
+        <span className="font-score text-3xl uppercase italic tracking-widest text-wk-gold drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)] sm:text-4xl">vs</span>
+        <div className="flex flex-1 items-center gap-3 text-left">
+          <TeamCrest short={teams[1].short} shirt={teams[1].shirt} trim={teams[1].trim} size={62} />
+          <div className="flex flex-col items-start gap-1">
+            <span className="font-score text-2xl uppercase leading-none tracking-tight text-white drop-shadow-[0_3px_16px_rgba(0,0,0,0.7)] sm:text-4xl">{teams[1].flag && <span className="mr-2">{teams[1].flag}</span>}{teams[1].name}</span>
+            <span className="h-1 w-14 rounded-full sm:w-20" style={{ background: teams[1].shirt }} />
+          </div>
+        </div>
       </div>
       {/* mini-veld: opstellingen op positie, tegenover elkaar */}
-      <div className="relative aspect-[16/9] w-full max-w-2xl overflow-hidden rounded-xl border border-white/15 shadow-2xl ring-1 ring-black/30"
+      <div className="relative aspect-[16/9] w-full max-w-3xl overflow-hidden rounded-xl border border-white/15 shadow-2xl ring-1 ring-black/30"
         style={{ background: 'repeating-linear-gradient(90deg,#1f7a37 0 8%,#237e3b 8% 16%)' }}>
         <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/30" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25" />
         <PitchTeam meta={teams[0]} side={0} />
         <PitchTeam meta={teams[1]} side={1} />
       </div>
@@ -2063,9 +2484,9 @@ function TeamCrest({ short, shirt, trim, size = 40 }: { short: string; shirt: st
 const ACTION_META: { id: ActionId; label: string }[] = [
   { id: 'kick', label: 'Schot / pass' },
   { id: 'sprint', label: 'Sprint' },
-  { id: 'slide', label: 'Sliding / panna' },
+  { id: 'slide', label: 'Sliding / omhaal' },
   { id: 'switch', label: 'Speler wisselen' },
-  { id: 'chip', label: 'Stift / lange bal' },
+  { id: 'chip', label: 'Voorzet / lange bal' },
   { id: 'feint', label: 'Schijnbeweging' },
 ]
 const KEY_LABELS: Record<string, string> = {
@@ -2263,6 +2684,29 @@ function TraitRow({ label, v, color }: { label: string; v: number; color: string
         ))}
       </span>
     </span>
+  )
+}
+
+// Apparaat-kiezer: icoon-kaartjes i.p.v. een propvolle segment-balk. Toont beide toetsenbord-helften
+// altijd, en alleen de controllers die écht verbonden zijn (+ de al gekozen, mocht die net wegvallen).
+function DevicePicker({ value, onChange, padCount }: { value: InputDevice; onChange: (d: InputDevice) => void; padCount: number }) {
+  const shown = DEVICE_META.filter((d) => d.pad == null || d.pad < padCount || d.id === value)
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {shown.map((d) => {
+        const active = d.id === value
+        return (
+          <button key={d.id} type="button" onClick={() => onChange(d.id)}
+            className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition ${active ? 'border-wk-gold bg-wk-gold/15' : 'border-white/12 hover:border-white/35'}`}>
+            <span className="text-lg leading-none">{d.icon}</span>
+            <span className="min-w-0">
+              <span className={`block truncate font-mono text-[11px] uppercase tracking-wide ${active ? 'text-wk-gold' : 'text-wk-text'}`}>{d.label}</span>
+              <span className="block truncate font-mono text-[9px] uppercase tracking-wide text-wk-muted">{d.sub}</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

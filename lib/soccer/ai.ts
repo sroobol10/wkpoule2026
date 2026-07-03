@@ -174,12 +174,16 @@ export function computeAICommands(
         if (o.team === p.team && o.role !== 'GK' && !o.sentOff && dist(o.pos, ball.pos) < toBall) { defNearer = true; break }
       }
       if (toBall < CONTROL_D + 12) {
-        // Bal aan de handschoen → uitverdelen naar een open medespeler, anders ver wegtrappen.
+        // Bal aan de handschoen → snel uitverdelen naar een open medespeler, anders ver wegtrappen.
+        // Kort laden zodat de keeper niet met de bal blijft treuzelen (en van z'n lijn dribbelt).
+        // Komt er een tegenstander dichtbij, dan meteen lossen — anders een makkelijk buitgemaakt doelpunt.
         const mate = openTeammate(state, p, dir)
+        const oppClose = nearestOpponent(state, p) < 58
         const aim = mate
           ? norm(sub({ x: mate.pos.x + mate.vel.x * 0.25, y: mate.pos.y + mate.vel.y * 0.25 }, p.pos))
           : norm(sub(goal, p.pos))
-        cmds[p.id] = chargeKick(p, jitterDir(aim, mate ? 0.1 : 0.25), mate ? 0.42 : 0.62)
+        const want = oppClose ? 0.16 : mate ? 0.3 : 0.48
+        cmds[p.id] = chargeKick(p, jitterDir(aim, mate ? 0.1 : 0.25), want)
       } else if (inDanger && ballSpeed < 360 && !defNearer && toBall < 290) {
         cmds[p.id] = { move: moveTowards(p.pos, ball.pos, 22), kick: false, sprint: toBall > 120 } // uitkomen/sweepen (komt vaker en verder uit)
       } else if (inDanger && toBall < 185 && ballSpeed < 400) {

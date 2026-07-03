@@ -47,14 +47,10 @@ import {
   PLAYER_MAX_SPEED,
   PLAYER_RADIUS,
   RECOVER_SPEED_MULT,
+  SELF_LOB_LIFT,
   FEINT_COOLDOWN,
   FEINT_SPEED,
   FEINT_TIME,
-  FLICK_LIFT,
-  FLICK_SPEED,
-  PANNA_CHANCE,
-  PANNA_RANGE,
-  PANNA_SPEED,
   SLIDE_COOLDOWN,
   SLIDE_SPEED,
   SLIDE_STEAL_RADIUS,
@@ -66,6 +62,10 @@ import {
   BICYCLE_MIN_Z,
   BICYCLE_POWER,
   BICYCLE_LIFT,
+  BICYCLE_SPRAY,
+  BICYCLE_WILD_CHANCE,
+  BICYCLE_WILD_SPRAY,
+  BICYCLE_ANIM_TIME,
   SPIN_ACCEL,
   SPIN_DECAY,
   RESTART_KEEP_RADIUS,
@@ -158,6 +158,7 @@ export function placeForKickoff(state: GameState, kickoffTeam: TeamId): void {
     p.slideTimer = 0
     p.slideTackle = false
     p.feintTimer = 0
+    p.bicycleTimer = 0
     p.tumbleTimer = 0
     p.tackleCooldown = 0
   }
@@ -234,6 +235,7 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
     if (p.sentOff) continue // van het veld gestuurd
     if (p.kickCooldown > 0) p.kickCooldown = Math.max(0, p.kickCooldown - dt)
     if (p.tackleCooldown > 0) p.tackleCooldown = Math.max(0, p.tackleCooldown - dt)
+    if (p.bicycleTimer > 0) p.bicycleTimer = Math.max(0, p.bicycleTimer - dt) // salto-animatie (puur render)
     const cmd = inputs[idx(p)] ?? { move: { x: 0, y: 0 }, kick: false }
 
     // Omvergelopen door een tackle → tuimelt weg (terugstoot rolt uit), even geen controle.
@@ -279,11 +281,12 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
     // Tijdens een aftrap/vrije trap mag de tegenpartij (niet de nemer) de bal niet aanvallen
     // tot er hervat is — dus geen slide/tackle starten.
     const restartLock = (state.phase === 'kickoff' || state.phase === 'setpiece') && p.team !== state.kickoffTeam
-    // Slide starten met Q = sliding-tackle, alléén zonder bal aan de voet
-    // (mét bal gebruik je R voor een kap/dash — dat is de aanvallers-actie).
+    // Slide starten met Q = sliding-tackle, alléén zonder bal binnen bereik. Ligt de bal (laag of
+    // hoog) binnen controle-afstand, dan is Q gereserveerd voor het lobje/de omhaal (handleBallContact).
     if (cmd.slide && !state.prevSlide[idx(p)] && p.tackleCooldown <= 0 && !restartLock) {
-      const hasBall = dist(p.pos, state.ball.pos) < CONTROL_RADIUS + PLAYER_RADIUS && state.ball.z < AIR_CONTROL_HEIGHT
-      if (!hasBall) {
+      // Bal binnen controle-afstand (laag of hoog) → Q is het lobje/de omhaal, geen tackle.
+      const ballInReach = dist(p.pos, state.ball.pos) < CONTROL_RADIUS + PLAYER_RADIUS
+      if (!ballInReach) {
         let d = norm(cmd.move)
         if (d.x === 0 && d.y === 0) d = p.facing
         if (d.x === 0 && d.y === 0) d = { x: teamDir(p.team, state.attackDir), y: 0 }
@@ -409,11 +412,53 @@ function separatePlayers(players: PlayerState[]) {
   }
 }
 
+// OMHAAL uitvoeren: overhead-knal richting het doel. Bewust wisselvallig — meestal een nette poging,
+// maar met een flinke kans dat-ie gigantisch naast gaat (gimmick), en rustiger dan een vol schot.
+function bicycleShot(state: GameState, p: PlayerState): void {
+  const ball = state.ball
+  const goalX = teamDir(p.team, state.attackDir) > 0 ? PITCH_LENGTH : 0
+  let bdir = norm(sub({ x: goalX, y: PITCH_WIDTH / 2 }, ball.pos))
+  const wild = Math.random() < BICYCLE_WILD_CHANCE
+  const spray = (Math.random() * 2 - 1) * (wild ? BICYCLE_WILD_SPRAY : BICYCLE_SPRAY)
+  const cs = Math.cos(spray), sn = Math.sin(spray)
+  bdir = { x: bdir.x * cs - bdir.y * sn, y: bdir.x * sn + bdir.y * cs }
+  const power = BICYCLE_POWER * traitMul(p.traits.shot) * (0.82 + Math.random() * 0.3) // niet altijd maximaal
+  ball.vel = scale(bdir, power)
+  ball.pos = add(ball.pos, scale(bdir, PLAYER_RADIUS + BALL_RADIUS))
+  ball.z = Math.max(ball.z, 4)
+  ball.vz = BICYCLE_LIFT
+  ball.spin = (Math.random() * 2 - 1) * SHOT_SPIN
+  state.stats.shots[p.team] += 1
+  state.bicycleCount += 1
+  p.bicycleTimer = BICYCLE_ANIM_TIME // salto-animatie (render)
+  touch(ball, p.id)
+  p.kickCooldown = KICK_COOLDOWN
+  p.charge = 0
+  if (state.phase === 'kickoff' || state.phase === 'setpiece') { state.phase = 'playing'; state.restartKind = null }
+}
+
 // Wie raakt de bal, en trapt/dribbelt die?
 function handleBallContact(state: GameState, inputs: InputCommand[]) {
   const { ball } = state
   // Bal in de lucht (geloft schot): niemand kan 'm controleren — hij vliegt over.
-  if (ball.z > AIR_CONTROL_HEIGHT) return
+  if (ball.z > AIR_CONTROL_HEIGHT) {
+    // ...behalve de OMHAAL: staat er een speler binnen bereik die Q indrukt terwijl de bal hoog
+    // hangt, dan haalt-ie 'm uit de lucht richting het doel. Moet hiervóór, anders is de hoge bal
+    // (bv. na het eigen lobje met Q) onbereikbaar en blijf je hangen in het lobje.
+    let cand: PlayerState | null = null
+    let cd = CONTROL_RADIUS + PLAYER_RADIUS + 6
+    for (const p of state.players) {
+      if (p.kickCooldown > 0 || p.sentOff || p.tumbleTimer > 0) continue
+      const d = dist(p.pos, ball.pos)
+      if (d < cd) { cd = d; cand = p }
+    }
+    if (cand) {
+      const cmd = inputs[idx(cand)] ?? { move: { x: 0, y: 0 }, kick: false }
+      const flickEdge = !!cmd.slide && !state.prevSlide[idx(cand)]
+      if (flickEdge && ball.z > BICYCLE_MIN_Z) bicycleShot(state, cand)
+    }
+    return
+  }
   const ballSpeed = Math.hypot(ball.vel.x, ball.vel.y)
   const prevOwner = ball.lastTouch
   const prevTeam = prevOwner >= 0 ? state.players[prevOwner]?.team : -1
@@ -456,57 +501,24 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
   // LOSLAAT-flank: knop was ingedrukt en is nu los → trap met de opgebouwde power.
   const releaseEdge = state.prevKick[idx(best)] && !cmd.kick
 
-  // Q mét bal: staat er een verdediger recht vóór je? → PANNA-poging (bal door de benen,
-  // lukt niet altijd). Anders een hakje/wip: bal vooruit de lucht in over een sliding heen.
+  // Q mét bal, twee-fasen: ligt de bal laag → een lobje omhoog (zet 'm klaar). Nog een keer Q
+  // terwijl de bal hóóg is → de OMHAAL: spectaculaire overhead-knal richting het doel + slow-motion.
+  // (R blijft de kap/dribbel-skillmove.)
   const flickEdge = !!cmd.slide && !state.prevSlide[idx(best)]
   if (flickEdge && best.kickCooldown <= 0) {
-    let dir = norm(cmd.move)
-    if (dir.x === 0 && dir.y === 0) dir = best.facing
-    if (dir.x === 0 && dir.y === 0) dir = { x: teamDir(best.team, state.attackDir), y: 0 }
-    // verdediger recht vooruit binnen panna-bereik?
-    let victim: PlayerState | null = null
-    let vBest = PANNA_RANGE + PLAYER_RADIUS
-    for (const o of state.players) {
-      if (o.team === best.team || o.sentOff) continue
-      const to = sub(o.pos, best.pos)
-      const od = Math.hypot(to.x, to.y)
-      if (od < 1e-3 || od > vBest) continue
-      if ((to.x / od) * dir.x + (to.y / od) * dir.y < 0.55) continue // niet echt vooruit
-      vBest = od
-      victim = o
-    }
-    if (victim) {
-      if (Math.random() < PANNA_CHANCE) {
-        // Gelukt: bal door de benen, net achter de verdediger; jij loopt erop, hij is beduusd.
-        ball.pos = { x: victim.pos.x + dir.x * (PLAYER_RADIUS + 16), y: victim.pos.y + dir.y * (PLAYER_RADIUS + 16) }
-        ball.vel = scale(dir, PANNA_SPEED)
-        ball.z = 0
-        ball.vz = 0
-        touch(ball, best.id)
-        best.kickCooldown = KICK_COOLDOWN * 0.55
-        victim.tumbleTimer = Math.max(victim.tumbleTimer, 0.45)
-        state.pannaCount += 1
-        state.stats.pannas[best.team] += 1
-      } else {
-        // Mislukt: de verdediger onderschept → jij bent de bal kwijt.
-        ball.pos = { x: victim.pos.x + dir.x * (PLAYER_RADIUS + BALL_RADIUS), y: victim.pos.y + dir.y * (PLAYER_RADIUS + BALL_RADIUS) }
-        ball.vel = scale(dir, -70)
-        ball.z = 0
-        ball.vz = 0
-        touch(ball, victim.id)
-        best.kickCooldown = KICK_COOLDOWN
-      }
+    if (ball.z > BICYCLE_MIN_Z) {
+      bicycleShot(state, best) // bal hangt hoog → omhaal richting doel
+    } else {
+      // Bal ligt laag → lobje recht omhoog. Reist licht met je mee zodat je eronder blijft en
+      // 'm zo met een tweede Q kunt omhalen.
+      ball.vz = SELF_LOB_LIFT
+      ball.z = Math.max(ball.z, 2)
+      ball.vel = { x: best.vel.x * 0.5, y: best.vel.y * 0.5 }
+      ball.spin = 0
+      touch(ball, best.id)
+      best.kickCooldown = KICK_COOLDOWN
       if (state.phase === 'kickoff' || state.phase === 'setpiece') { state.phase = 'playing'; state.restartKind = null }
-      return
     }
-    // geen verdediger vooruit → hakje/wip
-    ball.vel = scale(dir, FLICK_SPEED)
-    ball.pos = add(ball.pos, scale(dir, PLAYER_RADIUS + BALL_RADIUS))
-    ball.z = 0
-    ball.vz = FLICK_LIFT
-    touch(ball, best.id)
-    best.kickCooldown = KICK_COOLDOWN
-    if (state.phase === 'kickoff' || state.phase === 'setpiece') { state.phase = 'playing'; state.restartKind = null }
     return
   }
 
@@ -518,24 +530,40 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     let dir = norm(cmd.move)
     if (dir.x === 0 && dir.y === 0) dir = best.facing
     if (dir.x === 0 && dir.y === 0) dir = { x: teamDir(best.team, state.attackDir), y: 0 }
-    let power = CHIP_MIN_POWER + (CHIP_MAX_POWER - CHIP_MIN_POWER) * ct
-    // Bij een zacht lobje richten we (assist) op een open medespeler; een geladen lange bal
-    // gaat strak in de ingedrukte richting (de ruimte in).
-    if (ct < 0.45) {
-      const mate = bestPassTarget(state, best, dir)
-      if (mate) {
-        const rough = dist(ball.pos, mate.pos)
-        const travel = Math.min(0.7, rough / 520)
-        const lead = add(mate.pos, scale(mate.vel, travel))
-        dir = norm(sub(lead, ball.pos))
-        power = clamp(360 + dist(ball.pos, lead) * 1.15, CHIP_MIN_POWER, CHIP_MAX_POWER)
-      }
+
+    // Voorzet/lob: tenzij je 'm helemaal volhoudt (= bewust een lange bal de ruimte in), zoeken we
+    // een medespeler en berekenen we boog + kracht ballistisch zó dat de bal echt bij hem landt.
+    // (In de lucht is er geen wrijving → horizontale afstand = vHoriz × hangtijd; hangtijd = 2·vz/g.)
+    const mate = ct < 0.82 ? bestPassTarget(state, best, dir) : null
+    if (mate) {
+      const travel = Math.min(0.8, dist(ball.pos, mate.pos) / 520)
+      const lead = add(mate.pos, scale(mate.vel, travel))
+      dir = norm(sub(lead, ball.pos))
+      const L = dist(ball.pos, lead)
+      const vz = clamp(210 + L * 0.42, 220, 430) // boog: hoog genoeg om verdedigers te klaren
+      const tAir = (2 * vz) / BALL_GRAVITY // hangtijd tot de bal weer op de grond is
+      const landDist = L * 0.82 // iets vóór hem laten neerkomen → rolt dan naar hem toe
+      const vHoriz = clamp(landDist / Math.max(0.2, tAir), CHIP_MIN_POWER, BALL_MAX_SPEED * 0.7)
+      const carry = Math.max(0, best.vel.x * dir.x + best.vel.y * dir.y)
+      ball.vel = scale(dir, vHoriz + carry * 0.25)
+      ball.pos = add(ball.pos, scale(dir, PLAYER_RADIUS + BALL_RADIUS))
+      ball.z = 0
+      ball.vz = vz
+      ball.spin = 0
+      touch(ball, best.id)
+      best.kickCooldown = KICK_COOLDOWN
+      best.charge = 0
+      if (state.phase === 'kickoff' || state.phase === 'setpiece') { state.phase = 'playing'; state.restartKind = null }
+      return
     }
+
+    // Geen medespeler (of vol geladen): strakke lange bal in de ingedrukte richting, de ruimte in.
+    const power = CHIP_MIN_POWER + (CHIP_MAX_POWER - CHIP_MIN_POWER) * ct
     const carry = Math.max(0, best.vel.x * dir.x + best.vel.y * dir.y)
     ball.vel = scale(dir, power + carry * 0.3)
     ball.pos = add(ball.pos, scale(dir, PLAYER_RADIUS + BALL_RADIUS))
     ball.z = 0
-    ball.vz = SHOT_LIFT_VZ * (1.05 - 0.35 * ct) // zacht lobje = hogere boog, lange bal = vlakker
+    ball.vz = SHOT_LIFT_VZ * (1.05 - 0.35 * ct) // zacht = hogere boog, lange bal = vlakker
     ball.spin = 0
     touch(ball, best.id)
     best.kickCooldown = KICK_COOLDOWN
@@ -1062,7 +1090,10 @@ function checkSlideFouls(state: GameState): void {
     for (const o of state.players) {
       if (o.team === p.team || o.sentOff) continue
       if (dist(p.pos, o.pos) < FOUL_RADIUS + PLAYER_RADIUS) {
-        if (ballTeam === o.team) continue // voordeel: het team van het slachtoffer houdt de bal → doorspelen
+        // Voordeel: alleen doorspelen als de bal bij een MEDESPELER van het slachtoffer ligt (niet bij
+        // het slachtoffer zelf). Anders — je haalt de baldrager neer zonder de bal te winnen → overtreding.
+        // (Zonder deze uitzondering was ballTeam altijd gelijk aan o.team en floot de scheids nooit.)
+        if (ballTeam === o.team && state.ball.lastTouch !== o.id) continue
         const behind = p.facing.x * o.facing.x + p.facing.y * o.facing.y > 0.3
         // Nog niet meteen fluiten: eerst even de tumble/roll laten zien (FOUL_ANIM_DELAY),
         // dán pas de overtreding + kaart toekennen. Cooldown voorkomt intussen een tweede.
@@ -1123,6 +1154,28 @@ function resolvePendingFoul(state: GameState, dt: number): void {
   const slider = state.players[pf.slider]
   const victim = state.players[pf.victim]
   if (!slider || !victim || slider.sentOff) return
+
+  // Voordeelregel (uitgesteld): in het venster ná de tackle kan het benadeelde team de bal alsnog
+  // oppikken en verder aanvallen. Heeft dat team nu duidelijk balbezit (een niet-getuimelde speler
+  // dichter bij de bal dan elke tegenstander) én ligt de bal in hun aanvallende helft → laat
+  // doorspelen i.p.v. fluiten. Zo krijg je geen vrije trap tégen terwijl je zelf kansrijk verder kon.
+  const vTeam = victim.team
+  let ourD = Infinity
+  let theirD = Infinity
+  for (const q of state.players) {
+    if (q.sentOff || q.tumbleTimer > 0) continue
+    const d = dist(q.pos, state.ball.pos)
+    if (q.team === vTeam) { if (d < ourD) ourD = d }
+    else if (d < theirD) theirD = d
+  }
+  const controlD = CONTROL_RADIUS + PLAYER_RADIUS + 10
+  const vDir = teamDir(vTeam, state.attackDir)
+  const inAttackingHalf = vDir > 0 ? state.ball.pos.x > PITCH_LENGTH * 0.42 : state.ball.pos.x < PITCH_LENGTH * 0.58
+  if (ourD < controlD && ourD < theirD && inAttackingHalf) {
+    slider.slideTimer = 0 // voordeel: geen fluit, speler rondt z'n slide gewoon af
+    return
+  }
+
   awardFoul(state, slider, victim, pf.behind, pf.spot)
 }
 

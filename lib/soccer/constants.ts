@@ -74,8 +74,13 @@ export const PASS_CHARGE_MAX = 0.34 // onder deze laadtijd geldt de trap als "pa
 export const CHIP_MIN_POWER = 210 // korte tik E → zacht lobje (bewust traag → goed te timen)
 export const CHIP_MAX_POWER = 430 // vol geladen E → langere bal, maar nog steeds rustig
 export const BICYCLE_MIN_Z = 9 // bal minimaal zó hoog → een getimede knal wordt een omhaal
-export const BICYCLE_POWER = 860 // omhaal knalt hard richting doel
+export const BICYCLE_POWER = 540 // omhaal-knal (rustiger dan een vol schot → geen rare versnelling)
 export const BICYCLE_LIFT = 300 // opwaartse boog van de omhaal
+export const BICYCLE_SPRAY = 0.14 // normale hoek-afwijking van een omhaal (~8°, lastig te richten)
+export const BICYCLE_WILD_CHANCE = 0.34 // kans dat de omhaal gigantisch naast gaat (gimmick)
+export const BICYCLE_WILD_SPRAY = 0.6 // hoek-afwijking bij een wilde omhaal (~34°)
+export const BICYCLE_ANIM_TIME = 0.5 // duur van de salto-animatie (voeten boven, hoofd beneden)
+export const SELF_LOB_LIFT = 410 // Q op een lage bal: lobje omhoog (~0,6s hangtijd) → klaar voor de omhaal
 export const SLOWMO_TIME = 0.75 // seconden slow-motion na een omhaal (client vertraagt de sim even)
 
 // ── Curve & spray bij harde schoten (het "je knalt keihard"-gevoel) ────────────

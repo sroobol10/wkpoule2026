@@ -13,9 +13,9 @@ export type Bindings = {
   pad: Record<ActionId, number[]>
 }
 
-// Standaard: WASD/pijltjes lopen · Spatie schot · Q sliding · Shift sprint · X wisselen ·
-// E stift · R kap. PS5-controller (DualSense, standaardmapping): ✕ schot · □ sliding · ○ wisselen ·
-// △ stift · L1 kap · R1 sprint · linkerstick/D-pad lopen.
+// Standaard: WASD/pijltjes lopen · Spatie schot · Q sliding (zonder bal) / omhaal (met bal) ·
+// Shift sprint · X wisselen · E voorzet/lange bal · R kap. PS5-controller (DualSense): ✕ schot ·
+// □ sliding/omhaal · ○ wisselen · △ voorzet · L1 kap · R1 sprint · linkerstick/D-pad lopen.
 export const DEFAULT_BINDINGS: Bindings = {
   keys: {
     up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
@@ -23,6 +23,17 @@ export const DEFAULT_BINDINGS: Bindings = {
     switch: ['KeyX', 'ControlLeft', 'ControlRight'], chip: ['KeyE'], feint: ['KeyR'],
   },
   pad: { kick: [0], sprint: [5], slide: [2], switch: [1], chip: [3], feint: [4] },
+}
+
+// Vaste split-keyboard schema's voor lokaal 2v2 (2 mensen delen het toetsenbord). Niet-overlappend
+// met elkaar. De aanpasbare bindings (Controls-menu) gelden voor de solo/controller-speler.
+export const KB_LEFT_BINDINGS: Bindings = {
+  keys: { up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'], kick: ['Space'], sprint: ['ShiftLeft'], slide: ['KeyQ'], switch: ['KeyE'], chip: ['KeyR'], feint: ['KeyF'] },
+  pad: DEFAULT_BINDINGS.pad,
+}
+export const KB_RIGHT_BINDINGS: Bindings = {
+  keys: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], kick: ['Enter'], sprint: ['ShiftRight'], slide: ['Slash'], switch: ['Period'], chip: ['Comma'], feint: ['Quote'] },
+  pad: DEFAULT_BINDINGS.pad,
 }
 
 export const ACTION_IDS: ActionId[] = ['kick', 'sprint', 'slide', 'switch', 'chip', 'feint']
@@ -57,19 +68,34 @@ export function saveBindings(b: Bindings): void {
   }
 }
 
-// De eerste verbonden gamepad (of null).
-export function activeGamepad(): Gamepad | null {
+// Een verbonden gamepad. Zonder index: de eerste verbonden. Met index: precies die (voor
+// lokaal 2-spelers → speler 1 = pad 0, speler 2 = pad 1).
+export function activeGamepad(index?: number): Gamepad | null {
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return null
-  for (const p of navigator.getGamepads()) if (p && p.connected) return p
+  const pads = navigator.getGamepads()
+  if (index != null) { const p = pads[index]; return p && p.connected ? p : null }
+  for (const p of pads) if (p && p.connected) return p
   return null
+}
+
+// Aantal verbonden gamepads (voor de UI: is 2-controller-modus mogelijk?).
+export function connectedGamepadCount(): number {
+  if (typeof navigator === 'undefined' || !navigator.getGamepads) return 0
+  let n = 0
+  for (const p of navigator.getGamepads()) if (p && p.connected) n++
+  return n
 }
 
 export class PlayerInput {
   private down = new Set<string>()
   private bindings: Bindings
+  private padIndex?: number // specifieke controller (lokaal 2-spelers); undefined = eerste verbonden
+  private useKeyboard: boolean // false → deze speler leest alleen z'n controller
 
-  constructor(bindings?: Bindings) {
+  constructor(bindings?: Bindings, opts?: { padIndex?: number; keyboard?: boolean }) {
     this.bindings = bindings ?? loadBindings()
+    this.padIndex = opts?.padIndex
+    this.useKeyboard = opts?.keyboard ?? true
   }
   setBindings(b: Bindings) {
     this.bindings = b
@@ -89,8 +115,10 @@ export class PlayerInput {
   private reset = () => this.down.clear()
 
   attach() {
-    window.addEventListener('keydown', this.onKeyDown)
-    window.addEventListener('keyup', this.onKeyUp)
+    if (this.useKeyboard) {
+      window.addEventListener('keydown', this.onKeyDown)
+      window.addEventListener('keyup', this.onKeyUp)
+    }
     window.addEventListener('blur', this.reset)
   }
   detach() {
@@ -121,7 +149,7 @@ export class PlayerInput {
       }
     }
     // Controller: linkerstick (analoog, 360° + variabele snelheid) + D-pad (digitaal, zoals WASD).
-    const gp = activeGamepad()
+    const gp = activeGamepad(this.padIndex)
     if (gp) {
       // Radiale deadzone: neem de lengte van de stickvector en herschaal 'm vanaf de deadzone-rand
       // naar 0..1. Zo krijg je vloeiend versnellen (zacht duwen = wandelen) i.p.v. een sprong,

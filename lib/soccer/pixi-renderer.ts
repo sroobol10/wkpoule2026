@@ -25,6 +25,7 @@ import {
   PLAYER_RADIUS,
   PLAYERS_PER_TEAM,
   TUMBLE_TIME,
+  BICYCLE_ANIM_TIME,
 } from './constants'
 import type { GameState, MatchPhase, PlayerState, TeamMeta } from './types'
 
@@ -65,10 +66,13 @@ export class PixiSoccerRenderer {
   private nodes: Node[] = []
   private legPhase: number[] = [] // loop-fase per speler (voor de zwaaiende beentjes)
   private tumbleWas: boolean[] = [] // was deze speler vorige frame aan het tuimelen? (voor de stof-burst)
+  private bicycleWas: boolean[] = [] // was deze speler vorige frame in een omhaal-salto? (voor de sparkles)
   private shadows: any[] = []
   private ballNode: any = null
   private ballShadow: any = null
   private refNode: any = null
+  private refBumps = 0 // hoe vaak de scheids zélf is omvergelopen (groeit-per-tuimeling)
+  private refTumbleWas = false // vorige frame aan het tuimelen? → rising edge telt één bump
   private streakerNodes: any[] = [] // tot 3 bestormers (1 primair + 2 extra)
   private securityNode: any = null
   private securityPhase = 0
@@ -579,7 +583,20 @@ export class PixiSoccerRenderer {
     // tuimel-pose: omvergelopen → tuimelt over de kop (2,4 slag, uitdempend), ledematen spartelen,
     // en een squash bij de landing. Anders: sliding-pose (bijna plat) of rechtop.
     n.c.scale.set(1, 1)
-    if (p.tumbleTimer > 0) {
+    if ((p.bicycleTimer ?? 0) > 0) {
+      // OMHAAL-salto: het poppetje maakt een volledige achterwaartse salto (halverwege staat-ie
+      // op z'n kop → voeten boven, hoofd beneden), springt even op en spreidt de armen.
+      const prog = 1 - p.bicycleTimer / BICYCLE_ANIM_TIME // 0→1
+      const ease = 1 - (1 - prog) * (1 - prog) * (1 - prog) // ease-out → salto whipt meteen door
+      const sign = p.facing.x >= 0 ? 1 : -1
+      n.c.rotation = sign * ease * Math.PI * 2 // één volledige salto, front-loaded (synct met de trap)
+      const air = Math.sin(Math.min(1, prog * 1.5) * Math.PI) // vroeg opspringen, benen snel omhoog
+      n.c.scale.set(1 + air * 0.08, 1 + air * 0.08)
+      n.legL.position.set(-r * 0.3, HIP_Y - air * r * 0.7) // benen gestrekt
+      n.legR.position.set(r * 0.3, HIP_Y - air * r * 0.7)
+      n.armL.rotation = -1.9
+      n.armR.rotation = 1.9
+    } else if (p.tumbleTimer > 0) {
       const prog = 1 - p.tumbleTimer / TUMBLE_TIME // 0→1
       const ease = 1 - (1 - prog) * (1 - prog) // ease-out → snel begin, zachte landing
       const sign = (p.vel.x || p.facing.x) >= 0 ? 1 : -1
@@ -606,12 +623,16 @@ export class PixiSoccerRenderer {
     const c = new PIXI.Container()
     const sh = new PIXI.Graphics()
     sh.ellipse(0, r * 1.1, r * 0.8, r * 0.38).fill({ color: 0x000000, alpha: 0.25 })
-    const legL = new PIXI.Graphics(); legL.roundRect(-r * 0.19 - r * 0.28, r * 0.45, r * 0.38, r * 0.6, r * 0.14).fill(0x1b1b1b)
-    const legR = new PIXI.Graphics(); legR.roundRect(-r * 0.19 + r * 0.28, r * 0.45, r * 0.38, r * 0.6, r * 0.14).fill(0x1b1b1b)
+    const skin = 0xe8b48c
+    const legL = new PIXI.Graphics(); legL.roundRect(-r * 0.19 - r * 0.28, r * 0.36, r * 0.38, r * 0.72, r * 0.14).fill(0x1b1b1b)
+    const legR = new PIXI.Graphics(); legR.roundRect(-r * 0.19 + r * 0.28, r * 0.36, r * 0.38, r * 0.72, r * 0.14).fill(0x1b1b1b)
     const torso = new PIXI.Graphics()
     torso.roundRect(-r * 0.7, -r * 0.5, r * 1.4, r * 1.15, r * 0.4).fill(0x17181d).stroke({ width: 2, color: 0xf4b92e, alpha: 0.95 })
-    const head = this.headSprite(`${FACES_DIR}/ref.png`, r, 0xe8b48c)
-    c.addChild(sh, legL, legR, torso, head)
+    // Armen: zwarte mouw met een skin-kleurig handje eronder (past bij het scheids-tenue).
+    const armL = new PIXI.Graphics(); armL.roundRect(-r * 0.15, -r * 0.5, r * 0.3, r * 0.62, r * 0.13).fill(0x17181d); armL.circle(0, r * 0.16, r * 0.17).fill(skin); armL.position.set(-r * 0.68, 0)
+    const armR = new PIXI.Graphics(); armR.roundRect(-r * 0.15, -r * 0.5, r * 0.3, r * 0.62, r * 0.13).fill(0x17181d); armR.circle(0, r * 0.16, r * 0.17).fill(skin); armR.position.set(r * 0.68, 0)
+    const head = this.headSprite(`${FACES_DIR}/ref.png`, r, skin)
+    c.addChild(sh, legL, legR, torso, armL, armR, head)
     c.scale.set(1.2) // scheids iets groter dan de spelers
     this.entityLayer.addChild(c)
     this.refNode = c
@@ -895,17 +916,24 @@ export class PixiSoccerRenderer {
       const tumbling = p.tumbleTimer > 0
       if (tumbling && !this.tumbleWas[p.id]) this.spawnTumbleDust(p.pos.x, p.pos.y)
       this.tumbleWas[p.id] = tumbling
+      // sparkles op het moment dat de omhaal-salto begint
+      const bicycling = (p.bicycleTimer ?? 0) > 0
+      if (bicycling && !this.bicycleWas[p.id]) this.spawnSparkles(p.pos.x, p.pos.y)
+      this.bicycleWas[p.id] = bicycling
       // stof-veeg tijdens een glijdende tackle
       if (p.slideTimer > 0 && p.slideTackle && dt > 0 && Math.random() < 0.6) this.spawnSlideDust(p.pos.x, p.pos.y, p.facing)
       this.animatePlayer(p, n, dt)
       if (sh) sh.position.set(p.pos.x, p.pos.y + PLAYER_RADIUS * 1.15)
     }
     // scheidsrechter (kan getackeld worden → tuimelt spinnend weg, puur fun).
-    // Groeit 20% per tackle (tackleCount) → steeds imposantere scheids, geklemd op 4×.
+    // Groeit 20% telkens de scheids zélf onderuit wordt gelopen (niet bij elke tackle), geklemd op 4×.
+    const refTumbling = state.ref.tumble > 0
+    if (refTumbling && !this.refTumbleWas) this.refBumps += 1
+    this.refTumbleWas = refTumbling
     this.refNode.position.set(state.ref.pos.x, state.ref.pos.y)
     this.refNode.zIndex = state.ref.pos.y
-    this.refNode.rotation = state.ref.tumble > 0 ? state.ref.tumble * 9 : 0
-    this.refNode.scale.set(1.2 * Math.min(4, Math.pow(1.2, state.tackleCount)))
+    this.refNode.rotation = refTumbling ? state.ref.tumble * 9 : 0
+    this.refNode.scale.set(1.2 * Math.min(4, Math.pow(1.2, this.refBumps)))
 
     // veldbestormers (fun): tot 3 tegelijk (1 primair + extra's). Slot 0 = state.streaker, 1-2 = extra's.
     const allStreakers = state.streaker ? [state.streaker, ...state.extraStreakers] : []
@@ -1123,6 +1151,23 @@ export class PixiSoccerRenderer {
       const spd = 120 + Math.random() * 340
       this.fxLayer.addChild(g)
       this.particles.push({ g, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, life: 0, max: 0.9 + Math.random() * 0.6 })
+    }
+  }
+
+  // Omhaal-sparkles: een fontein van gouden/witte sterretjes rond de speler die de salto inzet.
+  private spawnSparkles(x: number, y: number) {
+    const PIXI = this.PIXI
+    for (let i = 0; i < 22; i++) {
+      const g = new PIXI.Graphics()
+      const col = i % 3 === 0 ? 0xffffff : 0xffd84a
+      // vierpuntige "twinkel"-ster
+      g.star(0, 0, 4, 2.6 + Math.random() * 1.8, 1.1).fill(col)
+      g.position.set(x + (Math.random() - 0.5) * 18, y - PLAYER_RADIUS * 0.6 + (Math.random() - 0.5) * 18)
+      g.rotation = Math.random() * Math.PI
+      const ang = Math.random() * Math.PI * 2
+      const spd = 60 + Math.random() * 200
+      this.fxLayer.addChild(g)
+      this.particles.push({ g, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 60, life: 0, max: 0.5 + Math.random() * 0.55 })
     }
   }
 

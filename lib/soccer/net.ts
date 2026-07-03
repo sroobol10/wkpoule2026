@@ -15,6 +15,16 @@ import type { GameState, InputCommand, MatchPhase, TeamMeta } from './types'
 
 export type NetRole = 'host' | 'guest'
 
+// ── Multiplayer-kamer (1v1 = 2 slots, 2v2 = 4 slots) ─────────────────────────
+// Slot-model: slot 0 = host (team 0, P1). Overige slots = gasten. Team per slot bepaalt de host
+// in de lobby en stuurt-ie mee in de 'lobby'- en 'start'-berichten.
+export type RosterMember = { peerId: string; name: string; role: NetRole }
+export type SlotAssign = { peerId: string; slot: number; team: 0 | 1 }
+export type LobbyPayload = { size: 2 | 4; slots: SlotAssign[] }
+// Gast kondigt zich aan bij de host (naam + z'n eigen team-config voor als host 'm nodig heeft).
+export type JoinPayload = { peerId: string; name: string; team: TeamMeta }
+export type SlotInput = { slot: number; cmd: InputCommand }
+
 // De host stuurt bij de start beide team-configs + matchlengte naar de gast.
 export type StartPayload = {
   teams: [TeamMeta, TeamMeta]
@@ -24,6 +34,7 @@ export type StartPayload = {
   ballScale?: number
   bigHeads?: boolean
   slippery?: boolean
+  slots?: SlotAssign[] // 2v2: slot/team-indeling zodat elke gast z'n eigen speler kent
 }
 
 // Compacte snapshot (afgeronde ints om bandbreedte te sparen).
@@ -35,8 +46,10 @@ export type Snapshot = {
   ph: MatchPhase // fase
   ck: number // klok (s)
   hf: number // helft
-  cg: number // bestuurde speler van de GAST (voor highlight)
-  cc: number // laadstand (charge, s) van die gast-speler (voor de power-balk)
+  cg: number // bestuurde speler van de GAST (1v1-highlight)
+  cc: number // laadstand (charge, s) van die gast-speler (1v1 power-balk)
+  cs?: number[] // 2v2: bestuurde speler-index per slot (elke gast leest z'n eigen slot)
+  ccs?: number[] // 2v2: laadstand (charge) per slot
   g: number[] // doelpunten, plat: [team, scorer, ownGoal?1:0, clockInt, half] per goal
   rx: number // scheids x
   ry: number // scheids y
@@ -58,10 +71,15 @@ export type Snapshot = {
 type Handlers = {
   onGuestJoined?: () => void
   onPeerLeft?: () => void
-  onInput?: (cmd: InputCommand) => void // host ontvangt gast-input
-  onTeam?: (meta: TeamMeta) => void // host ontvangt de team-config van de gast
+  onInput?: (cmd: InputCommand) => void // host ontvangt gast-input (1v1)
+  onTeam?: (meta: TeamMeta) => void // host ontvangt de team-config van de gast (1v1)
   onSnapshot?: (snap: Snapshot) => void // gast ontvangt snapshot
   onStart?: (payload: StartPayload) => void // gast: host is begonnen (met beide teams)
+  // Multiplayer 2v2:
+  onRoster?: (members: RosterMember[]) => void // host: wie zit er in de kamer (voor de lobby)
+  onJoin?: (p: JoinPayload) => void // host: een gast kondigt zich aan (naam + team)
+  onInputSlot?: (slot: number, cmd: InputCommand) => void // host: input van gast-slot
+  onLobby?: (payload: LobbyPayload) => void // gast: team/slot-indeling van de host
   onSubscribed?: () => void
 }
 
@@ -69,7 +87,7 @@ const N = PLAYERS_PER_TEAM * 2
 const r0 = (n: number) => Math.round(n) // 1 decimaal is niet nodig voor rendering
 
 // ── Serialisatie ────────────────────────────────────────────────────────────
-export function buildSnapshot(state: GameState, tick: number, controlledGuest: number): Snapshot {
+export function buildSnapshot(state: GameState, tick: number, controlledGuest: number, controlledSlots?: number[]): Snapshot {
   const p: number[] = new Array(N * 5)
   for (let i = 0; i < state.players.length; i++) {
     const pl = state.players[i]
@@ -91,6 +109,8 @@ export function buildSnapshot(state: GameState, tick: number, controlledGuest: n
     hf: state.half,
     cg: controlledGuest,
     cc: Math.round((state.players[controlledGuest]?.charge ?? 0) * 100) / 100,
+    cs: controlledSlots,
+    ccs: controlledSlots?.map((i) => Math.round((state.players[i]?.charge ?? 0) * 100) / 100),
     g: state.goals.flatMap((x) => [x.team, x.scorer, x.ownGoal ? 1 : 0, Math.round(x.clock), x.half]),
     rx: r0(state.ref.pos.x),
     ry: r0(state.ref.pos.y),
@@ -148,6 +168,8 @@ export function lerpSnapshotInto(target: GameState, a: Snapshot, b: Snapshot, al
   target.half = b.hf as 1 | 2
   // Laadstand van de bestuurde gast-speler terugzetten (voor de power-balk).
   if (target.players[b.cg]) target.players[b.cg].charge = b.cc
+  // 2v2: laadstand per slot terugzetten (voor de power-balk van elke gast).
+  if (b.cs && b.ccs) for (let i = 0; i < b.cs.length; i++) { const pl = target.players[b.cs[i]]; if (pl) pl.charge = b.ccs[i] }
   // Scheids, sent-off en restart-type overnemen (van de nieuwste snapshot).
   target.ref.pos.x = b.rx
   target.ref.pos.y = b.ry
@@ -244,31 +266,44 @@ export class SoccerNet {
   private channel: any = null
   private h: Handlers
   private peerSeen = false
+  readonly peerId = `p${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`
+  private name: string
 
-  constructor(role: NetRole, code: string, handlers: Handlers) {
+  constructor(role: NetRole, code: string, handlers: Handlers, name = '') {
     this.role = role
     this.code = code
     this.h = handlers
+    this.name = name
   }
 
   connect() {
+    // Presence-sleutel = unieke peerId (i.p.v. role) → tot 4 peers kunnen samen in de kamer.
     const ch = this.sb.channel(`soccer:${this.code}`, {
-      config: { broadcast: { self: false }, presence: { key: this.role } },
+      config: { broadcast: { self: false }, presence: { key: this.peerId } },
     })
     this.channel = ch
 
     if (this.role === 'host') {
-      ch.on('broadcast', { event: 'input' }, (m: { payload: InputCommand }) => this.h.onInput?.(m.payload))
-      ch.on('broadcast', { event: 'team' }, (m: { payload: TeamMeta }) => this.h.onTeam?.(m.payload))
+      ch.on('broadcast', { event: 'input' }, (m: { payload: InputCommand }) => this.h.onInput?.(m.payload)) // 1v1
+      ch.on('broadcast', { event: 'team' }, (m: { payload: TeamMeta }) => this.h.onTeam?.(m.payload)) // 1v1
+      ch.on('broadcast', { event: 'join' }, (m: { payload: JoinPayload }) => this.h.onJoin?.(m.payload)) // 2v2
+      ch.on('broadcast', { event: 'inp' }, (m: { payload: SlotInput }) => this.h.onInputSlot?.(m.payload.slot, m.payload.cmd)) // 2v2
     } else {
       ch.on('broadcast', { event: 'snap' }, (m: { payload: Snapshot }) => this.h.onSnapshot?.(m.payload))
       ch.on('broadcast', { event: 'start' }, (m: { payload: StartPayload }) => this.h.onStart?.(m.payload))
+      ch.on('broadcast', { event: 'lobby' }, (m: { payload: LobbyPayload }) => this.h.onLobby?.(m.payload)) // 2v2
     }
 
-    // Aanwezigheid: host merkt de gast, beide merken vertrek.
+    // Aanwezigheid: roster opbouwen (voor de lobby) + join/leave detecteren (self uitgesloten).
     ch.on('presence', { event: 'sync' }, () => {
-      const state = ch.presenceState() as Record<string, unknown[]>
-      const others = Object.keys(state).filter((k) => k !== this.role)
+      const state = ch.presenceState() as Record<string, Array<{ peerId?: string; role?: NetRole; name?: string }>>
+      const members: RosterMember[] = []
+      for (const entries of Object.values(state)) {
+        const e = entries[0]
+        if (e?.peerId) members.push({ peerId: e.peerId, name: e.name ?? '', role: e.role ?? 'guest' })
+      }
+      this.h.onRoster?.(members)
+      const others = members.filter((m) => m.peerId !== this.peerId)
       if (others.length > 0 && !this.peerSeen) {
         this.peerSeen = true
         this.h.onGuestJoined?.()
@@ -280,7 +315,7 @@ export class SoccerNet {
 
     ch.subscribe((status: string) => {
       if (status === 'SUBSCRIBED') {
-        ch.track({ role: this.role, at: Date.now() })
+        ch.track({ peerId: this.peerId, role: this.role, name: this.name, at: Date.now() })
         this.h.onSubscribed?.()
       }
     })
@@ -297,6 +332,16 @@ export class SoccerNet {
   }
   sendStart(payload: StartPayload) {
     this.channel?.send({ type: 'broadcast', event: 'start', payload })
+  }
+  // ── 2v2 ──
+  sendJoin(payload: JoinPayload) {
+    this.channel?.send({ type: 'broadcast', event: 'join', payload })
+  }
+  sendLobby(payload: LobbyPayload) {
+    this.channel?.send({ type: 'broadcast', event: 'lobby', payload })
+  }
+  sendInputSlot(slot: number, cmd: InputCommand) {
+    this.channel?.send({ type: 'broadcast', event: 'inp', payload: { slot, cmd } })
   }
 
   leave() {
