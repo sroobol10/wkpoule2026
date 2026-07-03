@@ -40,6 +40,7 @@ export type Snapshot = {
   g: number[] // doelpunten, plat: [team, scorer, ownGoal?1:0, clockInt, half] per goal
   rx: number // scheids x
   ry: number // scheids y
+  rt: number // scheids-tumble (getackeld, fun)
   so: number // sent-off bitmask (bit i = speler i van het veld)
   rk: string // restart-type ('throwin'|'corner'|'goalkick'|'freekick'|'')
   cd: number[] // kaarten, plat: [player, red?1:0, clockInt, half] per kaart (voor de flash)
@@ -49,7 +50,8 @@ export type Snapshot = {
   pn: number // panna-teller (voor "PANNA!" bij de gast)
   gk: number // laatste doelpunt-soort: 0 normal, 1 screamer, 2 owngoal
   st: number[] // stats: [shots0,shots1,tackles0,tackles1,pannas0,pannas1,possSec0,possSec1]
-  sk: number[] // veldbestormer: [x, y, variant] als actief, anders lege array
+  sk: number[] // veldbestormer: [x, y, variant, tumble] als actief, anders lege array
+  sk2: number[] // extra bestormers: [x, y, variant, tumble] per stuk (plat), anders leeg
   se: number[] // beveiliger: [x, y] als actief, anders lege array
 }
 
@@ -92,9 +94,10 @@ export function buildSnapshot(state: GameState, tick: number, controlledGuest: n
     g: state.goals.flatMap((x) => [x.team, x.scorer, x.ownGoal ? 1 : 0, Math.round(x.clock), x.half]),
     rx: r0(state.ref.pos.x),
     ry: r0(state.ref.pos.y),
+    rt: Math.round(state.ref.tumble * 100) / 100,
     so: state.players.reduce((m, p, i) => (p.sentOff ? m | (1 << i) : m), 0),
     rk: state.restartKind ?? '',
-    cd: state.cards.flatMap((c) => [c.player, c.red ? 1 : 0, Math.round(c.clock), c.half]),
+    cd: state.cards.flatMap((c) => [c.player, c.red ? 1 : 0, Math.round(c.clock), c.half, c.secondYellow ? 1 : 0]),
     fc: state.foulCount,
     tk: state.tackleCount,
     sv: state.saveCount,
@@ -106,8 +109,9 @@ export function buildSnapshot(state: GameState, tick: number, controlledGuest: n
       state.stats.pannas[0], state.stats.pannas[1],
       r0(state.stats.possMs[0]), r0(state.stats.possMs[1]),
     ],
-    sk: state.streaker ? [r0(state.streaker.pos.x), r0(state.streaker.pos.y), state.streaker.variant] : [],
-    se: state.security ? [r0(state.security.pos.x), r0(state.security.pos.y)] : [],
+    sk: state.streaker ? [r0(state.streaker.pos.x), r0(state.streaker.pos.y), state.streaker.variant, Math.round(state.streaker.tumble * 100) / 100] : [],
+    sk2: state.extraStreakers.flatMap((e) => [r0(e.pos.x), r0(e.pos.y), e.variant, Math.round(e.tumble * 100) / 100]),
+    se: state.security ? [r0(state.security.pos.x), r0(state.security.pos.y), Math.round(state.security.tumble * 100) / 100] : [],
   }
 }
 
@@ -147,6 +151,7 @@ export function lerpSnapshotInto(target: GameState, a: Snapshot, b: Snapshot, al
   // Scheids, sent-off en restart-type overnemen (van de nieuwste snapshot).
   target.ref.pos.x = b.rx
   target.ref.pos.y = b.ry
+  target.ref.tumble = b.rt ?? 0
   for (let i = 0; i < target.players.length; i++) target.players[i].sentOff = ((b.so >> i) & 1) === 1
   target.restartKind = (b.rk || null) as GameState['restartKind']
   target.foulCount = b.fc ?? target.foulCount
@@ -165,30 +170,39 @@ export function lerpSnapshotInto(target: GameState, a: Snapshot, b: Snapshot, al
     const both = a.sk.length >= 2
     const sx = both ? a.sk[0] + (b.sk[0] - a.sk[0]) * t : b.sk[0]
     const sy = both ? a.sk[1] + (b.sk[1] - a.sk[1]) * t : b.sk[1]
-    target.streaker = { pos: { x: sx, y: sy }, vel: { x: 0, y: 0 }, target: { x: b.sk[0], y: b.sk[1] }, timer: 0, variant: (b.sk[2] === 2 ? 2 : b.sk[2] === 1 ? 1 : 0), caught: false }
+    target.streaker = { pos: { x: sx, y: sy }, vel: { x: 0, y: 0 }, target: { x: b.sk[0], y: b.sk[1] }, timer: 0, variant: (b.sk[2] === 2 ? 2 : b.sk[2] === 1 ? 1 : 0), caught: false, tumble: b.sk[3] ?? 0, tackled: true }
   } else {
     target.streaker = null
+  }
+  // Extra bestormers (positie rechtstreeks van de nieuwste snapshot; geen interpolatie nodig).
+  const ex2 = b.sk2 ?? []
+  const nEx = Math.floor(ex2.length / 4)
+  target.extraStreakers = []
+  for (let i = 0; i < nEx; i++) {
+    const v = ex2[i * 4 + 2]
+    target.extraStreakers.push({ pos: { x: ex2[i * 4], y: ex2[i * 4 + 1] }, vel: { x: 0, y: 0 }, target: { x: ex2[i * 4], y: ex2[i * 4 + 1] }, timer: 99, variant: (v === 2 ? 2 : v === 1 ? 1 : 0), caught: false, tumble: ex2[i * 4 + 3] ?? 0, tackled: true })
   }
   if (b.se && b.se.length >= 2) {
     const both = a.se && a.se.length >= 2
     const ex = both ? a.se[0] + (b.se[0] - a.se[0]) * t : b.se[0]
     const ey = both ? a.se[1] + (b.se[1] - a.se[1]) * t : b.se[1]
-    target.security = { pos: { x: ex, y: ey }, vel: { x: 0, y: 0 } }
+    target.security = { pos: { x: ex, y: ey }, vel: { x: 0, y: 0 }, tumble: b.se[2] ?? 0 }
   } else {
     target.security = null
   }
   // Kaartenlog reconstrueren (alleen als het aantal wijzigt → goedkoop; voedt de flash).
-  const nCards = Math.floor(b.cd.length / 4)
+  const nCards = Math.floor(b.cd.length / 5)
   if (nCards !== target.cards.length) {
     target.cards = []
     for (let i = 0; i < nCards; i++) {
-      const player = b.cd[i * 4]
+      const player = b.cd[i * 5]
       target.cards.push({
         player,
         team: target.players[player]?.team ?? 0,
-        red: b.cd[i * 4 + 1] === 1,
-        clock: b.cd[i * 4 + 2],
-        half: b.cd[i * 4 + 3] as 1 | 2,
+        red: b.cd[i * 5 + 1] === 1,
+        clock: b.cd[i * 5 + 2],
+        half: b.cd[i * 5 + 3] as 1 | 2,
+        secondYellow: b.cd[i * 5 + 4] === 1,
       })
     }
   }

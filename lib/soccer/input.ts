@@ -14,8 +14,8 @@ export type Bindings = {
 }
 
 // Standaard: WASD/pijltjes lopen · Spatie schot · Q sliding · Shift sprint · X wisselen ·
-// E stift · R kap. Controller (standaard layout): A schot · X sliding · B wisselen · Y stift ·
-// LB kap · RB sprint · linkerstick/D-pad lopen.
+// E stift · R kap. PS5-controller (DualSense, standaardmapping): ✕ schot · □ sliding · ○ wisselen ·
+// △ stift · L1 kap · R1 sprint · linkerstick/D-pad lopen.
 export const DEFAULT_BINDINGS: Bindings = {
   keys: {
     up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
@@ -120,13 +120,20 @@ export class PlayerInput {
         }
       }
     }
-    // Controller: linkerstick (met deadzone) + D-pad (standaard knop 12–15).
+    // Controller: linkerstick (analoog, 360° + variabele snelheid) + D-pad (digitaal, zoals WASD).
     const gp = activeGamepad()
     if (gp) {
-      const ax = gp.axes[0] ?? 0
-      const ay = gp.axes[1] ?? 0
-      if (Math.abs(ax) > PAD_DEADZONE) x += ax
-      if (Math.abs(ay) > PAD_DEADZONE) y += ay
+      // Radiale deadzone: neem de lengte van de stickvector en herschaal 'm vanaf de deadzone-rand
+      // naar 0..1. Zo krijg je vloeiend versnellen (zacht duwen = wandelen) i.p.v. een sprong,
+      // en geen assen-"snapping" zoals bij een deadzone per as. De sim vertaalt lengte → snelheid.
+      const sx = gp.axes[0] ?? 0
+      const sy = gp.axes[1] ?? 0
+      const mag = Math.hypot(sx, sy)
+      if (mag > PAD_DEADZONE) {
+        const scaled = Math.min(1, (mag - PAD_DEADZONE) / (1 - PAD_DEADZONE))
+        x += (sx / mag) * scaled
+        y += (sy / mag) * scaled
+      }
       if (gp.buttons[12]?.pressed) y -= 1
       if (gp.buttons[13]?.pressed) y += 1
       if (gp.buttons[14]?.pressed) x -= 1

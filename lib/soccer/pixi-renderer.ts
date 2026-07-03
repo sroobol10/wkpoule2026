@@ -69,11 +69,10 @@ export class PixiSoccerRenderer {
   private ballNode: any = null
   private ballShadow: any = null
   private refNode: any = null
-  private streakerNode: any = null
+  private streakerNodes: any[] = [] // tot 3 bestormers (1 primair + 2 extra)
   private securityNode: any = null
   private securityPhase = 0
   private celebrateTeam: number | null = null // team dat juicht (armen omhoog) tijdens de goal-fase
-  private streakerPhase = 0 // loop-fase voor de zwaaiende beentjes/armen
   private teams: [TeamMeta, TeamMeta] | null = null
   private particles: Particle[] = []
   private flashes: Particle[] = [] // knipperende "camera-flitsen" op de tribune
@@ -634,34 +633,33 @@ export class PixiSoccerRenderer {
     return g
   }
 
-  // Veldbestormer: een vrolijk (semi-naakt) poppetje met een zwart censuurbalkje.
+  // Veldbestormers: tot 3 vrolijke (semi-naakte) poppetjes met een zwart censuurbalkje.
   private buildStreaker() {
     const PIXI = this.PIXI
     const r = PLAYER_RADIUS
     const skin = 0xf0c19b
-    const c = new PIXI.Container()
-    const sh = new PIXI.Graphics()
-    sh.ellipse(0, r * 1.1, r * 0.8, r * 0.38).fill({ color: 0x000000, alpha: 0.25 })
-    const legL = new PIXI.Graphics(); legL.roundRect(-r * 0.34, 0, r * 0.34, r * 0.62, r * 0.16).fill(skin); legL.position.set(-r * 0.02, r * 0.42)
-    const legR = new PIXI.Graphics(); legR.roundRect(0, 0, r * 0.34, r * 0.62, r * 0.16).fill(skin); legR.position.set(r * 0.02, r * 0.42)
-    const torso = new PIXI.Graphics()
-    torso.roundRect(-r * 0.6, -r * 0.5, r * 1.2, r * 1.0, r * 0.42).fill(skin).stroke({ width: 1.4, color: 0x9c6b45, alpha: 0.5 })
-    // opgeheven zwaaiende armen (juichend)
-    const armL = new PIXI.Graphics(); armL.roundRect(-r * 0.16, -r * 0.62, r * 0.32, r * 0.7, r * 0.15).fill(skin); armL.position.set(-r * 0.5, -r * 0.32)
-    const armR = new PIXI.Graphics(); armR.roundRect(-r * 0.16, -r * 0.62, r * 0.32, r * 0.7, r * 0.15).fill(skin); armR.position.set(r * 0.5, -r * 0.32)
-    // zwart censuurbalkje
-    const bar = new PIXI.Graphics(); bar.roundRect(-r * 0.42, r * 0.16, r * 0.84, r * 0.34, r * 0.08).fill(0x0a0a0a)
-    // drie koppen (variant 0/1/2); we togglen de zichtbaarheid per bestorming
-    const head0 = this.headSprite(`${FACES_DIR}/streaker-1.png`, r, skin)
-    const head1 = this.headSprite(`${FACES_DIR}/streaker-2.png`, r, skin)
-    const head2 = this.headSprite(`${FACES_DIR}/streaker-3.png`, r, skin)
-    head1.visible = false
-    head2.visible = false
-    c.addChild(sh, legL, legR, torso, bar, armL, armR, head0, head1, head2)
-    c.visible = false
-    c.scale.set(1.56) // flink groter dan de spelers → goed zichtbaar
-    this.entityLayer.addChild(c)
-    this.streakerNode = { c, legL, legR, armL, armR, heads: [head0, head1, head2] }
+    for (let k = 0; k < 3; k++) {
+      const c = new PIXI.Container()
+      const sh = new PIXI.Graphics()
+      sh.ellipse(0, r * 1.1, r * 0.8, r * 0.38).fill({ color: 0x000000, alpha: 0.25 })
+      const legL = new PIXI.Graphics(); legL.roundRect(-r * 0.34, 0, r * 0.34, r * 0.62, r * 0.16).fill(skin); legL.position.set(-r * 0.02, r * 0.42)
+      const legR = new PIXI.Graphics(); legR.roundRect(0, 0, r * 0.34, r * 0.62, r * 0.16).fill(skin); legR.position.set(r * 0.02, r * 0.42)
+      const torso = new PIXI.Graphics()
+      torso.roundRect(-r * 0.6, -r * 0.5, r * 1.2, r * 1.0, r * 0.42).fill(skin).stroke({ width: 1.4, color: 0x9c6b45, alpha: 0.5 })
+      const armL = new PIXI.Graphics(); armL.roundRect(-r * 0.16, -r * 0.62, r * 0.32, r * 0.7, r * 0.15).fill(skin); armL.position.set(-r * 0.5, -r * 0.32)
+      const armR = new PIXI.Graphics(); armR.roundRect(-r * 0.16, -r * 0.62, r * 0.32, r * 0.7, r * 0.15).fill(skin); armR.position.set(r * 0.5, -r * 0.32)
+      const bar = new PIXI.Graphics(); bar.roundRect(-r * 0.42, r * 0.16, r * 0.84, r * 0.34, r * 0.08).fill(0x0a0a0a)
+      const head0 = this.headSprite(`${FACES_DIR}/streaker-1.png`, r, skin)
+      const head1 = this.headSprite(`${FACES_DIR}/streaker-2.png`, r, skin)
+      const head2 = this.headSprite(`${FACES_DIR}/streaker-3.png`, r, skin)
+      head1.visible = false
+      head2.visible = false
+      c.addChild(sh, legL, legR, torso, bar, armL, armR, head0, head1, head2)
+      c.visible = false
+      c.scale.set(1.56) // flink groter dan de spelers → goed zichtbaar
+      this.entityLayer.addChild(c)
+      this.streakerNodes.push({ c, legL, legR, armL, armR, heads: [head0, head1, head2], phase: k * 1.7 })
+    }
   }
 
   // Beveiliger die op de streaker jaagt. Bij voorkeur het meegeleverde mbappe.png (legerpak
@@ -902,30 +900,37 @@ export class PixiSoccerRenderer {
       this.animatePlayer(p, n, dt)
       if (sh) sh.position.set(p.pos.x, p.pos.y + PLAYER_RADIUS * 1.15)
     }
-    // scheidsrechter
+    // scheidsrechter (kan getackeld worden → tuimelt spinnend weg, puur fun).
+    // Groeit 20% per tackle (tackleCount) → steeds imposantere scheids, geklemd op 4×.
     this.refNode.position.set(state.ref.pos.x, state.ref.pos.y)
     this.refNode.zIndex = state.ref.pos.y
+    this.refNode.rotation = state.ref.tumble > 0 ? state.ref.tumble * 9 : 0
+    this.refNode.scale.set(1.2 * Math.min(4, Math.pow(1.2, state.tackleCount)))
 
-    // veldbestormer (fun): rennen met zwaaiende beentjes + juichende armen
-    const sk = this.streakerNode
-    if (state.streaker) {
-      sk.c.visible = true
-      const vi = state.streaker.variant
-      sk.heads[0].visible = vi === 0
-      sk.heads[1].visible = vi === 1
-      sk.heads[2].visible = vi === 2
-      sk.c.position.set(state.streaker.pos.x, state.streaker.pos.y)
-      sk.c.zIndex = state.streaker.pos.y
-      const spd = Math.hypot(state.streaker.vel.x, state.streaker.vel.y)
-      this.streakerPhase += dt * (6 + spd * 0.03)
-      const swing = Math.sin(this.streakerPhase)
-      sk.legL.rotation = swing * 0.7
-      sk.legR.rotation = -swing * 0.7
-      sk.armL.rotation = -0.35 + swing * 0.4
-      sk.armR.rotation = 0.35 - swing * 0.4
-      sk.c.rotation = Math.sin(this.streakerPhase * 2) * 0.04 // vrolijk wiebelen
-    } else if (sk.c.visible) {
-      sk.c.visible = false
+    // veldbestormers (fun): tot 3 tegelijk (1 primair + extra's). Slot 0 = state.streaker, 1-2 = extra's.
+    const allStreakers = state.streaker ? [state.streaker, ...state.extraStreakers] : []
+    for (let k = 0; k < this.streakerNodes.length; k++) {
+      const sk = this.streakerNodes[k]
+      const str = allStreakers[k]
+      if (str) {
+        sk.c.visible = true
+        sk.heads[0].visible = str.variant === 0
+        sk.heads[1].visible = str.variant === 1
+        sk.heads[2].visible = str.variant === 2
+        sk.c.position.set(str.pos.x, str.pos.y)
+        sk.c.zIndex = str.pos.y
+        const spd = Math.hypot(str.vel.x, str.vel.y)
+        sk.phase += dt * (6 + spd * 0.03)
+        const swing = Math.sin(sk.phase)
+        sk.legL.rotation = swing * 0.7
+        sk.legR.rotation = -swing * 0.7
+        sk.armL.rotation = -0.35 + swing * 0.4
+        sk.armR.rotation = 0.35 - swing * 0.4
+        // getackeld → spinnend tuimelen; anders vrolijk wiebelen
+        sk.c.rotation = str.tumble > 0 ? str.tumble * 9 : Math.sin(sk.phase * 2) * 0.04
+      } else if (sk.c.visible) {
+        sk.c.visible = false
+      }
     }
 
     // beveiliger (jaagt op de streaker)
@@ -943,6 +948,8 @@ export class PixiSoccerRenderer {
       if (se.armR) se.armR.rotation = sw * 0.6
       // mbappe-sprite: licht wiebelen + voorover leunen alsof-ie sprint
       if (se.body) { se.body.rotation = sw * 0.05; se.body.position.y = PLAYER_RADIUS * 0.6 - Math.abs(sw) * PLAYER_RADIUS * 0.06 }
+      // getackeld → spinnend tuimelen (fun)
+      se.c.rotation = state.security.tumble > 0 ? state.security.tumble * 9 : 0
     } else if (se.c.visible) {
       se.c.visible = false
     }

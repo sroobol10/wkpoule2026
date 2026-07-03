@@ -54,19 +54,20 @@ export const COUNTRIES: Country[] = [
 // Elke collega heeft een archetype (`tag`) + eigenschappen op 1..5 (pace/shot/tackle).
 // Die sturen kleine multipliers in de sim én de AI, zodat teamkeuze er echt toe doet.
 export type PoolPlayer = { name: string; face: string; tag: string; traits: PlayerTraits }
+// Elke speler telt exact 11 traitpunten op (van 15) → eerlijk; alleen de verdeling verschilt.
 export const PLAYER_POOL: PoolPlayer[] = [
-  { name: 'Stefan', face: 'steve.png', tag: 'Sluipschutter', traits: { pace: 3, shot: 5, tackle: 2 } },
-  { name: 'Julia', face: 'julia.png', tag: 'Spielmacher', traits: { pace: 4, shot: 3, tackle: 2 } },
-  { name: 'Jeff', face: 'jeff.png', tag: 'Motor', traits: { pace: 3, shot: 3, tackle: 4 } },
-  { name: 'Chris', face: 'chris.png', tag: 'Muur', traits: { pace: 2, shot: 3, tackle: 5 } },
+  { name: 'Stefan', face: 'steve.png', tag: 'Sluipschutter', traits: { pace: 3, shot: 5, tackle: 3 } },
+  { name: 'Julia', face: 'julia.png', tag: 'Spielmacher', traits: { pace: 4, shot: 4, tackle: 3 } },
+  { name: 'Jeff', face: 'jeff.png', tag: 'Motor', traits: { pace: 4, shot: 3, tackle: 4 } },
+  { name: 'Chris', face: 'chris.png', tag: 'Muur', traits: { pace: 3, shot: 3, tackle: 5 } },
   { name: 'Pim', face: 'pim.png', tag: 'Tank', traits: { pace: 2, shot: 4, tackle: 5 } },
   { name: 'Pawel', face: 'pawel.png', tag: 'Raket', traits: { pace: 5, shot: 3, tackle: 3 } },
-  { name: 'Bram', face: 'bram.png', tag: 'Architect', traits: { pace: 3, shot: 5, tackle: 3 } },
-  { name: 'Ozair', face: 'ozair.png', tag: 'Terriër', traits: { pace: 4, shot: 2, tackle: 4 } },
-  { name: 'Florian', face: 'florian.png', tag: 'Sprinter', traits: { pace: 5, shot: 2, tackle: 3 } },
-  { name: 'Athena', face: 'athena.png', tag: 'Ster', traits: { pace: 4, shot: 4, tackle: 3 } },
-  { name: 'Jasper', face: 'jasper.png', tag: 'Techneut', traits: { pace: 5, shot: 4, tackle: 2 } },
-  { name: 'Corné', face: 'corne.png', tag: 'Goaltjesdief', traits: { pace: 4, shot: 4, tackle: 2 } },
+  { name: 'Bram', face: 'bram.png', tag: 'Architect', traits: { pace: 2, shot: 5, tackle: 4 } },
+  { name: 'Ozair', face: 'ozair.png', tag: 'Terriër', traits: { pace: 4, shot: 2, tackle: 5 } },
+  { name: 'Florian', face: 'florian.png', tag: 'Sprinter', traits: { pace: 5, shot: 4, tackle: 2 } },
+  { name: 'Athena', face: 'athena.png', tag: 'Ster', traits: { pace: 3, shot: 4, tackle: 4 } },
+  { name: 'Jasper', face: 'jasper.png', tag: 'Techneut', traits: { pace: 4, shot: 5, tackle: 2 } },
+  { name: 'Corné', face: 'corne.png', tag: 'Goaltjesdief', traits: { pace: 5, shot: 5, tackle: 1 } },
 ]
 
 // Gemiddeld profiel (AI-landen zonder poolgezicht, of onbekende gezichten).
@@ -144,14 +145,15 @@ export function deriveShort(name: string): string {
 
 // Maak een TeamMeta uit naam + kleuren + opstelling (per plek een speler; lege plekken
 // worden aangevuld met ONGEBRUIKTE spelers → nooit dubbele spelers) + formatie-id.
-export function buildTeamMeta(name: string, colors: TeamColors, lineup: (PoolPlayer | null)[], formationId: string): TeamMeta {
+// `traitsByFace` (optioneel) overschrijft de standaard-traits per gezicht (custom teams).
+export function buildTeamMeta(name: string, colors: TeamColors, lineup: (PoolPlayer | null)[], formationId: string, traitsByFace?: Record<string, PlayerTraits>): TeamMeta {
   const used = new Set(lineup.filter((p): p is PoolPlayer => !!p).map((p) => p.face))
   const spares = PLAYER_POOL.filter((p) => !used.has(p.face)) // aanvullers, allemaal uniek
-  const full: { name: string; face: string | null }[] = []
+  const full: { name: string; face: string | null; traits?: PlayerTraits }[] = []
   let si = 0
   for (let i = 0; i < PLAYERS_PER_TEAM; i++) {
     const p = lineup[i] ?? spares[si++] ?? PLAYER_POOL[i % PLAYER_POOL.length]
-    full.push({ name: p.name, face: p.face })
+    full.push({ name: p.name, face: p.face, traits: (p.face && traitsByFace?.[p.face]) || p.traits })
   }
   const country = COUNTRIES.find((x) => x.name.toLowerCase() === name.trim().toLowerCase())
   return {
@@ -228,7 +230,7 @@ function makeTeam(team: TeamId, attackDir: 1 | -1, meta: TeamMeta): PlayerState[
       name: sel.name || `Speler ${i + 1}`,
       face: sel.face ?? DEFAULT_FACE,
       anchor: { ...f.anchor },
-      traits: traitsForFace(sel.face),
+      traits: sel.traits ?? traitsForFace(sel.face),
       pos: { ...pos },
       vel: { x: 0, y: 0 },
       facing: { x: d, y: 0 },
@@ -263,8 +265,9 @@ export function createInitialState(humanTeam: TeamId, halfLengthSec: number, tea
     },
     score: [0, 0],
     teams: [teamA, teamB],
-    ref: { pos: { x: PITCH_LENGTH / 2, y: PITCH_WIDTH / 2 - 60 }, vel: { x: 0, y: 0 } },
+    ref: { pos: { x: PITCH_LENGTH / 2, y: PITCH_WIDTH / 2 - 60 }, vel: { x: 0, y: 0 }, tumble: 0 },
     streaker: null,
+    extraStreakers: [],
     streakerCooldown: STREAKER_MIN_GAP,
     security: null,
     wind: { x: 0, y: 0 },

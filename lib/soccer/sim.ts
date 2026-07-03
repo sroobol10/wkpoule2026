@@ -71,6 +71,8 @@ import {
   RESTART_KEEP_RADIUS,
   TUMBLE_KNOCK,
   TUMBLE_TIME,
+  FUN_TUMBLE_TIME,
+  FUN_KNOCK,
   SPRINT_DRAIN,
   SPRINT_MIN,
   SPRINT_MULT,
@@ -93,7 +95,7 @@ import {
   traitMul,
 } from './constants'
 import { anchorToWorld, teamDir } from './teams'
-import type { BallState, GameState, InputCommand, PlayerState, RestartKind, TeamId } from './types'
+import type { BallState, GameState, InputCommand, PlayerState, RestartKind, StreakerState, TeamId } from './types'
 import {
   add,
   clamp,
@@ -317,6 +319,7 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
   // en een lopende (vertraagde) overtreding afhandelen (fluit/kaart komt ná de tumble-animatie).
   applyTackleImpacts(state)
   checkSlideFouls(state)
+  funTackle(state) // scheids/streaker/bewaker omver sliden (fun, geen kaart)
   resolvePendingFoul(state, dt)
 
   // Dynamisch weer (wind kruipt/valt in vlagen, regen komt en gaat) — alleen tijdens spel.
@@ -577,7 +580,7 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     // (passes blijven onaangeroerd zodat de pass-assist accuraat blijft).
     if (best.charge >= PASS_CHARGE_MAX) {
       state.stats.shots[best.team] += 1
-      power *= traitMul(best.traits.shot)
+      power *= traitMul(best.traits.shot) // schutter-trait → hardere knal (keeper minder tijd)
     }
 
     // Pass-assist: bij een korte tik richten we naar de best passende medespeler — en
@@ -654,7 +657,7 @@ function collideBallBodies(state: GameState) {
     // Veldspelers laten hoge ballen over zich heen; alleen keepers pakken die (tot reach-hoogte).
     if (ball.z > AIR_CONTROL_HEIGHT && !(isGK && ball.z < GK_REACH_HEIGHT)) continue
     // Keeper: reikwijdte krimpt met de balsnelheid → geladen power-shots zijn moeilijker te pakken.
-    const react = 1 - Math.min(0.62, Math.max(0, (speed - 450) / 620))
+    const react = 1 - Math.min(0.52, Math.max(0, (speed - 470) / 660))
     const rad = isGK ? GK_SAVE_RADIUS * react : PLAYER_RADIUS + BALL_RADIUS * state.ballScale
     const dx = ball.pos.x - p.pos.x
     const dy = ball.pos.y - p.pos.y
@@ -821,6 +824,16 @@ function handleBoundsAndGoals(state: GameState, dt: number): boolean {
 // Scheidsrechter loopt mee met de bal (op afstand); raakt de bal niet.
 function moveRef(state: GameState, dt: number): void {
   const r = state.ref
+  // Net getackeld → tuimelt weg (knock uitdempend), loopt niet mee met de bal.
+  if (r.tumble > 0) {
+    r.tumble = Math.max(0, r.tumble - dt)
+    r.pos.x = clamp(r.pos.x + r.vel.x * dt, 20, PITCH_LENGTH - 20)
+    r.pos.y = clamp(r.pos.y + r.vel.y * dt, 20, PITCH_WIDTH - 20)
+    const f = Math.max(0, 1 - 3.5 * dt)
+    r.vel.x *= f
+    r.vel.y *= f
+    return
+  }
   const dx = state.ball.pos.x - r.pos.x
   const dy = state.ball.pos.y - r.pos.y
   const d = Math.hypot(dx, dy)
@@ -842,43 +855,39 @@ function streakerPointNear(cx: number, cy: number, ang: number, r: number): Vec2
   }
 }
 
-// Veldbestormer: spawnt af en toe RONDOM de bal (waar de camera staat → altijd in beeld),
-// slentert daar rond, ketst de bal weg (kan 'm niet bezitten) + loopt spelers omver.
-function updateStreaker(state: GameState, dt: number): void {
-  const s = state.streaker
-  if (!s) {
-    if (state.streakerCooldown > 0) state.streakerCooldown -= dt
-    else if (state.phase === 'playing' && Math.random() < STREAKER_SPAWN_CHANCE * dt) {
-      const b = state.ball.pos
-      const ang = Math.random() * Math.PI * 2
-      const pos = streakerPointNear(b.x, b.y, ang, 330) // net binnen beeld, aan één kant van de bal
-      const target = streakerPointNear(b.x, b.y, ang + Math.PI, 330) // dwars door de bal-omgeving
-      const variant = (Math.random() * 3 | 0) as 0 | 1 | 2
-      state.streaker = { pos, vel: { x: 0, y: 0 }, target, timer: STREAKER_MAX_LIFE, variant, caught: false }
-    }
-    return
+// Maak een nieuwe veldbestormer, RONDOM de bal (waar de camera staat → altijd in beeld).
+function makeStreaker(state: GameState): StreakerState {
+  const b = state.ball.pos
+  const ang = Math.random() * Math.PI * 2
+  return {
+    pos: streakerPointNear(b.x, b.y, ang, 330),
+    vel: { x: 0, y: 0 },
+    target: streakerPointNear(b.x, b.y, ang + Math.PI, 330),
+    timer: STREAKER_MAX_LIFE,
+    variant: (Math.random() * 3 | 0) as 0 | 1 | 2,
+    caught: false,
+    tumble: 0,
+    tackled: false,
   }
+}
 
-  s.timer -= dt
-  if (s.timer <= 0) {
-    // Veiligheids-timeout → weg, korte pauze tot de volgende.
-    state.streaker = null
-    state.security = null
-    state.streakerCooldown = STREAKER_MIN_GAP
-    return
+// Beweegt één bestormer: tuimelen → slenteren → bal wegketsen + spelers hinderen.
+// Retourneert true als hij weg moet (gepakt én bij de tribune aangekomen).
+function roamStreaker(state: GameState, s: StreakerState, dt: number): boolean {
+  if (s.tumble > 0) {
+    s.tumble = Math.max(0, s.tumble - dt)
+    s.pos.x = clamp(s.pos.x + s.vel.x * dt, 20, PITCH_LENGTH - 20)
+    s.pos.y = clamp(s.pos.y + s.vel.y * dt, 20, PITCH_WIDTH - 20)
+    const f = Math.max(0, 1 - 3.5 * dt)
+    s.vel.x *= f
+    s.vel.y *= f
+    return false
   }
   let dx = s.target.x - s.pos.x
   let dy = s.target.y - s.pos.y
   let d = Math.hypot(dx, dy)
   if (d < 8) {
-    if (s.caught) {
-      // Bij de tribune aangekomen → beiden weg, korte pauze tot de volgende.
-      state.streaker = null
-      state.security = null
-      state.streakerCooldown = STREAKER_MIN_GAP
-      return
-    }
-    // Doel bereikt → nieuw doel bij de (huidige) bal, zodat-ie in beeld blijft slenteren.
+    if (s.caught) return true // bij de tribune aangekomen → weg
     s.target = streakerPointNear(state.ball.pos.x, state.ball.pos.y, Math.random() * Math.PI * 2, 280)
     dx = s.target.x - s.pos.x
     dy = s.target.y - s.pos.y
@@ -925,31 +934,73 @@ function updateStreaker(state: GameState, dt: number): void {
       }
     }
   }
+  return false
+}
 
-  // Beveiliger: verschijnt kort na de streaker aan de dichtstbijzijnde rand en zit 'm achterna.
+// Veldbestormers: één spawnt af en toe; tackle er één → er komt een extra bij (max 3 totaal,
+// zie funTackle). Als de eerste weg is (timeout/gepakt), verdwijnen ook de extra's → terug naar 1.
+function updateStreaker(state: GameState, dt: number): void {
+  const s = state.streaker
+  if (!s) {
+    if (state.streakerCooldown > 0) state.streakerCooldown -= dt
+    else if (state.phase === 'playing' && Math.random() < STREAKER_SPAWN_CHANCE * dt) state.streaker = makeStreaker(state)
+    if (state.extraStreakers.length) state.extraStreakers = []
+    return
+  }
+  s.timer -= dt
+  const gone = s.timer <= 0 || roamStreaker(state, s, dt)
+  if (gone) {
+    state.streaker = null
+    state.security = null
+    state.extraStreakers = []
+    state.streakerCooldown = STREAKER_MIN_GAP
+    return
+  }
+  updateSecurity(state, dt)
+  // Extra bestormers: eigen leeftijd + slenteren; verdwijnen als hun timer op is.
+  if (state.extraStreakers.length) {
+    for (const e of state.extraStreakers) e.timer -= dt
+    state.extraStreakers = state.extraStreakers.filter((e) => e.timer > 0)
+    for (const e of state.extraStreakers) roamStreaker(state, e, dt)
+  }
+}
+
+// Beveiliger: verschijnt kort na de streaker aan de dichtstbijzijnde rand en zit 'm achterna.
+// Kan zelf ook omver getackeld worden → tuimelt weg en pakt daarna de achtervolging weer op.
+function updateSecurity(state: GameState, dt: number): void {
+  const s = state.streaker
+  if (!s) return
   if (!state.security && STREAKER_MAX_LIFE - s.timer > SECURITY_SPAWN_AFTER) {
     const edges = [{ x: -20, y: s.pos.y }, { x: PITCH_LENGTH + 20, y: s.pos.y }, { x: s.pos.x, y: -20 }, { x: s.pos.x, y: PITCH_WIDTH + 20 }]
     const dists = [s.pos.x, PITCH_LENGTH - s.pos.x, s.pos.y, PITCH_WIDTH - s.pos.y]
     let mi = 0
     for (let i = 1; i < 4; i++) if (dists[i] < dists[mi]) mi = i
-    state.security = { pos: { ...edges[mi] }, vel: { x: 0, y: 0 } }
+    state.security = { pos: { ...edges[mi] }, vel: { x: 0, y: 0 }, tumble: 0 }
   }
-  if (state.security) {
-    const sec = state.security
-    const cdx = s.pos.x - sec.pos.x
-    const cdy = s.pos.y - sec.pos.y
-    const cd = Math.hypot(cdx, cdy) || 1
-    sec.vel = { x: (cdx / cd) * SECURITY_SPEED, y: (cdy / cd) * SECURITY_SPEED }
+  const sec = state.security
+  if (!sec) return
+  if (sec.tumble > 0) {
+    sec.tumble = Math.max(0, sec.tumble - dt)
     sec.pos.x += sec.vel.x * dt
     sec.pos.y += sec.vel.y * dt
-    if (!s.caught && cd < SECURITY_CATCH_RADIUS) {
-      // Gepakt! Samen naar de dichtstbijzijnde rand (tribune) → daar verdwijnen ze.
-      s.caught = true
-      const dd = [s.pos.x, PITCH_LENGTH - s.pos.x, s.pos.y, PITCH_WIDTH - s.pos.y]
-      let mi = 0
-      for (let i = 1; i < 4; i++) if (dd[i] < dd[mi]) mi = i
-      s.target = mi === 0 ? { x: -60, y: s.pos.y } : mi === 1 ? { x: PITCH_LENGTH + 60, y: s.pos.y } : mi === 2 ? { x: s.pos.x, y: -60 } : { x: s.pos.x, y: PITCH_WIDTH + 60 }
-    }
+    const f = Math.max(0, 1 - 3.5 * dt)
+    sec.vel.x *= f
+    sec.vel.y *= f
+    return
+  }
+  const cdx = s.pos.x - sec.pos.x
+  const cdy = s.pos.y - sec.pos.y
+  const cd = Math.hypot(cdx, cdy) || 1
+  sec.vel = { x: (cdx / cd) * SECURITY_SPEED, y: (cdy / cd) * SECURITY_SPEED }
+  sec.pos.x += sec.vel.x * dt
+  sec.pos.y += sec.vel.y * dt
+  if (!s.caught && cd < SECURITY_CATCH_RADIUS) {
+    // Gepakt! Samen naar de dichtstbijzijnde rand (tribune) → daar verdwijnen ze.
+    s.caught = true
+    const dd = [s.pos.x, PITCH_LENGTH - s.pos.x, s.pos.y, PITCH_WIDTH - s.pos.y]
+    let mi = 0
+    for (let i = 1; i < 4; i++) if (dd[i] < dd[mi]) mi = i
+    s.target = mi === 0 ? { x: -60, y: s.pos.y } : mi === 1 ? { x: PITCH_LENGTH + 60, y: s.pos.y } : mi === 2 ? { x: s.pos.x, y: -60 } : { x: s.pos.x, y: PITCH_WIDTH + 60 }
   }
 }
 
@@ -1002,12 +1053,16 @@ function applyTackleImpacts(state: GameState): void {
 function checkSlideFouls(state: GameState): void {
   if (state.phase !== 'playing') return
   if (state.foulCooldown > 0) return // net een overtreding gehad → even geen nieuwe (geen dubbele kaart)
+  // Welk team heeft nu de bal? Voordeelregel: haal je iemand neer zónder de bal te veroveren
+  // en houdt zijn team de bal gewoon → niet fluiten, laat doorspelen (wel de tumble-animatie).
+  const ballTeam = state.ball.lastTouch >= 0 ? (state.players[state.ball.lastTouch]?.team ?? -1) : -1
   for (const p of state.players) {
     if (p.slideTimer <= 0 || !p.slideTackle || p.sentOff) continue // aanvallers-boost telt niet als overtreding
     if (state.ball.lastTouch === p.id) continue // schone tackle (bal gewonnen) → geen overtreding
     for (const o of state.players) {
       if (o.team === p.team || o.sentOff) continue
       if (dist(p.pos, o.pos) < FOUL_RADIUS + PLAYER_RADIUS) {
+        if (ballTeam === o.team) continue // voordeel: het team van het slachtoffer houdt de bal → doorspelen
         const behind = p.facing.x * o.facing.x + p.facing.y * o.facing.y > 0.3
         // Nog niet meteen fluiten: eerst even de tumble/roll laten zien (FOUL_ANIM_DELAY),
         // dán pas de overtreding + kaart toekennen. Cooldown voorkomt intussen een tweede.
@@ -1020,6 +1075,39 @@ function checkSlideFouls(state: GameState): void {
         }
         state.foulCooldown = FOUL_COOLDOWN
         return
+      }
+    }
+  }
+}
+
+// Fun: de scheids, de veldbestormer én de beveiliger mag je omver sliden. Ze tuimelen (met een
+// stevige knock) — puur voor de lol, nooit een kaart of overtreding.
+function funTackle(state: GameState): void {
+  for (const p of state.players) {
+    if (p.slideTimer <= 0 || !p.slideTackle || p.sentOff) continue
+    const hit = (ex: number, ey: number, rad: number): { nx: number; ny: number } | null => {
+      const dx = ex - p.pos.x
+      const dy = ey - p.pos.y
+      const d = Math.hypot(dx, dy)
+      return d < rad + PLAYER_RADIUS && d > 1e-3 ? { nx: dx / d, ny: dy / d } : null
+    }
+    const r = state.ref
+    if (r.tumble <= 0) { const h = hit(r.pos.x, r.pos.y, 13); if (h) { r.tumble = FUN_TUMBLE_TIME; r.vel = { x: h.nx * FUN_KNOCK, y: h.ny * FUN_KNOCK } } }
+    const se = state.security
+    if (se && se.tumble <= 0) { const h = hit(se.pos.x, se.pos.y, 13); if (h) { se.tumble = FUN_TUMBLE_TIME; se.vel = { x: h.nx * FUN_KNOCK, y: h.ny * FUN_KNOCK } } }
+    // Bestormers: tackle er één → tuimelt, en (voor 't eerst) roept er een extra op (max 3 totaal).
+    if (state.streaker) {
+      for (const st of [state.streaker, ...state.extraStreakers]) {
+        if (st.tumble > 0) continue
+        const h = hit(st.pos.x, st.pos.y, STREAKER_RADIUS)
+        if (!h) continue
+        st.tumble = FUN_TUMBLE_TIME
+        st.vel = { x: h.nx * FUN_KNOCK, y: h.ny * FUN_KNOCK }
+        if (!st.tackled) {
+          st.tackled = true
+          const total = 1 + state.extraStreakers.length
+          if (total < 3) state.extraStreakers.push(makeStreaker(state))
+        }
       }
     }
   }
@@ -1055,14 +1143,15 @@ function awardFoul(state: GameState, slider: PlayerState, victim: PlayerState, b
   state.foulStreakTimer = FOUL_STREAK_WINDOW
   if (state.foulStreak >= FOUL_STREAK_LIMIT && !red) yellow = true
 
-  if (yellow && slider.yellow) { yellow = false; red = true } // tweede geel = rood
+  let secondYellow = false
+  if (yellow && slider.yellow) { yellow = false; red = true; secondYellow = true } // tweede geel = rood
   if (yellow) slider.yellow = true
   if (red) {
     slider.sentOff = true
     slider.pos = { x: PITCH_LENGTH / 2, y: -70 } // van het veld af
     slider.vel = { x: 0, y: 0 }
   }
-  if (yellow || red) state.cards.push({ player: slider.id, team: slider.team, red, clock: state.clock, half: state.half })
+  if (yellow || red) state.cards.push({ player: slider.id, team: slider.team, red, clock: state.clock, half: state.half, secondYellow })
   state.foulCount += 1
   state.foulCooldown = FOUL_COOLDOWN
   slider.slideTimer = 0
@@ -1152,7 +1241,7 @@ export function debugSpawnStreaker(state: GameState): void {
   const ang = Math.random() * Math.PI * 2
   const pos = streakerPointNear(b.x, b.y, ang, 330)
   const target = streakerPointNear(b.x, b.y, ang + Math.PI, 330)
-  state.streaker = { pos, vel: { x: 0, y: 0 }, target, timer: STREAKER_MAX_LIFE, variant: (Math.random() * 3 | 0) as 0 | 1 | 2, caught: false }
+  state.streaker = { pos, vel: { x: 0, y: 0 }, target, timer: STREAKER_MAX_LIFE, variant: (Math.random() * 3 | 0) as 0 | 1 | 2, caught: false, tumble: 0, tackled: false }
   state.security = null
   state.streakerCooldown = 0
 }

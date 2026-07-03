@@ -7,10 +7,10 @@ import { useRouter } from 'next/navigation'
 import ImmersiveToggle from './immersive-toggle'
 import {
   FIXED_DT, MAX_STEPS_PER_FRAME, CONTROL_RADIUS, PLAYER_RADIUS, MAX_CHARGE_TIME,
-  PENALTY_W, PENALTY_H, PITCH_LENGTH, PITCH_WIDTH, PLAYERS_PER_TEAM, SLOWMO_TIME,
+  PLAYERS_PER_TEAM, SLOWMO_TIME,
 } from '@/lib/soccer/constants'
 import {
-  createInitialState, teamDir, KITS, COUNTRIES, PLAYER_POOL, FORMATIONS, formationById, buildTeamMeta, randomAiTeam, ensureDistinctKit,
+  createInitialState, KITS, COUNTRIES, PLAYER_POOL, FORMATIONS, formationById, buildTeamMeta, randomAiTeam, ensureDistinctKit,
   type PoolPlayer, type TeamColors,
 } from '@/lib/soccer/teams'
 import { placeForKickoff, startSecondHalf, nearestTeammateToBall, step, debugSpawnStreaker, debugCard, debugGoal } from '@/lib/soccer/sim'
@@ -18,7 +18,7 @@ import { computeAICommands } from '@/lib/soccer/ai'
 import { PixiSoccerRenderer } from '@/lib/soccer/pixi-renderer'
 import { KeyboardInput, DEFAULT_BINDINGS, loadBindings, saveBindings, activeGamepad, type Bindings, type ActionId } from '@/lib/soccer/input'
 import { SoccerNet, buildSnapshot, lerpSnapshotInto, makeRoomCode, type Snapshot } from '@/lib/soccer/net'
-import type { GameState, InputCommand, TeamId, TeamMeta } from '@/lib/soccer/types'
+import type { GameState, InputCommand, PlayerTraits, TeamId, TeamMeta } from '@/lib/soccer/types'
 import { dist } from '@/lib/soccer/vec'
 
 type Stage = 'menu' | 'match' | 'penalty'
@@ -26,10 +26,12 @@ type Mode = 'local' | 'online' | 'penalty'
 type Lobby = 'idle' | 'hosting' | 'joining'
 type Role = 'host' | 'guest' | null
 type Overlay = null | 'goal' | 'halftime' | 'fulltime'
-type Scorer = { team: TeamId; name: string; ownGoal: boolean; clock: number; half: number }
+type Scorer = { team: TeamId; name: string; ownGoal: boolean; clock: number; half: number; face?: string | null }
+// Kaart op de tijdlijn (rust/eind): geel of rood, met speler + foto.
+type TlCard = { team: TeamId; name: string; face: string | null; red: boolean; secondYellow: boolean; clock: number; half: number }
 type MatchStats = { possPct: [number, number]; shots: [number, number]; tackles: [number, number]; pannas: [number, number] }
 type Mvp = { name: string; face: string | null; team: TeamId; line: string }
-type PanelInfo = { title: string; score: [number, number]; result?: 'win' | 'loss' | 'draw'; scorers: Scorer[]; note?: string; motm?: Mvp; stats?: MatchStats }
+type PanelInfo = { title: string; score: [number, number]; result?: 'win' | 'loss' | 'draw'; scorers: Scorer[]; cards: TlCard[]; halfLen: number; note?: string; motm?: Mvp; stats?: MatchStats }
 type GoalInfo = { name: string; teamName: string; face: string | null; team: TeamId; ownGoal: boolean; color: string; kind: 'normal' | 'screamer' | 'owngoal' }
 
 const GOAL_SOUNDS = ['/sfx/goal.mp3', '/sfx/goal2.mp3', '/sfx/goal3.mp3']
@@ -106,6 +108,9 @@ const RESTART_LABEL: Record<string, string> = {
 }
 
 const SETUP_KEY = 'kopstukken:setup:v1' // lokaal bewaarde team-setup + settings
+const TRAITS_KEY = 'kopstukken:traits:v1' // lokaal aangepaste speler-traits (face → {pace,shot,tackle})
+const TRAIT_BUDGET = 11 // vaste puntensom per speler (eerlijk)
+const defaultTraitsFor = (face: string): PlayerTraits => PLAYER_POOL.find((p) => p.face === face)?.traits ?? { pace: 3, shot: 3, tackle: 3 }
 const RESULTS_KEY = 'kopstukken:results:v1' // lokale geschiedenis van gespeelde wedstrijden
 type MatchResult = {
   a: string; b: string; ca: string; cb: string; sa: number; sb: number; pens?: 0 | 1; ts: number
@@ -194,14 +199,7 @@ function seedEdgesOnSwitch(
 
 function pickControlledForTeam(s: GameState, team: TeamId, curId: number): number {
   const b = s.ball
-  const dir = teamDir(team, s.attackDir)
-  const ownGoalX = dir > 0 ? 0 : PITCH_LENGTH
-  const inOwnBox =
-    Math.abs(b.pos.x - ownGoalX) < PENALTY_W + 30 && Math.abs(b.pos.y - PITCH_WIDTH / 2) < PENALTY_H / 2 + 30
-  if (inOwnBox) {
-    const gk = s.players.find((p) => p.team === team && p.role === 'GK')
-    if (gk) return gk.id
-  }
+  // De keeper blijft altijd AI-bestuurd (je krijgt 'm nooit onder de knop → geen "verkeerde kant op").
   const curP = curId >= 0 ? s.players[curId] : null
   const nearest = nearestTeammateToBall(s, team)
   if (!curP || curP.team !== team || curP.role === 'GK' || curP.sentOff) return nearest
@@ -237,7 +235,7 @@ export default function SoccerClient() {
   const [matchTeams, setMatchTeams] = useState<[TeamMeta, TeamMeta] | null>(null)
   const [scoreFlash, setScoreFlash] = useState<[number, number] | null>(null)
   const [setpieceLabel, setSetpieceLabel] = useState<string | null>(null)
-  const [cardFlash, setCardFlash] = useState<{ red: boolean; name: string; teamName: string; n: number } | null>(null)
+  const [cardFlash, setCardFlash] = useState<{ red: boolean; secondYellow: boolean; name: string; teamName: string; n: number } | null>(null)
   const [foulFlash, setFoulFlash] = useState(false)
   const [countdown, setCountdown] = useState<number | 'GO' | null>(null)
   const [hintDone, setHintDone] = useState(false)
@@ -248,6 +246,10 @@ export default function SoccerClient() {
   const [results, setResults] = useState<MatchResult[]>([])
   const [showResults, setShowResults] = useState(false)
   const [showControls, setShowControls] = useState(false)
+  const [showTraits, setShowTraits] = useState(false)
+  // Zelf aangepaste traits per speler (face → traits); leeg = standaard uit de pool.
+  const [customTraits, setCustomTraits] = useState<Record<string, PlayerTraits>>({})
+  const traitsFor = useCallback((face: string): PlayerTraits => customTraits[face] ?? defaultTraitsFor(face), [customTraits])
   const [paused, setPaused] = useState(false)
   const [penaltyResult, setPenaltyResult] = useState<{ winner: TeamId; score: [number, number] } | null>(null)
   const matchRecordedRef = useRef<boolean>(false)
@@ -292,6 +294,7 @@ export default function SoccerClient() {
   const controlledGuestRef = useRef<number>(-1)
   const tickRef = useRef<number>(0)
   const lastGuestSendRef = useRef<number>(0)
+  const lastPausedSendRef = useRef<number>(0) // host: snapshots blijven sturen tijdens een pauze (rust/kaart/einde)
   const snapBufRef = useRef<{ snap: Snapshot; at: number }[]>([])
   const startedGuestRef = useRef<boolean>(false)
   const hostMetaRef = useRef<TeamMeta | null>(null)
@@ -356,9 +359,29 @@ export default function SoccerClient() {
     } catch {
       /* corrupte opslag → gewoon de standaardwaarden */
     }
+    // Zelf aangepaste traits inladen (alleen geldige, som === budget).
+    try {
+      const raw = localStorage.getItem(TRAITS_KEY)
+      if (raw) {
+        const obj = JSON.parse(raw) as Record<string, PlayerTraits>
+        const clean: Record<string, PlayerTraits> = {}
+        for (const [face, tr] of Object.entries(obj)) {
+          if (tr && [tr.pace, tr.shot, tr.tackle].every((v) => Number.isInteger(v) && v >= 1 && v <= 5) && tr.pace + tr.shot + tr.tackle === TRAIT_BUDGET) {
+            clean[face] = { pace: tr.pace, shot: tr.shot, tackle: tr.tackle }
+          }
+        }
+        setCustomTraits(clean)
+      }
+    } catch { /* corrupt → standaard */ }
     hydratedRef.current = true
   }, [])
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Aangepaste traits opslaan bij elke wijziging.
+  useEffect(() => {
+    if (!hydratedRef.current) return
+    try { localStorage.setItem(TRAITS_KEY, JSON.stringify(customTraits)) } catch { /* quota */ }
+  }, [customTraits])
 
   // Setup opslaan bij elke wijziging (pas nadat de opslag geladen is).
   useEffect(() => {
@@ -505,7 +528,7 @@ export default function SoccerClient() {
         cardJustAdded = true
         const c = s.cards[s.cards.length - 1]
         cardHoldMs = c.red ? 4500 : 5000
-        setCardFlash({ red: c.red, name: s.players[c.player]?.name ?? '', teamName: s.teams[c.team]?.name ?? '', n: s.cards.length })
+        setCardFlash({ red: c.red, secondYellow: !!c.secondYellow, name: s.players[c.player]?.name ?? '', teamName: s.teams[c.team]?.name ?? '', n: s.cards.length })
         pushComment(cardQuip(s.players[c.player]?.name ?? 'iemand', c.red))
         playSound(c.red ? REDCARD_SOUNDS : YELLOWCARD_SOUNDS, 0.75)
         if (cardTimerRef.current) clearTimeout(cardTimerRef.current)
@@ -632,13 +655,24 @@ export default function SoccerClient() {
       const ht = humanTeamRef.current
       const mine = s.score[ht]
       const theirs = s.score[ht === 0 ? 1 : 0]
+      // Klok → voetbal-schaal (0→45 per helft), in seconden.
+      const toMatchClock = (c: number) => (s.halfLengthSec > 0 ? Math.min(45, (c / s.halfLengthSec) * 45) * 60 : c)
       const scorers = s.goals.map((g) => ({
         team: g.team,
         name: g.scorer >= 0 ? (s.players[g.scorer]?.name ?? '?') : '?',
+        face: g.scorer >= 0 ? (s.players[g.scorer]?.face ?? null) : null,
         ownGoal: g.ownGoal,
-        // doelpunt-tijd op dezelfde voetbal-schaal als de klok (0→45 per helft)
-        clock: s.halfLengthSec > 0 ? Math.min(45, (g.clock / s.halfLengthSec) * 45) * 60 : g.clock,
+        clock: toMatchClock(g.clock),
         half: g.half,
+      }))
+      const tlCards: TlCard[] = s.cards.map((c) => ({
+        team: c.team,
+        name: s.players[c.player]?.name ?? '?',
+        face: s.players[c.player]?.face ?? null,
+        red: c.red,
+        secondYellow: !!c.secondYellow,
+        clock: toMatchClock(c.clock),
+        half: c.half,
       }))
       // Man of the Match (bij einde): speler met de meeste (echte) goals + een speels lijntje.
       let motm: Mvp | undefined
@@ -671,6 +705,8 @@ export default function SoccerClient() {
         score: [s.score[0], s.score[1]],
         result: desired === 'fulltime' ? (mine > theirs ? 'win' : mine < theirs ? 'loss' : 'draw') : undefined,
         scorers,
+        cards: tlCards,
+        halfLen: 45,
         motm,
         stats: matchStats,
       })
@@ -768,6 +804,16 @@ export default function SoccerClient() {
       }
       if (steps === MAX_STEPS_PER_FRAME) accRef.current = 0
       syncOverlay(s)
+    } else if (netRole === 'host' && netRef.current) {
+      // Ook tijdens een pauze (rust, kaart-animatie, einde) blijft de host de fase + score naar
+      // de gast sturen — de sim staat stil, dus posities blijven gelijk — zodat de gast het
+      // rust-/eind-/kaartscherm óók (en op tijd) ziet i.p.v. pas als het spel weer loopt.
+      const now = performance.now()
+      if (now - lastPausedSendRef.current > 90) {
+        lastPausedSendRef.current = now
+        tickRef.current++
+        netRef.current.sendSnapshot(buildSnapshot(s, tickRef.current, controlledGuestRef.current))
+      }
     }
     drawFrame(pausedRef.current ? 0 : frameDt)
   }, [drawFrame, syncOverlay])
@@ -854,7 +900,7 @@ export default function SoccerClient() {
   }, [])
 
   // Bouw jouw team uit de builder-selectie.
-  const myTeamMeta = useCallback(() => buildTeamMeta(teamName, kit, lineup, formationId), [teamName, kit, lineup, formationId])
+  const myTeamMeta = useCallback(() => buildTeamMeta(teamName, kit, lineup, formationId, customTraits), [teamName, kit, lineup, formationId, customTraits])
 
   const startLocal = () => {
     const human = myTeamMeta()
@@ -1125,6 +1171,9 @@ export default function SoccerClient() {
           {showControls && (
             <ControlsModal onClose={() => setShowControls(false)} onApply={(b) => inputRef.current?.setBindings(b)} />
           )}
+          {showTraits && (
+            <TraitsModal current={customTraits} onClose={() => setShowTraits(false)} onSave={setCustomTraits} />
+          )}
 
           {lobby !== 'idle' ? (
             <div className="relative flex flex-1 items-center justify-center px-8">
@@ -1216,8 +1265,14 @@ export default function SoccerClient() {
 
                   {/* spelerspool */}
                   <div className="mt-4">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-wk-muted">Spelers</p>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-wk-muted">Spelers</p>
+                        <button type="button" onClick={() => setShowTraits(true)}
+                          className="rounded-md border border-white/15 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide text-wk-soft transition hover:border-white/35 hover:text-wk-text">
+                          ⚙ Traits
+                        </button>
+                      </div>
                       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-wk-soft">
                         {picked ? <span className="text-wk-gold">{picked.player.name} → {picked.from === null ? 'klik een plek' : 'klik een plek om te wisselen'}</span> : 'Klik een speler of veldplek'}
                       </p>
@@ -1228,8 +1283,7 @@ export default function SoccerClient() {
                         const isPicked = picked?.player.face === p.face && picked.from === null
                         return (
                           <button key={p.face} onClick={() => setPicked(isPicked ? null : { player: p, from: null })}
-                            title={`${p.name} — ${p.tag}\nSnelheid ${p.traits.pace}/5 · Schot ${p.traits.shot}/5 · Tackle ${p.traits.tackle}/5`}
-                            className="group flex flex-col items-center">
+                            className="group relative flex flex-col items-center">
                             <span className={`relative block h-12 w-12 overflow-hidden rounded-full border-2 transition ${isPicked ? 'scale-110 border-wk-gold ring-2 ring-wk-gold/50' : inTeam ? 'border-wk-gold/60' : 'border-white/15 opacity-80 group-hover:opacity-100'}`}>
                               <Image src={`/spelers/${p.face}`} alt={p.name} width={48} height={48} className="h-full w-full object-cover" />
                               {inTeam && !isPicked && (
@@ -1238,6 +1292,17 @@ export default function SoccerClient() {
                             </span>
                             <span className="mt-1 max-w-[52px] truncate font-mono text-[9px] uppercase tracking-wide text-wk-soft">{p.name}</span>
                             <span className="max-w-[52px] truncate font-mono text-[8px] uppercase tracking-wide text-wk-gold/70">{p.tag}</span>
+                            {/* Hover-kaart met de traits (pijl onderaan naar de speler) */}
+                            <span className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-2 hidden w-44 -translate-x-1/2 group-hover:block">
+                              <span className="block rounded-xl border border-white/15 bg-wk-bg/95 p-3 text-left shadow-2xl backdrop-blur-sm">
+                                <span className="mb-0.5 block font-display text-sm uppercase leading-none tracking-wide text-white">{p.name}</span>
+                                <span className="mb-2 block font-mono text-[9px] uppercase tracking-[0.14em] text-wk-gold/80">{p.tag}</span>
+                                <TraitRow label="Snelheid" v={traitsFor(p.face).pace} color="#4FA8E0" />
+                                <TraitRow label="Schot" v={traitsFor(p.face).shot} color="#F4B92E" />
+                                <TraitRow label="Tackle" v={traitsFor(p.face).tackle} color="#E63946" />
+                              </span>
+                              <span className="absolute left-1/2 top-full h-2 w-2 -translate-x-1/2 -translate-y-1 rotate-45 border-b border-r border-white/15 bg-wk-bg/95" />
+                            </span>
                           </button>
                         )
                       })}
@@ -1617,7 +1682,7 @@ function Countdown({ value }: { value: number | 'GO' }) {
 }
 
 // Kaart-animatie — full-screen, langer/coole dan een normale overtreding.
-function CardCelebration({ card }: { card: { red: boolean; name: string; teamName: string; n: number } }) {
+function CardCelebration({ card }: { card: { red: boolean; secondYellow: boolean; name: string; teamName: string; n: number } }) {
   const col = card.red ? '#E11D2E' : '#F5C518'
   // Optionele scheids-afbeelding (kaart omhoog); valt terug op een getekende kaart als 't bestand ontbreekt.
   const [imgFailed, setImgFailed] = useState(false)
@@ -1647,6 +1712,11 @@ function CardCelebration({ card }: { card: { red: boolean; name: string; teamNam
         <h1 className="font-display text-6xl sm:text-7xl uppercase tracking-wider text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.85)]" style={{ animation: 'goal-pop 0.45s cubic-bezier(0.2,1.5,0.4,1) both' }}>
           {card.red ? 'Rode kaart' : 'Gele kaart'}
         </h1>
+        {card.secondYellow && (
+          <p className="font-score text-2xl sm:text-3xl uppercase tracking-[0.14em] text-[#F5C518] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]" style={{ animation: 'goal-pop 0.45s cubic-bezier(0.2,1.5,0.4,1) 0.1s both' }}>
+            🟨🟨 Tweede geel
+          </p>
+        )}
         {card.name && (
           <p className="font-score text-3xl sm:text-4xl uppercase tracking-wide text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]" style={{ animation: 'goal-rise 0.5s ease-out 0.12s both' }}>
             {card.name}
@@ -1873,16 +1943,15 @@ function GoalCelebration({ info }: { info: GoalInfo | null }) {
   )
 }
 
-function mmss(sec: number) {
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60).toString().padStart(2, '0')
-  return `${m}:${s}`
-}
 
 // Freeze-scherm bij rust/einde.
 function BreakPanel({ info, teams, children }: { info: PanelInfo; teams: [TeamMeta, TeamMeta]; children: ReactNode }) {
-  const cols: [Scorer[], Scorer[]] = [[], []]
-  for (const g of info.scorers) cols[g.team].push(g)
+  // Alle wedstrijd-events (goals + kaarten) chronologisch voor de horizontale tijdlijn.
+  const matchMin = (half: number, clock: number) => Math.max(0, Math.round((half - 1) * info.halfLen + clock / 60))
+  const timelineEvents = [
+    ...info.scorers.map((g) => ({ min: matchMin(g.half, g.clock), team: g.team, name: g.name, face: g.face ?? null, icon: g.ownGoal ? '⚽' : '⚽' })),
+    ...info.cards.map((c) => ({ min: matchMin(c.half, c.clock), team: c.team, name: c.name, face: c.face, icon: c.red ? '🟥' : '🟨' })),
+  ].sort((a, b) => a.min - b.min)
   const resultTxt = info.result === 'win' ? '🏆 Gewonnen!' : info.result === 'loss' ? 'Verloren' : info.result === 'draw' ? 'Gelijkspel' : null
   return (
     <div className="absolute inset-0 flex items-center justify-center overflow-hidden backdrop-blur-[3px]">
@@ -1924,24 +1993,28 @@ function BreakPanel({ info, teams, children }: { info: PanelInfo; teams: [TeamMe
             </div>
           </div>
         )}
-        <div className="grid w-full grid-cols-2 gap-6 pt-1">
-          {([0, 1] as TeamId[]).map((t) => (
-            <div key={t} className={t === 0 ? 'text-right' : 'text-left'}>
-              <div className={`mb-2 flex items-center gap-2 ${t === 0 ? 'justify-end' : 'justify-start'}`}>
-                <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/30" style={{ background: teams[t].shirt }} />
-                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/80">{teams[t].name}</span>
-              </div>
-              <ul className="space-y-1">
-                {cols[t].length === 0 && <li className="font-mono text-[11px] text-white/40">—</li>}
-                {cols[t].map((g, i) => (
-                  <li key={i} className="text-sm text-white">
-                    <span className="text-white/55 tabular-nums">{g.half}e {mmss(g.clock)}</span>{' '}
-                    {g.name}{g.ownGoal && <span className="text-white/55"> (e.o.)</span>}
-                  </li>
-                ))}
-              </ul>
+        {/* Horizontale tijdlijn: goals + kaarten chronologisch, met spelerfoto's */}
+        <div className="w-full">
+          <div className="mb-1.5 flex items-center justify-between font-mono text-[9px] uppercase tracking-[0.16em] text-white/45">
+            <span>0&apos;</span><span>Rust</span><span>{info.halfLen * 2}&apos;</span>
+          </div>
+          <div className="h-px w-full bg-white/15" />
+          {timelineEvents.length === 0 ? (
+            <p className="pt-3 text-center font-mono text-[11px] text-white/40">Nog geen goals of kaarten</p>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto pt-3 pb-1">
+              {timelineEvents.map((e, i) => (
+                <div key={i} className="flex shrink-0 flex-col items-center gap-1">
+                  <span className="font-mono text-[10px] tabular-nums text-white/60">{e.min}&apos;</span>
+                  <span className="relative block h-11 w-11 overflow-hidden rounded-full" style={{ boxShadow: `0 0 0 2px ${teams[e.team].shirt}` }}>
+                    <Image src={`/spelers/${e.face ?? 'default.png'}`} alt={e.name} width={44} height={44} className="h-full w-full object-cover" />
+                    <span className="absolute -bottom-1 -right-1 text-[13px] leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">{e.icon}</span>
+                  </span>
+                  <span className="max-w-[64px] truncate font-mono text-[9px] uppercase tracking-wide text-white/80">{e.name}</span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
         {info.stats && (
           <div className="w-full max-w-sm space-y-1.5 rounded-xl bg-black/25 px-4 py-3 ring-1 ring-white/10">
@@ -2006,8 +2079,9 @@ function keyLabel(code: string | undefined): string {
   if (code.startsWith('Digit')) return code.slice(5)
   return code
 }
+// PS5 / DualSense-knopnamen (Gamepad-standaardmapping: index → fysieke knop).
 const PAD_LABELS: Record<number, string> = {
-  0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'Back', 9: 'Start', 10: 'L3', 11: 'R3', 12: 'D↑', 13: 'D↓', 14: 'D←', 15: 'D→',
+  0: '✕', 1: '○', 2: '□', 3: '△', 4: 'L1', 5: 'R1', 6: 'L2', 7: 'R2', 8: 'Create', 9: 'Options', 10: 'L3', 11: 'R3', 12: 'D↑', 13: 'D↓', 14: 'D←', 15: 'D→',
 }
 function padLabel(i: number | undefined): string {
   return i == null ? '—' : (PAD_LABELS[i] ?? `Knop ${i}`)
@@ -2102,6 +2176,93 @@ function ControlsModal({ onClose, onApply }: { onClose: () => void; onApply: (b:
         </div>
       </div>
     </div>
+  )
+}
+
+// Traits per speler zelf verdelen (vaste som = TRAIT_BUDGET → eerlijk). Wordt lokaal bewaard
+// en meegestuurd in de team-config (dus ook online).
+function TraitsModal({ current, onClose, onSave }: { current: Record<string, PlayerTraits>; onClose: () => void; onSave: (t: Record<string, PlayerTraits>) => void }) {
+  const build = (from: (p: (typeof PLAYER_POOL)[number]) => PlayerTraits) => {
+    const d: Record<string, PlayerTraits> = {}
+    for (const p of PLAYER_POOL) d[p.face] = from(p)
+    return d
+  }
+  const [draft, setDraft] = useState<Record<string, PlayerTraits>>(() => build((p) => ({ ...(current[p.face] ?? p.traits) })))
+  const KEYS: { k: keyof PlayerTraits; label: string; color: string }[] = [
+    { k: 'pace', label: 'Snelheid', color: '#4FA8E0' },
+    { k: 'shot', label: 'Schot', color: '#F4B92E' },
+    { k: 'tackle', label: 'Tackle', color: '#E63946' },
+  ]
+  const sumOf = (t: PlayerTraits) => t.pace + t.shot + t.tackle
+  const adjust = (face: string, k: keyof PlayerTraits, delta: number) => setDraft((d) => {
+    const t = d[face]
+    const nv = t[k] + delta
+    if (nv < 1 || nv > 5) return d
+    if (delta > 0 && sumOf(t) >= TRAIT_BUDGET) return d // budget op
+    return { ...d, [face]: { ...t, [k]: nv } }
+  })
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-6" onClick={onClose}>
+      <div className="flex max-h-[86vh] w-full max-w-lg flex-col rounded-2xl border border-white/12 bg-wk-surface p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-display text-lg uppercase tracking-[0.14em] text-wk-text">Traits verdelen</h2>
+          <button onClick={onClose} className="font-mono text-[11px] uppercase tracking-widest text-wk-muted hover:text-wk-text">Sluiten ✕</button>
+        </div>
+        <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-wk-muted">Elke speler heeft {TRAIT_BUDGET} punten (1–5 per trait). Eerlijk: de som blijft gelijk.</p>
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+          {PLAYER_POOL.map((p) => {
+            const t = draft[p.face]
+            const left = TRAIT_BUDGET - sumOf(t)
+            return (
+              <div key={p.face} className="rounded-xl border border-white/10 bg-wk-bg2/50 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="relative block h-8 w-8 overflow-hidden rounded-full border border-white/15">
+                    <Image src={`/spelers/${p.face}`} alt={p.name} width={32} height={32} className="h-full w-full object-cover" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-[11px] uppercase tracking-wide text-wk-text">{p.name}</p>
+                    <p className="truncate font-mono text-[8px] uppercase tracking-wide text-wk-gold/70">{p.tag}</p>
+                  </div>
+                  <span className={`ml-auto font-mono text-[10px] uppercase tracking-wide ${left > 0 ? 'text-wk-gold' : 'text-wk-muted'}`}>{left > 0 ? `${left} over` : 'vol'}</span>
+                </div>
+                {KEYS.map(({ k, label, color }) => (
+                  <div key={k} className="mb-1 flex items-center gap-2 last:mb-0">
+                    <span className="w-16 font-mono text-[9px] uppercase tracking-wide text-wk-soft">{label}</span>
+                    <button onClick={() => adjust(p.face, k, -1)} disabled={t[k] <= 1}
+                      className="flex h-5 w-5 items-center justify-center rounded border border-white/15 font-mono text-xs text-wk-soft transition hover:border-white/35 disabled:opacity-30">−</button>
+                    <span className="flex flex-1 gap-0.5">
+                      {[1, 2, 3, 4, 5].map((i) => <span key={i} className="h-2 flex-1 rounded-[1px]" style={{ background: i <= t[k] ? color : 'rgba(255,255,255,0.12)' }} />)}
+                    </span>
+                    <button onClick={() => adjust(p.face, k, 1)} disabled={t[k] >= 5 || left <= 0}
+                      className="flex h-5 w-5 items-center justify-center rounded border border-white/15 font-mono text-xs text-wk-soft transition hover:border-white/35 disabled:opacity-30">+</button>
+                    <span className="w-3 text-right font-mono text-[10px] tabular-nums text-wk-text">{t[k]}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <button onClick={() => setDraft(build((p) => ({ ...p.traits })))} className="font-mono text-[10px] uppercase tracking-[0.16em] text-wk-muted hover:text-wk-soft">Standaard herstellen</button>
+          <button onClick={() => { onSave(draft); onClose() }} className="rounded-lg border border-wk-green/50 bg-wk-green/15 px-5 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-wk-green hover:bg-wk-green/25">Opslaan</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Trait-regel voor de hover-kaart: label + 5 pips (gevuld t/m de rating).
+function TraitRow({ label, v, color }: { label: string; v: number; color: string }) {
+  return (
+    <span className="mb-1 flex items-center justify-between gap-2 last:mb-0">
+      <span className="font-mono text-[9px] uppercase tracking-wide text-wk-soft">{label}</span>
+      <span className="flex gap-0.5">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <span key={i} className="h-1.5 w-3 rounded-[1px]" style={{ background: i <= v ? color : 'rgba(255,255,255,0.14)' }} />
+        ))}
+      </span>
+    </span>
   )
 }
 

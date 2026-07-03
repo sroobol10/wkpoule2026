@@ -25,7 +25,7 @@ export const traitMul = (rating: number): number => 1 + (rating - 3) * TRAIT_STE
 export const PLAYER_RADIUS = 12
 export const PLAYER_ACCEL = 1700 // versnelling richting gewenste snelheid
 export const PLAYER_MAX_SPEED = 180 // rustiger tempo (~12% trager, 2026-07-02)
-export const KEEPER_MAX_SPEED = 210 // keeper reageert wat kwieker (minder passief)
+export const KEEPER_MAX_SPEED = 228 // keeper reageert kwiek (komt vlot uit, minder passief)
 export const PLAYER_FRICTION = 9 // remt spelers af als er geen input is
 
 // ── Tackelen / afpakken ───────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ export const TACKLE_COOLDOWN = 0.6 // seconden dat de afgepakte speler niet mete
 // ── Bal ─────────────────────────────────────────────────────────────────────
 export const BALL_RADIUS = 8
 export const BALL_FRICTION = 0.72 // per seconde; hoger = rolt korter
-export const BALL_MAX_SPEED = 850
+export const BALL_MAX_SPEED = 900 // wat kopruimte zodat een 5★-knal echt harder is dan de rest
 export const CONTROL_RADIUS = 27 // binnen deze straal "voelt" een speler de bal
 export const DRIBBLE_PUSH = 60 // ondergrens balsnelheid bij dribbelen (voorkomt wegschieten bij stilstand)
 export const DRIBBLE_KEEP = 24 // gewenste bal-afstand vóór de dribbelende speler (kleiner = strakker aan de voet)
@@ -51,7 +51,7 @@ export const TRAP_MAX_SPEED = 700 // boven deze snelheid (keiharde knal) kun je 
 // Fysieke bal↔lichaam-botsing: spelers blokkeren/ketsen snelle ballen (schoten, harde passes).
 export const BODY_BLOCK_SPEED = 240 // alleen ballen sneller dan dit ketsen af tegen lichamen
 export const BODY_RESTITUTION = 0.55 // hoeveel snelheid behouden blijft bij een blok
-export const GK_SAVE_RADIUS = 34 // keeper heeft een grotere reikwijdte (redt ballen in de buurt)
+export const GK_SAVE_RADIUS = 37 // keeper heeft een grotere reikwijdte (redt ballen in de buurt)
 export const GK_REACH_HEIGHT = 42 // keeper pakt ook hoge/gelofte ballen tot deze hoogte
 
 // Hoogte: een geladen schot lift een beetje (passes/zachte schoten blijven op de grond).
@@ -119,15 +119,16 @@ export const RESTART_KEEP_RADIUS = 95 // straal rond de bal bij een vrije trap/s
 // ── Scheidsrechter & overtredingen ────────────────────────────────────────────
 export const REF_SPEED = 132 // hoe snel de scheids meeloopt
 export const REF_LAG = 110 // afstand die de scheids van de bal houdt
-export const FOUL_RADIUS = 22 // slide raakt de man binnen deze straal → overtreding
+export const FOUL_RADIUS = 15 // slide raakt de man binnen deze straal → overtreding (krapper = minder fluitjes)
 export const SETPIECE_READY = 0.6 // korte pauze voor een set-piece speelbaar wordt
 export const FOUL_COOLDOWN = 0.7 // min. sim-tijd tussen twee overtredingen (voorkomt dubbele kaarten in 1 frame)
 export const FOUL_ANIM_DELAY = 0.5 // sim-tijd tussen de tackle-inslag (tumble) en het toekennen van de overtreding
-// Kaart-kansen bij een slide-overtreding (van achteren is erger).
-export const FOUL_BEHIND_RED = 0.14
-export const FOUL_BEHIND_YELLOW = 0.5
-export const FOUL_FRONT_RED = 0.03
-export const FOUL_FRONT_YELLOW = 0.22
+// Kaart-kansen bij een slide-overtreding (van achteren is erger). Directe rood is nu zeldzaam;
+// de meeste kaarten zijn geel (en 2× geel → rood).
+export const FOUL_BEHIND_RED = 0.05
+export const FOUL_BEHIND_YELLOW = 0.42
+export const FOUL_FRONT_RED = 0.012
+export const FOUL_FRONT_YELLOW = 0.2
 // Escalatie: bij 3+ overtredingen binnen dit venster (sim-seconden) altijd minimaal geel
 // (voorkomt dat het een schoppartij wordt). De timer reset bij elke nieuwe overtreding.
 export const FOUL_STREAK_WINDOW = 22
@@ -145,6 +146,9 @@ export const STREAKER_BALL_KICK = 320 // snelheid waarmee hij een aangeraakte ba
 export const SECURITY_SPEED = 208 // iets sneller dan de streaker → haalt 'm uiteindelijk in
 export const SECURITY_SPAWN_AFTER = 1.1 // sec nadat de streaker verschijnt komt de beveiliger 't veld op
 export const SECURITY_CATCH_RADIUS = 24 // binnen deze straal grijpt hij de streaker → beiden weg
+// Fun-tackle: scheids/streaker/bewaker mag je omver sliden (nooit een kaart) → ze tuimelen extra hard.
+export const FUN_TUMBLE_TIME = 0.95
+export const FUN_KNOCK = 320
 
 // ── Camera ──────────────────────────────────────────────────────────────────
 export const CAMERA_LERP = 5 // hoe soepel de camera de bal volgt (hoger = strakker)

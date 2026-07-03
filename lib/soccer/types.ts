@@ -67,7 +67,7 @@ export type TeamMeta = {
   trim: string // accent/broek
   keeper: string // keeperskleur
   formation: string // gekozen formatie-id (bepaalt rollen + posities)
-  players: { name: string; face: string | null }[] // selectie, index = formatieplek
+  players: { name: string; face: string | null; traits?: PlayerTraits }[] // selectie (evt. custom traits), index = formatieplek
 }
 
 export type GoalEvent = {
@@ -88,7 +88,7 @@ export type MatchPhase =
 
 export type RestartKind = 'throwin' | 'corner' | 'goalkick' | 'freekick'
 
-export type CardEvent = { player: number; team: TeamId; red: boolean; clock: number; half: 1 | 2 }
+export type CardEvent = { player: number; team: TeamId; red: boolean; clock: number; half: 1 | 2; secondYellow?: boolean }
 
 // Veldbestormer (fun): loopt vanuit de tribune diagonaal het veld over naar een
 // willekeurig doel, kan de bal niet bezitten maar wel wegketsen/hinderen.
@@ -99,15 +99,18 @@ export type StreakerState = {
   timer: number // resterende leeftijd (s); veiligheids-timeout
   variant: 0 | 1 | 2 // welke van de drie streaker-koppen
   caught: boolean // door de beveiliger gepakt → samen op weg naar de tribune (rand)
+  tumble: number // >0 = net getackeld → tuimelt (puur fun, geen kaart)
+  tackled: boolean // al eens getackeld (voorkomt dubbel-spawnen van extra bestormers)
 }
 
 export type GameState = {
   players: PlayerState[]
   ball: BallState
-  ref: { pos: Vec2; vel: Vec2 } // scheidsrechter (loopt mee; raakt de bal niet)
-  streaker: StreakerState | null // actieve veldbestormer, of null
+  ref: { pos: Vec2; vel: Vec2; tumble: number } // scheidsrechter (loopt mee; kan getackeld worden → tuimelt, fun)
+  streaker: StreakerState | null // actieve (eerste) veldbestormer, of null
+  extraStreakers: StreakerState[] // extra bestormers: tackle er één → +1 (max 3 totaal), leeg als de eerste weg is
   streakerCooldown: number // seconden tot een nieuwe bestorming mag spawnen
-  security: { pos: Vec2; vel: Vec2 } | null // beveiliger die de bestormer achterna zit
+  security: { pos: Vec2; vel: Vec2; tumble: number } | null // beveiliger die de bestormer achterna zit
   wind: Vec2 // windvector (duwt de bal, sterker als-ie in de lucht is); {0,0} = geen wind
   // Dynamisch weer: de wind kruipt naar `windTarget`, en elke `weatherTimer` sec valt er een
   // nieuwe vlaag (en soms begint/stopt de regen). `weather` stuurt de regen-/sneeuw-overlay.

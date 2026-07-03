@@ -180,10 +180,10 @@ export function computeAICommands(
           ? norm(sub({ x: mate.pos.x + mate.vel.x * 0.25, y: mate.pos.y + mate.vel.y * 0.25 }, p.pos))
           : norm(sub(goal, p.pos))
         cmds[p.id] = chargeKick(p, jitterDir(aim, mate ? 0.1 : 0.25), mate ? 0.42 : 0.62)
-      } else if (inDanger && ballSpeed < 330 && !defNearer && toBall < 240) {
-        cmds[p.id] = { move: moveTowards(p.pos, ball.pos, 24), kick: false } // uitkomen/sweepen
-      } else if (inDanger && toBall < 150 && ballSpeed < 300) {
-        cmds[p.id] = { move: moveTowards(p.pos, ball.pos, 26), kick: false } // losse bal smoren
+      } else if (inDanger && ballSpeed < 360 && !defNearer && toBall < 290) {
+        cmds[p.id] = { move: moveTowards(p.pos, ball.pos, 22), kick: false, sprint: toBall > 120 } // uitkomen/sweepen (komt vaker en verder uit)
+      } else if (inDanger && toBall < 185 && ballSpeed < 400) {
+        cmds[p.id] = { move: moveTowards(p.pos, ball.pos, 24), kick: false, sprint: true } // dichtbij → bal claimen, ook met een verdediger in de buurt
       } else {
         // Hoek-spel: ga op de lijn doel-midden → bal staan (verkleint de hoek), en kom verder
         // uit naarmate de bal dichterbij én centraler is. Bij een schot: onderschep de baan.
@@ -260,10 +260,17 @@ export function computeAICommands(
         const pressured = nearestOpponent(state, p) < 46
         const mate = openTeammate(state, p, dir)
         const passer = p.id % 3 === 0 // sommige spelers zijn "passers" (deterministisch, geen geflikker)
-        // Schutters (hoge shot-trait) durven van verder te knallen; op Pittig ook iets gretiger.
-        const shootRange = SHOOT_RANGE * traitMul(p.traits.shot) * (0.9 + 0.15 * diff)
+        // Schutters (hoge shot-trait) durven van grotere afstand te knallen → ze scoren van verder.
+        const shootRange = SHOOT_RANGE * traitMul(p.traits.shot) * (0.92 + 0.13 * diff)
         if (toGoal < shootRange) {
-          cmds[p.id] = chargeKick(p, jitterDir(norm(sub(goal, ball.pos)), aimError), 0.7) // schot
+          // De keeper staat op de bal→doelmidden-lijn; recht op het midden mikken = zó gepakt.
+          // Betere schutters plaatsen 'm in de HOEK wég van de keeper (en met minder mik-fout).
+          const oppGk = state.players.find((o) => o.team !== p.team && o.role === 'GK')
+          const openSign = oppGk ? (oppGk.pos.y > CENTER_Y ? -1 : 1) : (Math.random() < 0.5 ? -1 : 1)
+          // Mik op een MATIGE hoek wég van de keeper (te ver = mis; midden = gepakt). De trait
+          // bepaalt de ZUIVERHEID: een 5★ legt 'm daar precies neer, een 2★ mist alle kanten op.
+          const aimY = CENTER_Y + openSign * (GOAL_WIDTH / 2) * 0.55
+          cmds[p.id] = chargeKick(p, jitterDir(norm(sub({ x: goal.x, y: aimY }, ball.pos)), aimError), 0.7) // schot in de hoek
         } else if (mate && (pressured || passer)) {
           const lead = { x: mate.pos.x + mate.vel.x * 0.2, y: mate.pos.y + mate.vel.y * 0.2 }
           cmds[p.id] = chargeKick(p, norm(sub(lead, ball.pos)), 0.22) // pass naar open man
@@ -280,8 +287,8 @@ export function computeAICommands(
         // Sliding is een laatste redmiddel: dichtbij (grote kans op de bal i.p.v. de man),
         // bij een controleerbare bal. Betere tacklers (tackle-trait) én hogere moeilijkheid
         // gaan van iets verder en iets vaker de grond op.
-        const slideReach = 34 + p.traits.tackle * 2 + pressAgg * 6
-        const slideWindow = Math.floor(clock * 1.5 + p.id) % 3 === 0 || diff > 0.75
+        const slideReach = 26 + p.traits.tackle * 2 + pressAgg * 4
+        const slideWindow = Math.floor(clock * 1.2 + p.id) % 4 === 0 // zeldzamer → minder overtredingen
         if (enemyBall && toBall < slideReach && ballSpeed < 320 && p.tackleCooldown <= 0 && slideWindow) {
           cmds[p.id] = { move: norm(sub(ball.pos, p.pos)), kick: false, slide: true }
         } else {
