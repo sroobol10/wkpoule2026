@@ -136,6 +136,14 @@ export default async function KnockoutPage() {
     third_place: thirdWinner ? [thirdWinner] : [],
   }
 
+  // reachedStage[stage] = teams die DEZE ronde daadwerkelijk bereikten (in de echte wedstrijden
+  // stonden) → onderscheidt "verloor deze ronde" (rood) van "eerder uitgeschakeld" (grijs).
+  const reachedStage: Record<string, string[]> = Object.fromEntries(
+    Object.entries(teamsInStage).map(([k, v]) => [k, [...v]]),
+  )
+  // Teams die minstens één KO-wedstrijd wonnen (voor "pick is al een ronde door" → groen).
+  const wonAnyKo = [...new Set(Object.values(actualWinners))]
+
   // ── "Wie koos wat" per live KO-wedstrijd (over je eigen league) ─────────────
   // Per deelnemer resolven we de volledige bracket en tellen we, per actueel team
   // in elk live duel: hoe vaak gekozen op deze plek (bereikt dit duel) en hoe vaak
@@ -276,6 +284,8 @@ export default async function KnockoutPage() {
       anyMatchPlayed={anyGroupMatchPlayed}
       actualWinners={actualWinners}
       advancedFromStage={advancedFromStage}
+      reachedStage={reachedStage}
+      wonAnyKo={wonAnyKo}
       eliminatedTeams={eliminatedTeams}
     />
   )

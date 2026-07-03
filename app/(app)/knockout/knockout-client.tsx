@@ -46,6 +46,8 @@ type Props = {
   anyMatchPlayed?: boolean
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
+  reachedStage?: Record<string, string[]>
+  wonAnyKo?: string[]
   eliminatedTeams?: string[]
 }
 
@@ -77,6 +79,8 @@ export default function KnockoutClient({
   anyMatchPlayed = false,
   actualWinners = {},
   advancedFromStage = {},
+  reachedStage = {},
+  wonAnyKo = [],
   eliminatedTeams = [],
 }: Props) {
   // Bracket is op slot zodra de eerste groepswedstrijd gespeeld is (niet puur op tijd)
@@ -93,6 +97,8 @@ export default function KnockoutClient({
         locked={bracketLocked}
         actualWinners={actualWinners}
         advancedFromStage={advancedFromStage}
+        reachedStage={reachedStage}
+        wonAnyKo={wonAnyKo}
         eliminatedTeams={eliminatedTeams}
         slotDist={slotDist}
       />

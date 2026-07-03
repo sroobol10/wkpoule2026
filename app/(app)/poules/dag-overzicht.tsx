@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
 import { formatInAmsterdam } from '@/lib/format'
 import { playerCountry } from '@/lib/player-countries'
+import { BRACKET } from '@/lib/bracket'
 
 // Compact dagoverzicht bovenaan het klassement (per ingelogde deelnemer).
 // "Dag" = CEST-kalenderdag (UTC+2), conform de rest van de app.
@@ -95,7 +96,28 @@ export async function DagOverzicht({ userId }: { userId: string }) {
     .eq('user_id', userId)
   const bracket = (bracketRows ?? []) as { slot: number; predicted_team_id: string; points_awarded: number | null }[]
   const winSet = new Set(bracket.map((b) => b.predicted_team_id))
-  const koPtsBySlot = Object.fromEntries(bracket.map((b) => [b.slot, b.points_awarded])) as Record<number, number | null>
+  // Punten worden toegekend op team-doorgang (welk slot je 'm ook plaatste): zolang je gekozen
+  // land die ronde doorgaat krijg je de rondepunten. We indexeren daarom op stage+team, niet op
+  // slot=match_number (dat faalt zodra je pick in een ander slot staat dan de echte wedstrijd).
+  const slotStage: Record<number, string> = Object.fromEntries(BRACKET.map((b) => [b.slot, b.stage]))
+  const koPtsByStageTeam: Record<string, number | null> = {}
+  for (const b of bracket) {
+    const st = slotStage[b.slot]
+    if (!st) continue
+    const key = `${st}:${b.predicted_team_id}`
+    const cur = koPtsByStageTeam[key]
+    if (cur == null || (b.points_awarded != null && b.points_awarded > cur)) koPtsByStageTeam[key] = b.points_awarded
+  }
+  // Punten voor een KO-wedstrijd: het hoogste toegekende puntenaantal van je gekozen land(en)
+  // in deze wedstrijd, voor de stage van deze wedstrijd (null = nog niet gescoord).
+  const koPtsForMatch = (m: Match): number | null => {
+    let best: number | null = null
+    for (const t of myChoiceTeams(m, winSet)) {
+      const v = koPtsByStageTeam[`${m.stage}:${t.id}`]
+      if (v != null && (best == null || v > best)) best = v
+    }
+    return best
+  }
 
   // KO-wedstrijden alleen tonen als je minstens één van de twee landen als winnaar
   // voorspelde. Groepsfase-wedstrijden tonen we zoals altijd.
@@ -170,7 +192,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Behaalde punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {played.map((m) => (
-                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} koPts={koPtsBySlot[m.match_number ?? -1] ?? null} joker={jokerIds.has(m.id)} winSet={winSet} />
+                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} koPts={koPtsForMatch(m)} joker={jokerIds.has(m.id)} winSet={winSet} />
                   ))}
                 </div>
               </SubSection>

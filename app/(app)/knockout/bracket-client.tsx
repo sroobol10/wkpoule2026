@@ -4,6 +4,7 @@ import { Fragment, useState, useTransition, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { saveBracketPick, clearBracketSlots } from '@/app/actions/bracket'
 import { BRACKET, KO_KICKOFFS, assignThirdPlaceSlots } from '@/lib/bracket'
+import { KO_POINTS } from '@/lib/constants'
 import { formatInAmsterdam } from '@/lib/format'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -32,6 +33,8 @@ type Props = {
   locked: boolean
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
+  reachedStage?: Record<string, string[]>
+  wonAnyKo?: string[]
   eliminatedTeams?: string[]
   slotDist?: Record<number, SlotDist>
 }
@@ -120,8 +123,9 @@ function getDownstreamSlots(changedSlot: number): number[] {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, eliminatedTeams = [], slotDist = {} }: Props) {
+export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, reachedStage = {}, wonAnyKo = [], eliminatedTeams = [], slotDist = {} }: Props) {
   const eliminatedSet = new Set(eliminatedTeams)
+  const wonKoSet = new Set(wonAnyKo)
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
   // Build advancement map: group -> pos -> teamId
@@ -226,6 +230,7 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
         const m = bracket[matchDef.slot]
         // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
         const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
+        const reachedSet = new Set(reachedStage[matchDef.stage] ?? [])
         // Banner boven elke nieuwe ronde, met extra witruimte ertussen
         const newStage = matchDef.stage !== (ordered[idx - 1]?.stage ?? null)
         return (
@@ -240,6 +245,8 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
               actualWinnerId={actualWinners[matchDef.slot] ?? null}
               kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
               advancedTeams={advancedSet}
+              reachedTeams={reachedSet}
+              wonKoTeams={wonKoSet}
               eliminatedTeams={eliminatedSet}
               pts={ptsPerSlot[matchDef.slot] ?? null}
               dist={slotDist[matchDef.slot] ?? null}
@@ -279,6 +286,8 @@ function BracketMatchCard({
   actualWinnerId,
   kickoffAt,
   advancedTeams,
+  reachedTeams,
+  wonKoTeams,
   eliminatedTeams,
   pts,
   dist,
@@ -291,6 +300,8 @@ function BracketMatchCard({
   actualWinnerId: string | null
   kickoffAt: string | null
   advancedTeams: Set<string>
+  reachedTeams: Set<string>
+  wonKoTeams: Set<string>
   eliminatedTeams: Set<string>
   pts: number | null
   dist: SlotDist | null
@@ -310,6 +321,17 @@ function BracketMatchCard({
   const isCorrect = !!userPick && actualWinnerId === userPick
   const isWrong   = !!userPick && eliminatedTeams.has(userPick) && actualWinnerId !== userPick
   const resultIn  = actualWinnerId != null   // uitslag ingevoerd → datum weg, ruimte voor punten
+
+  // Puntenbadge: altijd tonen zodra je pick beslist is (door → punten, uit → 0 PT). Punten
+  // volgen team-doorgang (niet dit exacte slot): gescoorde pts hebben voorrang, anders afgeleid.
+  const pickAdvanced   = !!userPick && advancedTeams.has(userPick)     // ronde door → punten
+  const pickEliminated = !!userPick && eliminatedTeams.has(userPick)   // uit → geen punten
+  let earnedPts: number | null = null
+  if (pts != null) earnedPts = pts
+  else if (pickAdvanced) earnedPts = KO_POINTS[match.stage] ?? 0
+  else if (pickEliminated) earnedPts = 0
+  // 0 PT rood = pick verloor DEZE ronde (stond in de ronde, ging niet door); grijs = eerder uit.
+  const lostThisRound = pickEliminated && !!userPick && reachedTeams.has(userPick)
 
   return (
     <div className={`bg-wk-surface border rounded-xl overflow-hidden ${
@@ -331,13 +353,15 @@ function BracketMatchCard({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {pts !== null && (
+          {earnedPts !== null && (
             <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-full border tracking-[0.12em] uppercase ${
-              pts > 0
+              earnedPts > 0
                 ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
-                : 'bg-white/5 border-white/10 text-wk-muted'
+                : lostThisRound
+                  ? 'bg-wk-red/10 border-wk-red/30 text-wk-red'
+                  : 'bg-white/5 border-white/10 text-wk-muted'
             }`}>
-              {pts} pt
+              {earnedPts} pt
             </span>
           )}
         </div>
@@ -357,8 +381,8 @@ function BracketMatchCard({
               selected={match.winner === homeTeam.id}
               isActualWinner={actualWinnerId === homeTeam.id}
               advanced={advancedTeams.has(homeTeam.id)}
+              hasWonKo={wonKoTeams.has(homeTeam.id)}
               eliminated={eliminatedTeams.has(homeTeam.id)}
-              pts={pts}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(homeTeam.id)}
@@ -371,8 +395,8 @@ function BracketMatchCard({
               selected={match.winner === awayTeam.id}
               isActualWinner={actualWinnerId === awayTeam.id}
               advanced={advancedTeams.has(awayTeam.id)}
+              hasWonKo={wonKoTeams.has(awayTeam.id)}
               eliminated={eliminatedTeams.has(awayTeam.id)}
-              pts={pts}
               disabled={locked || !bothKnown}
               isPending={isPending}
               onClick={() => onPick(awayTeam.id)}
@@ -397,7 +421,7 @@ function BracketMatchCard({
               {/* 1) Als wedstrijd: wie werd op elke seed van dit duel getipt */}
               {(dist.home.length > 0 || dist.away.length > 0) && (
                 <div>
-                  <p className="font-mono text-[9px] text-wk-gold/70 tracking-[0.16em] uppercase mb-2">Als wedstrijd</p>
+                  <p className="font-mono text-[9px] text-wk-gold/70 tracking-[0.16em] uppercase mb-2">Als wd. {match.slot}</p>
                   <div className="grid grid-cols-2 gap-x-3 sm:gap-x-6">
                     <SeedDist label="Thuis" seed={dist.homeSeed} rows={dist.home} ownId={match.home} actualId={dist.actualHome} teamMap={teamMap} />
                     <SeedDist label="Uit" seed={dist.awaySeed} rows={dist.away} ownId={match.away} actualId={dist.actualAway} teamMap={teamMap} />
@@ -407,7 +431,10 @@ function BracketMatchCard({
               {/* 2) Als winnaar: hoe vaak elk team als winnaar van dit slot is getipt */}
               {dist.winner.length > 0 && (
                 <div className={dist.home.length > 0 || dist.away.length > 0 ? 'border-t border-white/5 pt-3' : ''}>
-                  <p className="font-mono text-[9px] text-wk-gold/70 tracking-[0.16em] uppercase mb-2">Als winnaar</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-mono text-[9px] text-wk-gold/70 tracking-[0.16em] uppercase">Als winnaar van wd. {match.slot}</p>
+                    <a href={`/knockout/wedstrijd/${match.slot}`} className="font-mono text-[9px] text-wk-muted hover:text-wk-soft tracking-[0.12em] uppercase">Wie? →</a>
+                  </div>
                   <SeedDist label="Winnaar" seed="" rows={dist.winner} ownId={match.winner} actualId={dist.actualWinner} teamMap={teamMap} />
                 </div>
               )}
@@ -481,8 +508,8 @@ function TeamBtn({
   selected,
   isActualWinner,
   advanced,
+  hasWonKo,
   eliminated,
-  pts,
   disabled,
   isPending,
   onClick,
@@ -491,8 +518,8 @@ function TeamBtn({
   selected: boolean
   isActualWinner: boolean   // won dit exacte slot (uitslag)
   advanced: boolean         // door naar de volgende ronde (in werkelijkheid)
+  hasWonKo: boolean         // heeft al minstens één KO-wedstrijd gewonnen
   eliminated: boolean       // uit het toernooi
-  pts: number | null        // slot-punten (alleen op de gekozen tegel getoond)
   disabled: boolean
   isPending: boolean
   onClick: () => void
@@ -525,6 +552,9 @@ function TeamBtn({
   if (selected) {
     if (wonHere) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusLabel = 'Winnaar'; statusClass = 'text-wk-green' }
     else if (out) { colorClass = 'border-wk-red/45 bg-wk-red/10 text-wk-muted'; statusLabel = 'Uitgeschakeld'; statusClass = 'text-wk-red' }
+    // Pick is al minstens één ronde door (won een eerdere KO-wedstrijd) → groen i.p.v. goud,
+    // ook als deze wedstrijd nog niet gespeeld is.
+    else if (hasWonKo) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusClass = 'text-wk-green' }
     else colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
   } else if (wonHere) {
     colorClass = 'border-wk-gold/55 bg-wk-gold/20 text-wk-soft'; statusLabel = 'Winnaar'
@@ -566,12 +596,6 @@ function TeamBtn({
       {statusLabel && (
         <span className={`font-mono text-[9px] tracking-widest uppercase ${selected ? statusClass : 'text-wk-muted'}`}>
           {statusLabel}
-        </span>
-      )}
-      {/* Punten op de gekozen tegel: rood bij uitschakeling, anders grijs (0) / groen (>0) */}
-      {selected && pts !== null && (
-        <span className={`font-mono text-[9px] font-bold tracking-widest uppercase ${out ? 'text-wk-red' : pts > 0 ? 'text-wk-green' : 'text-wk-muted'}`}>
-          {pts} pt
         </span>
       )}
     </button>
