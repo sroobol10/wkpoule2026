@@ -56,15 +56,17 @@ export const COUNTRIES: Country[] = [
 export type PoolPlayer = { name: string; face: string; tag: string; traits: PlayerTraits }
 export const PLAYER_POOL: PoolPlayer[] = [
   { name: 'Stefan', face: 'steve.png', tag: 'Sluipschutter', traits: { pace: 3, shot: 5, tackle: 2 } },
-  { name: 'Julia', face: 'julia.png', tag: 'Spelmaker', traits: { pace: 4, shot: 3, tackle: 2 } },
+  { name: 'Julia', face: 'julia.png', tag: 'Spielmacher', traits: { pace: 4, shot: 3, tackle: 2 } },
   { name: 'Jeff', face: 'jeff.png', tag: 'Motor', traits: { pace: 3, shot: 3, tackle: 4 } },
   { name: 'Chris', face: 'chris.png', tag: 'Muur', traits: { pace: 2, shot: 3, tackle: 5 } },
   { name: 'Pim', face: 'pim.png', tag: 'Tank', traits: { pace: 2, shot: 4, tackle: 5 } },
   { name: 'Pawel', face: 'pawel.png', tag: 'Raket', traits: { pace: 5, shot: 3, tackle: 3 } },
   { name: 'Bram', face: 'bram.png', tag: 'Architect', traits: { pace: 3, shot: 5, tackle: 3 } },
   { name: 'Ozair', face: 'ozair.png', tag: 'Terriër', traits: { pace: 4, shot: 2, tackle: 4 } },
-  { name: 'Florian', face: 'florian.png', tag: 'Flankspeler', traits: { pace: 5, shot: 3, tackle: 2 } },
+  { name: 'Florian', face: 'florian.png', tag: 'Sprinter', traits: { pace: 5, shot: 2, tackle: 3 } },
   { name: 'Athena', face: 'athena.png', tag: 'Ster', traits: { pace: 4, shot: 4, tackle: 3 } },
+  { name: 'Jasper', face: 'jasper.png', tag: 'Techneut', traits: { pace: 5, shot: 4, tackle: 2 } },
+  { name: 'Corné', face: 'corne.png', tag: 'Goaltjesdief', traits: { pace: 4, shot: 4, tackle: 2 } },
 ]
 
 // Gemiddeld profiel (AI-landen zonder poolgezicht, of onbekende gezichten).

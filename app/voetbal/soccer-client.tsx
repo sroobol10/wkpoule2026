@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -16,7 +16,7 @@ import {
 import { placeForKickoff, startSecondHalf, nearestTeammateToBall, step, debugSpawnStreaker, debugCard, debugGoal } from '@/lib/soccer/sim'
 import { computeAICommands } from '@/lib/soccer/ai'
 import { PixiSoccerRenderer } from '@/lib/soccer/pixi-renderer'
-import { KeyboardInput } from '@/lib/soccer/input'
+import { KeyboardInput, DEFAULT_BINDINGS, loadBindings, saveBindings, activeGamepad, type Bindings, type ActionId } from '@/lib/soccer/input'
 import { SoccerNet, buildSnapshot, lerpSnapshotInto, makeRoomCode, type Snapshot } from '@/lib/soccer/net'
 import type { GameState, InputCommand, TeamId, TeamMeta } from '@/lib/soccer/types'
 import { dist } from '@/lib/soccer/vec'
@@ -90,11 +90,8 @@ function startLoop(src: string, volume: number): HTMLAudioElement | null {
   }
 }
 
-const HALF_OPTIONS = [
-  { label: '1½ min', sec: 90 },
-  { label: '3 min', sec: 180 },
-  { label: '5 min', sec: 300 },
-]
+// Vaste wedstrijdhelft: 2 minuten (versneld → ~een volledige pot). Niet meer instelbaar.
+const HALF_SEC = 120
 const DIFFICULTY = [
   { label: '🔥', val: 0.35 },
   { label: '🔥🔥', val: 0.6 },
@@ -231,7 +228,7 @@ export default function SoccerClient() {
   const [roomCode, setRoomCode] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [netMsg, setNetMsg] = useState('')
-  const [halfSec, setHalfSec] = useState(180)
+  const halfSec = HALF_SEC
   const [difficulty, setDifficulty] = useState(0.6)
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [tooSmall, setTooSmall] = useState(false)
@@ -250,6 +247,7 @@ export default function SoccerClient() {
   const [ready, setReady] = useState(false)
   const [results, setResults] = useState<MatchResult[]>([])
   const [showResults, setShowResults] = useState(false)
+  const [showControls, setShowControls] = useState(false)
   const [paused, setPaused] = useState(false)
   const [penaltyResult, setPenaltyResult] = useState<{ winner: TeamId; score: [number, number] } | null>(null)
   const matchRecordedRef = useRef<boolean>(false)
@@ -350,7 +348,6 @@ export default function SoccerClient() {
             return e && typeof e.face === 'string' ? (PLAYER_POOL.find((p) => p.face === e.face) ?? null) : null
           }))
         }
-        if (typeof s.halfSec === 'number' && HALF_OPTIONS.some((o) => o.sec === s.halfSec)) setHalfSec(s.halfSec)
         if (typeof s.difficulty === 'number' && DIFFICULTY.some((o) => o.val === s.difficulty)) setDifficulty(s.difficulty)
         if (typeof s.giantBall === 'boolean') setGiantBall(s.giantBall)
         if (typeof s.bigHeads === 'boolean') setBigHeads(s.bigHeads)
@@ -1021,8 +1018,8 @@ export default function SoccerClient() {
 
   const myTeamName = matchTeams ? matchTeams[role === 'guest' ? 1 : 0].name : ''
   const controlHint = role !== null
-    ? `Jij bent ${myTeamName} · WASD = lopen · Shift = sprint · spatie = schot/pass · E = stift · R = kap · Q = panna/hakje/sliding · X = wisselen`
-    : 'WASD = lopen · Shift = sprint · spatie = schot/pass · E = stift · R = kap · Q = panna/hakje/sliding · X = wisselen'
+    ? `Jij bent ${myTeamName} · WASD = lopen · Shift = sprint · spatie = schot/pass · E = stift · R = kap · Q = panna/hakje/sliding · X = wisselen · 🎮 controller ondersteund`
+    : 'WASD = lopen · Shift = sprint · spatie = schot/pass · E = stift · R = kap · Q = panna/hakje/sliding · X = wisselen · 🎮 controller ondersteund'
 
   return (
     <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
@@ -1125,6 +1122,10 @@ export default function SoccerClient() {
             </div>
           )}
 
+          {showControls && (
+            <ControlsModal onClose={() => setShowControls(false)} onApply={(b) => inputRef.current?.setBindings(b)} />
+          )}
+
           {lobby !== 'idle' ? (
             <div className="relative flex flex-1 items-center justify-center px-8">
               <div className="flex w-full max-w-md flex-col items-center gap-5 rounded-2xl border border-white/10 bg-wk-surface/60 px-8 py-10 text-center backdrop-blur-sm animate-fade-up">
@@ -1221,7 +1222,7 @@ export default function SoccerClient() {
                         {picked ? <span className="text-wk-gold">{picked.player.name} → {picked.from === null ? 'klik een plek' : 'klik een plek om te wisselen'}</span> : 'Klik een speler of veldplek'}
                       </p>
                     </div>
-                    <div className="grid grid-cols-5 justify-items-center gap-2">
+                    <div className="grid grid-cols-6 justify-items-center gap-2">
                       {PLAYER_POOL.map((p) => {
                         const inTeam = lineup.some((l) => l?.face === p.face)
                         const isPicked = picked?.player.face === p.face && picked.from === null
@@ -1249,11 +1250,16 @@ export default function SoccerClient() {
                   <div className="shrink-0"><Segmented options={['Computer', "Penalty's", 'Online']} value={mode === 'local' ? 0 : mode === 'penalty' ? 1 : 2} onChange={(i) => { setMode(i === 0 ? 'local' : i === 1 ? 'penalty' : 'online'); cancelLobby() }} /></div>
                   <Panel title="Wedstrijd" className="flex-1">
                     <div className="flex flex-1 flex-col gap-5">
-                      <Field label="Helft"><Segmented options={HALF_OPTIONS.map((o) => o.label)} value={HALF_OPTIONS.findIndex((o) => o.sec === halfSec)} onChange={(i) => setHalfSec(HALF_OPTIONS[i].sec)} /></Field>
                       {mode === 'local' && (
                         <Field label="Moeilijkheid"><Segmented options={DIFFICULTY.map((o) => o.label)} value={DIFFICULTY.findIndex((o) => o.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} /></Field>
                       )}
                       <Field label="Bal"><Segmented options={['Normaal', '⚽ Giant']} value={giantBall ? 1 : 0} onChange={(i) => setGiantBall(i === 1)} /></Field>
+                      <Field label="Besturing">
+                        <button type="button" onClick={() => setShowControls(true)}
+                          className="w-full rounded-lg border border-white/15 px-3 py-2 font-mono text-[11px] uppercase tracking-wide text-wk-soft transition hover:border-white/35 hover:text-wk-text">
+                          🎮 Toetsen &amp; controller aanpassen
+                        </button>
+                      </Field>
                       {mode !== 'penalty' && (
                         <Field label="Chaos">
                           <div className="flex flex-wrap gap-2">
@@ -1977,6 +1983,125 @@ function TeamCrest({ short, shirt, trim, size = 40 }: { short: string; shirt: st
       <path d="M3 15 H37" stroke={trim} strokeWidth="1.4" opacity="0.55" />
       <text x="20" y="29" textAnchor="middle" fontSize="12" fontWeight="900" fontFamily="Arial, sans-serif" fill={txt} letterSpacing="0.5">{short.slice(0, 3)}</text>
     </svg>
+  )
+}
+
+// ── Besturing aanpassen (toetsenbord + controller) ───────────────────────────
+const ACTION_META: { id: ActionId; label: string }[] = [
+  { id: 'kick', label: 'Schot / pass' },
+  { id: 'sprint', label: 'Sprint' },
+  { id: 'slide', label: 'Sliding / panna' },
+  { id: 'switch', label: 'Speler wisselen' },
+  { id: 'chip', label: 'Stift / lange bal' },
+  { id: 'feint', label: 'Schijnbeweging' },
+]
+const KEY_LABELS: Record<string, string> = {
+  Space: 'Spatie', Enter: 'Enter', ShiftLeft: 'Shift', ShiftRight: 'Shift R', ControlLeft: 'Ctrl', ControlRight: 'Ctrl R',
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Tab: 'Tab', Backspace: '⌫',
+}
+function keyLabel(code: string | undefined): string {
+  if (!code) return '—'
+  if (KEY_LABELS[code]) return KEY_LABELS[code]
+  if (code.startsWith('Key')) return code.slice(3)
+  if (code.startsWith('Digit')) return code.slice(5)
+  return code
+}
+const PAD_LABELS: Record<number, string> = {
+  0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'Back', 9: 'Start', 10: 'L3', 11: 'R3', 12: 'D↑', 13: 'D↓', 14: 'D←', 15: 'D→',
+}
+function padLabel(i: number | undefined): string {
+  return i == null ? '—' : (PAD_LABELS[i] ?? `Knop ${i}`)
+}
+
+function ControlsModal({ onClose, onApply }: { onClose: () => void; onApply: (b: Bindings) => void }) {
+  const [bindings, setBindings] = useState<Bindings>(() => loadBindings())
+  const [capture, setCapture] = useState<{ action: ActionId; kind: 'key' | 'pad' } | null>(null)
+
+  // Toets vastleggen: eerstvolgende toetsaanslag wordt de nieuwe binding (Esc annuleert).
+  useEffect(() => {
+    if (capture?.kind !== 'key') return
+    const h = (e: KeyboardEvent) => {
+      e.preventDefault()
+      if (e.code === 'Escape') { setCapture(null); return }
+      setBindings((b) => ({ ...b, keys: { ...b.keys, [capture.action]: [e.code] } }))
+      setCapture(null)
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [capture])
+
+  // Controllerknop vastleggen: pollt de gamepad tot er een knop wordt ingedrukt.
+  useEffect(() => {
+    if (capture?.kind !== 'pad') return
+    let raf = 0
+    const poll = () => {
+      const gp = activeGamepad()
+      if (gp) {
+        for (let i = 0; i < gp.buttons.length; i++) {
+          const btn = gp.buttons[i]
+          if (btn && (btn.pressed || btn.value > 0.6)) {
+            setBindings((b) => ({ ...b, pad: { ...b.pad, [capture.action]: [i] } }))
+            setCapture(null)
+            return
+          }
+        }
+      }
+      raf = requestAnimationFrame(poll)
+    }
+    raf = requestAnimationFrame(poll)
+    const esc = (e: KeyboardEvent) => { if (e.code === 'Escape') setCapture(null) }
+    window.addEventListener('keydown', esc)
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('keydown', esc) }
+  }, [capture])
+
+  const save = () => { saveBindings(bindings); onApply(bindings); onClose() }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-6" onClick={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-white/12 bg-wk-surface p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-display text-lg uppercase tracking-[0.14em] text-wk-text">Besturing</h2>
+          <button onClick={onClose} className="font-mono text-[11px] uppercase tracking-widest text-wk-muted hover:text-wk-text">Sluiten ✕</button>
+        </div>
+        <p className="mb-3 font-mono text-[10px] uppercase leading-relaxed tracking-[0.12em] text-wk-muted">
+          Bewegen: WASD / pijltjes / linkerstick. Klik een knop om te wijzigen.
+        </p>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
+            <span />
+            <span className="text-center font-mono text-[9px] uppercase tracking-[0.14em] text-wk-muted">Toets</span>
+            <span className="text-center font-mono text-[9px] uppercase tracking-[0.14em] text-wk-muted">🎮 Knop</span>
+            {ACTION_META.map((a) => (
+              <Fragment key={a.id}>
+                <span className="font-mono text-[11px] uppercase tracking-wide text-wk-soft">{a.label}</span>
+                <button
+                  onClick={() => setCapture({ action: a.id, kind: 'key' })}
+                  className={`min-w-[64px] rounded-md border px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${capture?.action === a.id && capture.kind === 'key' ? 'border-wk-gold bg-wk-gold/15 text-wk-gold animate-pulse' : 'border-white/15 text-wk-text hover:border-white/35'}`}>
+                  {capture?.action === a.id && capture.kind === 'key' ? '…' : keyLabel(bindings.keys[a.id]?.[0])}
+                </button>
+                <button
+                  onClick={() => setCapture({ action: a.id, kind: 'pad' })}
+                  className={`min-w-[64px] rounded-md border px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${capture?.action === a.id && capture.kind === 'pad' ? 'border-wk-gold bg-wk-gold/15 text-wk-gold animate-pulse' : 'border-white/15 text-wk-text hover:border-white/35'}`}>
+                  {capture?.action === a.id && capture.kind === 'pad' ? '…' : padLabel(bindings.pad[a.id]?.[0])}
+                </button>
+              </Fragment>
+            ))}
+          </div>
+        </div>
+
+        {capture && (
+          <p className="mt-3 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-wk-gold">
+            {capture.kind === 'key' ? 'Druk een toets…' : 'Druk een controllerknop…'} <span className="text-wk-muted">(Esc = annuleren)</span>
+          </p>
+        )}
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <button onClick={() => setBindings(DEFAULT_BINDINGS)} className="font-mono text-[10px] uppercase tracking-[0.16em] text-wk-muted hover:text-wk-soft">Standaard herstellen</button>
+          <button onClick={save} className="rounded-lg border border-wk-green/50 bg-wk-green/15 px-5 py-2 font-mono text-[12px] uppercase tracking-[0.14em] text-wk-green hover:bg-wk-green/25">Opslaan</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

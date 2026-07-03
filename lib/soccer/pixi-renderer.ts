@@ -339,35 +339,6 @@ export class PixiSoccerRenderer {
     draw(L / 2 - dw * 0.7, cA)
     draw(L / 2 + dw * 0.7, cB)
     this.world.addChild(g)
-    this.buildCrowdBanners() // spandoeken + vlaggetjes op de tribune
-  }
-
-  // Sfeer op de tribune: spandoeken met de teamnaam/-code (in teamkleur) + wat kleine vlaggetjes.
-  // Fans van team A clusteren achter het linkerdoel + linkerhelft, team B rechts.
-  private buildCrowdBanners() {
-    const PIXI = this.PIXI
-    const L = PITCH_LENGTH, W = PITCH_WIDTH, D = STAND_DEPTH
-    const A = this.teams?.[0], B = this.teams?.[1]
-    if (!A || !B) return
-    const g = new PIXI.Graphics()
-    const banner = (cx: number, cy: number, w: number, h: number, color: string, label: string) => {
-      g.moveTo(cx - w / 2, cy - h / 2).lineTo(cx + w / 2, cy - h / 2).stroke({ width: 1.5, color: 0x0a0a0a, alpha: 0.5 }) // ophangdraad
-      g.roundRect(cx - w / 2, cy - h / 2, w, h, 3).fill(color).stroke({ width: 2, color: 0x0a0a0a, alpha: 0.55 })
-      const t = new PIXI.Text({ text: label, style: { fontFamily: 'Arial', fontSize: 26, fontWeight: '900', fill: 0xffffff, letterSpacing: 1, stroke: { color: 0x0a0a0a, width: 4 } } })
-      t.anchor.set(0.5)
-      t.scale.set(Math.min((h * 0.6) / t.height, (w * 0.86) / t.width))
-      t.position.set(cx, cy)
-      this.world.addChild(g)
-      this.world.addChild(t)
-    }
-    // Grote spandoeken achter het eigen doel (naam), kleinere op de zijtribunes (code).
-    banner(-D * 0.58, W * 0.42, 168, 52, A.shirt, A.name.toUpperCase().slice(0, 12))
-    banner(L + D * 0.58, W * 0.58, 168, 52, B.shirt, B.name.toUpperCase().slice(0, 12))
-    banner(L * 0.26, -D * 0.6, 108, 40, A.shirt, A.short)
-    banner(L * 0.74, -D * 0.6, 108, 40, B.shirt, B.short)
-    banner(L * 0.3, W + D * 0.6, 108, 40, A.shirt, A.short)
-    banner(L * 0.7, W + D * 0.6, 108, 40, B.shirt, B.short)
-    this.world.addChild(g)
   }
 
   // Willekeurig punt op de tribune (voor de knipperende flitsen).
