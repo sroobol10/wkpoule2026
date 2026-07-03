@@ -584,18 +584,20 @@ export class PixiSoccerRenderer {
     // en een squash bij de landing. Anders: sliding-pose (bijna plat) of rechtop.
     n.c.scale.set(1, 1)
     if ((p.bicycleTimer ?? 0) > 0) {
-      // OMHAAL-salto: het poppetje maakt een volledige achterwaartse salto (halverwege staat-ie
-      // op z'n kop → voeten boven, hoofd beneden), springt even op en spreidt de armen.
+      // OMHAAL: het poppetje klapt achterover — kop zakt laag, béíde benen zwiepen hoog de lucht in
+      // (voeten boven, hoofd beneden). Bewust géén volledige spin: dat oogde als een kopbal/pirouette.
       const prog = 1 - p.bicycleTimer / BICYCLE_ANIM_TIME // 0→1
-      const ease = 1 - (1 - prog) * (1 - prog) * (1 - prog) // ease-out → salto whipt meteen door
+      const strike = Math.sin(Math.min(1, prog * 1.4) * Math.PI) // 0→1→0, piek vroeg = het trapmoment
       const sign = p.facing.x >= 0 ? 1 : -1
-      n.c.rotation = sign * ease * Math.PI * 2 // één volledige salto, front-loaded (synct met de trap)
-      const air = Math.sin(Math.min(1, prog * 1.5) * Math.PI) // vroeg opspringen, benen snel omhoog
-      n.c.scale.set(1 + air * 0.08, 1 + air * 0.08)
-      n.legL.position.set(-r * 0.3, HIP_Y - air * r * 0.7) // benen gestrekt
-      n.legR.position.set(r * 0.3, HIP_Y - air * r * 0.7)
-      n.armL.rotation = -1.9
-      n.armR.rotation = 1.9
+      n.c.rotation = sign * strike * 0.5 // lichte kanteling voor dynamiek (geen rondje)
+      n.c.scale.set(1 + strike * 0.05, 1 + strike * 0.05)
+      // Kop omlaag/achterover, torso iets omhoog, benen gestrekt hoog boven het lichaam.
+      n.headGroup.position.set(-sign * strike * r * 0.5, -r * 1.5 + strike * r * 2.3)
+      n.torso.position.set(0, r * 0.05 - strike * r * 0.25)
+      n.legL.position.set(-r * 0.32 - sign * strike * r * 0.25, HIP_Y - strike * r * 2.0)
+      n.legR.position.set(r * 0.32 - sign * strike * r * 0.25, HIP_Y - strike * r * 2.3)
+      n.armL.rotation = -1.5 - strike * 0.9
+      n.armR.rotation = 1.5 + strike * 0.9
     } else if (p.tumbleTimer > 0) {
       const prog = 1 - p.tumbleTimer / TUMBLE_TIME // 0→1
       const ease = 1 - (1 - prog) * (1 - prog) // ease-out → snel begin, zachte landing
