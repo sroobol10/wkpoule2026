@@ -13,9 +13,9 @@ export type Bindings = {
   pad: Record<ActionId, number[]>
 }
 
-// Standaard: WASD/pijltjes lopen · Spatie schot · Q sliding (zonder bal) / omhaal (met bal) ·
-// Shift sprint · X wisselen · E voorzet/lange bal · R kap. PS5-controller (DualSense): ✕ schot ·
-// □ sliding/omhaal · ○ wisselen · △ voorzet · L1 kap · R1 sprint · linkerstick/D-pad lopen.
+// Standaard: WASD/pijltjes lopen · Spatie schot · Q sliding (zonder bal) / truc (met bal) ·
+// Shift sprint · X wisselen · E voorzet/lange bal · R omhaal (2× met bal = knal). PS5-controller
+// (DualSense): ✕ schot · □ sliding/truc · ○ wisselen · △ voorzet · L1 omhaal · R1 sprint · stick/D-pad.
 export const DEFAULT_BINDINGS: Bindings = {
   keys: {
     up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],

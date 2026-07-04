@@ -281,32 +281,23 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
     // Tijdens een aftrap/vrije trap mag de tegenpartij (niet de nemer) de bal niet aanvallen
     // tot er hervat is — dus geen slide/tackle starten.
     const restartLock = (state.phase === 'kickoff' || state.phase === 'setpiece') && p.team !== state.kickoffTeam
-    // Slide starten met Q = sliding-tackle, alléén zonder bal binnen bereik. Ligt de bal (laag of
-    // hoog) binnen controle-afstand, dan is Q gereserveerd voor het lobje/de omhaal (handleBallContact).
+    // Q: mét bal aan de voet = truc/kap (snelle dash langs een verdediger); zónder bal binnen bereik
+    // = sliding-tackle. (De omhaal zit op R — zie handleBallContact.)
     if (cmd.slide && !state.prevSlide[idx(p)] && p.tackleCooldown <= 0 && !restartLock) {
-      // Bal binnen controle-afstand (laag of hoog) → Q is het lobje/de omhaal, geen tackle.
       const ballInReach = dist(p.pos, state.ball.pos) < CONTROL_RADIUS + PLAYER_RADIUS
-      if (!ballInReach) {
-        let d = norm(cmd.move)
-        if (d.x === 0 && d.y === 0) d = p.facing
-        if (d.x === 0 && d.y === 0) d = { x: teamDir(p.team, state.attackDir), y: 0 }
+      const atFeet = ballInReach && state.ball.z < AIR_CONTROL_HEIGHT
+      let d = norm(cmd.move)
+      if (d.x === 0 && d.y === 0) d = p.facing
+      if (d.x === 0 && d.y === 0) d = { x: teamDir(p.team, state.attackDir), y: 0 }
+      if (atFeet && p.feintTimer <= 0) {
+        p.facing = d
+        p.feintTimer = FEINT_TIME
+        p.vel = scale(d, FEINT_SPEED)
+      } else if (!ballInReach) {
         p.facing = d
         p.slideTackle = true
         p.slideTimer = SLIDE_TIME
         p.vel = scale(d, SLIDE_SPEED)
-      }
-    }
-
-    // Schijnbeweging/kap (R): alleen met de bal aan de voet → snelle dash in de gekozen richting.
-    if (cmd.feint && !state.prevFeint[idx(p)] && p.feintTimer <= 0 && p.tackleCooldown <= 0) {
-      const hasBall = dist(p.pos, state.ball.pos) < CONTROL_RADIUS + PLAYER_RADIUS && state.ball.z < AIR_CONTROL_HEIGHT
-      if (hasBall) {
-        let d = norm(cmd.move)
-        if (d.x === 0 && d.y === 0) d = p.facing
-        if (d.x === 0 && d.y === 0) d = { x: teamDir(p.team, state.attackDir), y: 0 }
-        p.facing = d
-        p.feintTimer = FEINT_TIME
-        p.vel = scale(d, FEINT_SPEED)
       }
     }
   }
@@ -442,9 +433,9 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
   const { ball } = state
   // Bal in de lucht (geloft schot): niemand kan 'm controleren — hij vliegt over.
   if (ball.z > AIR_CONTROL_HEIGHT) {
-    // ...behalve de OMHAAL: staat er een speler binnen bereik die Q indrukt terwijl de bal hoog
+    // ...behalve de OMHAAL: staat er een speler binnen bereik die R indrukt terwijl de bal hoog
     // hangt, dan haalt-ie 'm uit de lucht richting het doel. Moet hiervóór, anders is de hoge bal
-    // (bv. na het eigen lobje met Q) onbereikbaar en blijf je hangen in het lobje.
+    // (bv. na het eigen lobje met R) onbereikbaar en blijf je hangen in het lobje.
     let cand: PlayerState | null = null
     let cd = CONTROL_RADIUS + PLAYER_RADIUS + 6
     for (const p of state.players) {
@@ -454,8 +445,8 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     }
     if (cand) {
       const cmd = inputs[idx(cand)] ?? { move: { x: 0, y: 0 }, kick: false }
-      const flickEdge = !!cmd.slide && !state.prevSlide[idx(cand)]
-      if (flickEdge && ball.z > BICYCLE_MIN_Z) bicycleShot(state, cand)
+      const bikeEdge = !!cmd.feint && !state.prevFeint[idx(cand)]
+      if (bikeEdge && ball.z > BICYCLE_MIN_Z) bicycleShot(state, cand)
     }
     return
   }
@@ -501,16 +492,16 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
   // LOSLAAT-flank: knop was ingedrukt en is nu los → trap met de opgebouwde power.
   const releaseEdge = state.prevKick[idx(best)] && !cmd.kick
 
-  // Q mét bal, twee-fasen: ligt de bal laag → een lobje omhoog (zet 'm klaar). Nog een keer Q
+  // R mét bal, twee-fasen: ligt de bal laag → een lobje omhoog (zet 'm klaar). Nog een keer R
   // terwijl de bal hóóg is → de OMHAAL: spectaculaire overhead-knal richting het doel + slow-motion.
-  // (R blijft de kap/dribbel-skillmove.)
-  const flickEdge = !!cmd.slide && !state.prevSlide[idx(best)]
-  if (flickEdge && best.kickCooldown <= 0) {
+  // (Q mét bal is de truc/kap-skillmove.)
+  const bikeEdge = !!cmd.feint && !state.prevFeint[idx(best)]
+  if (bikeEdge && best.kickCooldown <= 0) {
     if (ball.z > BICYCLE_MIN_Z) {
       bicycleShot(state, best) // bal hangt hoog → omhaal richting doel
     } else {
       // Bal ligt laag → lobje recht omhoog. Reist licht met je mee zodat je eronder blijft en
-      // 'm zo met een tweede Q kunt omhalen.
+      // 'm zo met een tweede R kunt omhalen.
       ball.vz = SELF_LOB_LIFT
       ball.z = Math.max(ball.z, 2)
       ball.vel = { x: best.vel.x * 0.5, y: best.vel.y * 0.5 }

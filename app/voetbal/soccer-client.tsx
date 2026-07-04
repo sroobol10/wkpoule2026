@@ -137,6 +137,8 @@ const RESTART_LABEL: Record<string, string> = {
 const SETUP_KEY = 'kopstukken:setup:v1' // lokaal bewaarde team-setup + settings
 const TRAITS_KEY = 'kopstukken:traits:v1' // lokaal aangepaste speler-traits (face → {pace,shot,tackle})
 const TRAIT_BUDGET = 11 // vaste puntensom per speler (eerlijk)
+// Spelerspool op naam gesorteerd (voor de keuze-lijstjes onderin de instellingen).
+const PLAYER_POOL_ALPHA = [...PLAYER_POOL].sort((a, b) => a.name.localeCompare(b.name, 'nl'))
 const defaultTraitsFor = (face: string): PlayerTraits => PLAYER_POOL.find((p) => p.face === face)?.traits ?? { pace: 3, shot: 3, tackle: 3 }
 const RESULTS_KEY = 'kopstukken:results:v1' // lokale geschiedenis van gespeelde wedstrijden
 type MatchResult = {
@@ -1671,7 +1673,7 @@ export default function SoccerClient() {
                       </p>
                     </div>
                     <div className="grid grid-cols-6 justify-items-center gap-2">
-                      {PLAYER_POOL.map((p) => {
+                      {PLAYER_POOL_ALPHA.map((p) => {
                         const inTeam = lineup.some((l) => l?.face === p.face)
                         const isPicked = picked?.player.face === p.face && picked.from === null
                         return (
@@ -2484,10 +2486,10 @@ function TeamCrest({ short, shirt, trim, size = 40 }: { short: string; shirt: st
 const ACTION_META: { id: ActionId; label: string }[] = [
   { id: 'kick', label: 'Schot / pass' },
   { id: 'sprint', label: 'Sprint' },
-  { id: 'slide', label: 'Sliding / omhaal' },
+  { id: 'slide', label: 'Sliding / truc' },
   { id: 'switch', label: 'Speler wisselen' },
   { id: 'chip', label: 'Voorzet / lange bal' },
-  { id: 'feint', label: 'Schijnbeweging' },
+  { id: 'feint', label: 'Omhaal (2× = knal)' },
 ]
 const KEY_LABELS: Record<string, string> = {
   Space: 'Spatie', Enter: 'Enter', ShiftLeft: 'Shift', ShiftRight: 'Shift R', ControlLeft: 'Ctrl', ControlRight: 'Ctrl R',
@@ -2632,7 +2634,7 @@ function TraitsModal({ current, onClose, onSave }: { current: Record<string, Pla
         </div>
         <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-wk-muted">Elke speler heeft {TRAIT_BUDGET} punten (1–5 per trait). Eerlijk: de som blijft gelijk.</p>
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-          {PLAYER_POOL.map((p) => {
+          {PLAYER_POOL_ALPHA.map((p) => {
             const t = draft[p.face]
             const left = TRAIT_BUDGET - sumOf(t)
             return (

@@ -86,43 +86,47 @@ export async function DagOverzicht({ userId }: { userId: string }) {
   const predMap = Object.fromEntries(((preds ?? []) as Pred[]).map((p) => [p.match_id, p]))
   const jokerIds = new Set(((jokers ?? []) as { match_id: string }[]).map((j) => j.match_id))
 
-  // KO-winnaars komen uit de bracket (bracket_predictions): per slot het land dat je
-  // liet winnen. winSet = alle landen die je ergens als winnaar koos; bracketBySlot
-  // levert de punten per KO-wedstrijd (slot = match_number).
+  // KO-winnaars komen uit de bracket (bracket_predictions): per slot het land dat je liet winnen.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: bracketRows } = await (supabase as any)
     .from('bracket_predictions')
     .select('slot, predicted_team_id, points_awarded')
     .eq('user_id', userId)
   const bracket = (bracketRows ?? []) as { slot: number; predicted_team_id: string; points_awarded: number | null }[]
-  const winSet = new Set(bracket.map((b) => b.predicted_team_id))
   // Punten worden toegekend op team-doorgang (welk slot je 'm ook plaatste): zolang je gekozen
   // land die ronde doorgaat krijg je de rondepunten. We indexeren daarom op stage+team, niet op
   // slot=match_number (dat faalt zodra je pick in een ander slot staat dan de echte wedstrijd).
   const slotStage: Record<number, string> = Object.fromEntries(BRACKET.map((b) => [b.slot, b.stage]))
   const koPtsByStageTeam: Record<string, number | null> = {}
+  // winnersByStage = per KO-ronde de landen die je in díé ronde liet winnen. Cruciaal: een land
+  // dat je een eerdere ronde liet winnen telt hier NIET mee — anders zou bv. Canada (dat je in de
+  // vorige ronde koos) opduiken in een wedstrijd waar je een ánder land als winnaar voorspelde.
+  const winnersByStage: Record<string, Set<string>> = {}
   for (const b of bracket) {
     const st = slotStage[b.slot]
     if (!st) continue
     const key = `${st}:${b.predicted_team_id}`
     const cur = koPtsByStageTeam[key]
     if (cur == null || (b.points_awarded != null && b.points_awarded > cur)) koPtsByStageTeam[key] = b.points_awarded
+    ;(winnersByStage[st] ??= new Set<string>()).add(b.predicted_team_id)
   }
+  const EMPTY_SET = new Set<string>()
+  const stageWinners = (m: Match): Set<string> => winnersByStage[m.stage] ?? EMPTY_SET
   // Punten voor een KO-wedstrijd: het hoogste toegekende puntenaantal van je gekozen land(en)
   // in deze wedstrijd, voor de stage van deze wedstrijd (null = nog niet gescoord).
   const koPtsForMatch = (m: Match): number | null => {
     let best: number | null = null
-    for (const t of myChoiceTeams(m, winSet)) {
+    for (const t of myChoiceTeams(m, stageWinners(m))) {
       const v = koPtsByStageTeam[`${m.stage}:${t.id}`]
       if (v != null && (best == null || v > best)) best = v
     }
     return best
   }
 
-  // KO-wedstrijden alleen tonen als je minstens één van de twee landen als winnaar
-  // voorspelde. Groepsfase-wedstrijden tonen we zoals altijd.
+  // KO-wedstrijden alleen tonen als je één van de twee ECHTE deelnemers als winnaar van DÉZE ronde
+  // voorspelde. Zo verdwijnen wedstrijden waar je pick niet (meer) meespeelt → geen punten mogelijk.
   const visible = matches.filter(
-    (m) => m.stage === 'group' || winSet.has(m.home_team?.id ?? '') || winSet.has(m.away_team?.id ?? ''),
+    (m) => m.stage === 'group' || stageWinners(m).has(m.home_team?.id ?? '') || stageWinners(m).has(m.away_team?.id ?? ''),
   )
   const played = visible.filter((m) => m.result_entered)
   const upcoming = visible.filter((m) => !m.result_entered)
@@ -192,7 +196,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Behaalde punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {played.map((m) => (
-                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} koPts={koPtsForMatch(m)} joker={jokerIds.has(m.id)} winSet={winSet} />
+                    <PlayedRow key={m.id} m={m} pred={predMap[m.id]} koPts={koPtsForMatch(m)} joker={jokerIds.has(m.id)} myWinners={stageWinners(m)} />
                   ))}
                 </div>
               </SubSection>
@@ -201,7 +205,7 @@ export async function DagOverzicht({ userId }: { userId: string }) {
               <SubSection title="Nog te behalen punten">
                 <div className="bg-wk-surface border border-white/10 rounded-xl divide-y divide-white/5">
                   {upcoming.map((m) => (
-                    <UpcomingRow key={m.id} m={m} pred={predMap[m.id]} joker={jokerIds.has(m.id)} winSet={winSet} />
+                    <UpcomingRow key={m.id} m={m} pred={predMap[m.id]} joker={jokerIds.has(m.id)} myWinners={stageWinners(m)} />
                   ))}
                 </div>
               </SubSection>
@@ -291,11 +295,11 @@ function groupPredText(pred?: Pred): string | null {
   return pred ? `${pred.predicted_home}–${pred.predicted_away}` : null
 }
 
-// De landen (van de twee echte deelnemers) die je als KO-winnaar voorspelde.
-function myChoiceTeams(m: Match, winSet: Set<string>): NonNullable<TeamRef>[] {
+// De landen (van de twee echte deelnemers) die je als winnaar van DÉZE KO-ronde voorspelde.
+function myChoiceTeams(m: Match, myWinners: Set<string>): NonNullable<TeamRef>[] {
   const out: NonNullable<TeamRef>[] = []
-  if (m.home_team && winSet.has(m.home_team.id)) out.push(m.home_team)
-  if (m.away_team && winSet.has(m.away_team.id)) out.push(m.away_team)
+  if (m.home_team && myWinners.has(m.home_team.id)) out.push(m.home_team)
+  if (m.away_team && myWinners.has(m.away_team.id)) out.push(m.away_team)
   return out
 }
 function koWinner(m: Match): TeamRef {
@@ -332,7 +336,7 @@ function MyChoice({ teams }: { teams: NonNullable<TeamRef>[] }) {
   )
 }
 
-function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; koPts?: number | null; joker: boolean; winSet: Set<string> }) {
+function PlayedRow({ m, pred, koPts, joker, myWinners }: { m: Match; pred?: Pred; koPts?: number | null; joker: boolean; myWinners: Set<string> }) {
   const isKo = m.stage !== 'group'
   const pts = isKo ? (koPts ?? null) : (pred?.points_awarded ?? null)
   const winner = koWinner(m)
@@ -353,7 +357,7 @@ function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; k
         {isKo ? (
           <>
             <span className="inline-flex items-center gap-2">
-              <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
+              <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, myWinners)} /></span>
               {joker && <JokerTag />}
             </span>
             <span className="inline-flex flex-wrap items-center">
@@ -385,7 +389,7 @@ function PlayedRow({ m, pred, koPts, joker, winSet }: { m: Match; pred?: Pred; k
   )
 }
 
-function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; joker: boolean; winSet: Set<string> }) {
+function UpcomingRow({ m, pred, joker, myWinners }: { m: Match; pred?: Pred; joker: boolean; myWinners: Set<string> }) {
   const isKo = m.stage !== 'group'
   const voorspeld = groupPredText(pred)
   return (
@@ -400,7 +404,7 @@ function UpcomingRow({ m, pred, joker, winSet }: { m: Match; pred?: Pred; joker:
       </div>
       <div className="pl-12 mt-2 flex items-center gap-x-3 gap-y-1 text-xs sm:text-[13px] text-wk-muted flex-wrap">
         {isKo
-          ? <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, winSet)} /></span>
+          ? <span className="inline-flex items-center">Mijn keuze <MyChoice teams={myChoiceTeams(m, myWinners)} /></span>
           : <span>Voorspeld <b className={`ml-1 ${voorspeld ? 'text-wk-soft' : 'text-wk-muted/50'}`}>{voorspeld ?? '—'}</b></span>}
         {joker && <JokerTag />}
       </div>

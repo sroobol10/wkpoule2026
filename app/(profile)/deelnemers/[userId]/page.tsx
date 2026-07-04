@@ -84,7 +84,7 @@ export default async function DeelnemerProfilePage({
     // Nog actieve ploegen → uitgeschakelde bracket-picks worden grijs getoond
     const { data: koM } = await supabase
       .from('matches')
-      .select('home_team_id, away_team_id, home_score, away_score, result_entered')
+      .select('home_team_id, away_team_id, home_score, away_score, result_entered, shootout_winner_id')
       .in('stage', ['r32', 'r16', 'qf', 'sf', 'third_place', 'final'])
     aliveTeamIds = [...computeAliveTeamIds(
       (mRes.data ?? []) as unknown as AliveGroupMatch[],
