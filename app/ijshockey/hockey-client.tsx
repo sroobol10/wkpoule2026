@@ -6,22 +6,22 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import ImmersiveToggle from './immersive-toggle'
 import { AnalogTouchControls } from '@/components/playground/analog-touch-controls'
-import { isCoarsePointer } from '@/components/playground/mobile-play'
+import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile, isCoarsePointer } from '@/components/playground/mobile-play'
 import {
   FIXED_DT, MAX_STEPS_PER_FRAME, CONTROL_RADIUS, PLAYER_RADIUS, MAX_CHARGE_TIME,
   PLAYERS_PER_TEAM, SLOWMO_TIME,
-} from '@/lib/soccer/constants'
+} from '@/lib/hockey/constants'
 import {
   createInitialState, KITS, COUNTRIES, PLAYER_POOL, FORMATIONS, formationById, buildTeamMeta, randomAiTeam, ensureDistinctKit,
   type PoolPlayer, type TeamColors,
-} from '@/lib/soccer/teams'
-import { placeForKickoff, startSecondHalf, nearestTeammateToBall, step, debugSpawnStreaker, debugCard, debugGoal } from '@/lib/soccer/sim'
-import { computeAICommands } from '@/lib/soccer/ai'
-import { PixiSoccerRenderer } from '@/lib/soccer/pixi-renderer'
-import { KeyboardInput, DEFAULT_BINDINGS, KB_LEFT_BINDINGS, KB_RIGHT_BINDINGS, loadBindings, saveBindings, activeGamepad, connectedGamepadCount, type Bindings, type ActionId } from '@/lib/soccer/input'
-import { SoccerNet, buildSnapshot, lerpSnapshotInto, makeRoomCode, type Snapshot, type RosterMember, type SlotAssign } from '@/lib/soccer/net'
-import type { GameState, InputCommand, PlayerTraits, TeamId, TeamMeta } from '@/lib/soccer/types'
-import { dist } from '@/lib/soccer/vec'
+} from '@/lib/hockey/teams'
+import { placeForKickoff, startSecondHalf, nearestTeammateToBall, step, debugSpawnStreaker, debugCard, debugGoal } from '@/lib/hockey/sim'
+import { computeAICommands } from '@/lib/hockey/ai'
+import { PixiSoccerRenderer } from '@/lib/hockey/pixi-renderer'
+import { KeyboardInput, DEFAULT_BINDINGS, KB_LEFT_BINDINGS, KB_RIGHT_BINDINGS, loadBindings, saveBindings, activeGamepad, connectedGamepadCount, type Bindings, type ActionId } from '@/lib/hockey/input'
+import { SoccerNet, buildSnapshot, lerpSnapshotInto, makeRoomCode, type Snapshot, type RosterMember, type SlotAssign } from '@/lib/hockey/net'
+import type { GameState, InputCommand, PlayerTraits, TeamId, TeamMeta } from '@/lib/hockey/types'
+import { dist } from '@/lib/hockey/vec'
 
 type Stage = 'menu' | 'match' | 'penalty'
 type Mode = 'local' | 'local2p' | 'coop' | 'local2v2' | 'online' | 'penalty'
@@ -63,13 +63,12 @@ type Mvp = { name: string; face: string | null; team: TeamId; line: string }
 type PanelInfo = { title: string; score: [number, number]; result?: 'win' | 'loss' | 'draw'; scorers: Scorer[]; cards: TlCard[]; halfLen: number; note?: string; motm?: Mvp; stats?: MatchStats }
 type GoalInfo = { name: string; teamName: string; face: string | null; team: TeamId; ownGoal: boolean; color: string; kind: 'normal' | 'screamer' | 'owngoal' }
 
-const GOAL_SOUNDS = ['/sfx/goal.mp3', '/sfx/goal2.mp3', '/sfx/goal3.mp3', '/sfx/goal-variant.mp3', '/sfx/goaltune-feyenoord.mp3']
+const GOAL_SOUNDS = ['/sfx/goal-ice.mp3'] // ijshockey-goalhoorn
 const KICK_SOUNDS = ['/sfx/kick.mp3']       // trap/pass-plof (Steve levert clips; werkt stil tot dan)
 const WHISTLE_SOUNDS = ['/sfx/whistle.mp3'] // scheidsfluit (aftrap/overtreding/rust/eind)
 const TACKLE_SOUNDS = ['/sfx/tackle.mp3']   // dreun bij een sliding-tackle die iemand omver loopt
 const YELLOWCARD_SOUNDS = ['/sfx/yellowcard.mp3'] // bij een gele kaart
 const REDCARD_SOUNDS = ['/sfx/redcard.mp3']       // bij een rode kaart
-const EMO_SOUNDS = ['/sfx/emotional-damage.mp3']  // bij een eigen doelpunt (au)
 // Voorgeladen audio-pool → geen decode-vertraging bij de eerste keer (bijv. de kaartfluit).
 const audioPool = new Map<string, HTMLAudioElement>()
 function primeSound(src: string) {
@@ -97,7 +96,7 @@ const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 function goalQuip(name: string, team: string, kind: 'normal' | 'screamer' | 'owngoal'): string {
   if (kind === 'owngoal') return pick([`😅 EIGEN GOAL van ${name}! ${team} lacht in z'n vuistje.`, `🙈 ${name} verlengt 'm in eigen doel… au.`, `📎 ${name} scoort… aan de verkeerde kant!`])
   if (kind === 'screamer') return pick([`🚀 ${name} met een PEGEL — boven in de kruising!`, `💥 ${name} ramt 'm er vanaf afstand in!`, `😱 Wat een knal van ${name}!`])
-  return pick([`⚽ ${name} scoort voor ${team}!`, `🎯 ${name} maakt 'm ijskoud af.`, `🔥 ${name}!! Daar is de goal.`, `🙌 ${name} tekent voor de treffer.`])
+  return pick([`🏒 ${name} scoort voor ${team}!`, `🎯 ${name} maakt 'm ijskoud af.`, `🔥 ${name}!! Daar is de goal.`, `🙌 ${name} tekent voor de treffer.`])
 }
 function cardQuip(name: string, red: boolean): string {
   return red
@@ -130,28 +129,22 @@ const DIFFICULTY = [
   { label: '🔥🔥🔥', val: 0.85 },
 ]
 
+// Hockey kent maar één herstart-soort: de face-off (na een tijdstraf). De puck gaat
+// nooit uit — de boarding houdt alles binnen.
 const RESTART_LABEL: Record<string, string> = {
-  throwin: 'Ingooi',
-  corner: 'Hoekschop',
-  goalkick: 'Doeltrap',
-  freekick: 'Vrije trap',
+  throwin: 'Face-off',
+  corner: 'Face-off',
+  goalkick: 'Face-off',
+  freekick: 'Face-off',
 }
 
-// Veld- en weer-voorkeur (instelbaar). 'random' = elke wedstrijd verrast; anders vast.
-const SURFACE_OPTS = ['gras', 'random', 'zaal', 'strand', 'sneeuw'] as const
-const SURFACE_LABELS = ['Gras', '🎲 Random', 'Zaal', 'Strand', 'Sneeuw']
-type SurfacePref = (typeof SURFACE_OPTS)[number]
-const WEATHER_OPTS = ['random', 'clear', 'rain', 'snow'] as const
-const WEATHER_LABELS = ['🎲 Random', 'Droog', 'Regen', 'Sneeuw']
-type WeatherPref = (typeof WEATHER_OPTS)[number]
-
-const SETUP_KEY = 'kopstukken:setup:v1' // lokaal bewaarde team-setup + settings
+const SETUP_KEY = 'ijshockey:setup:v1' // lokaal bewaarde team-setup + settings
 const TRAITS_KEY = 'kopstukken:traits:v1' // lokaal aangepaste speler-traits (face → {pace,shot,tackle})
 const TRAIT_BUDGET = 11 // vaste puntensom per speler (eerlijk)
 // Spelerspool op naam gesorteerd (voor de keuze-lijstjes onderin de instellingen).
 const PLAYER_POOL_ALPHA = [...PLAYER_POOL].sort((a, b) => a.name.localeCompare(b.name, 'nl'))
 const defaultTraitsFor = (face: string): PlayerTraits => PLAYER_POOL.find((p) => p.face === face)?.traits ?? { pace: 3, shot: 3, tackle: 3 }
-const RESULTS_KEY = 'kopstukken:results:v1' // lokale geschiedenis van gespeelde wedstrijden
+const RESULTS_KEY = 'ijshockey:results:v1' // lokale geschiedenis van gespeelde wedstrijden
 type MatchResult = {
   a: string; b: string; ca: string; cb: string; sa: number; sb: number; pens?: 0 | 1; ts: number
   // Uitgebreid (nieuwe wedstrijden) → voedt de Erelijst. Oude entries missen dit; val netjes terug.
@@ -221,7 +214,7 @@ function cycleTeammate(s: GameState, team: TeamId, cur: number): number {
 }
 
 // Voorkomt de "dubbele tackle": als de controle (auto-)wisselt naar een andere speler terwijl
-// Q/E/R al ingedrukt is, zou die nieuwe speler meteen een edge-actie doen (slide/stift/kap).
+// Q/E/R al ingedrukt is, zou die nieuwe speler meteen een edge-actie doen (check/slapshot/spin).
 // We zaaien daarom prevSlide/prevChip/prevFeint = true bij een wissel → pas een VERSE druk telt.
 function seedEdgesOnSwitch(
   s: GameState,
@@ -274,7 +267,7 @@ function pickCoop(s: GameState, team: TeamId, curId: number, otherId: number): n
   return curId
 }
 
-export default function SoccerClient() {
+export default function HockeyClient() {
   const router = useRouter()
   const close = () => router.push('/playground') // sluiten = terug naar de arcadehal
 
@@ -302,8 +295,7 @@ export default function SoccerClient() {
   const halfSec = HALF_SEC
   const [difficulty, setDifficulty] = useState(0.6)
   const [overlay, setOverlay] = useState<Overlay>(null)
-  const [isTouch, setIsTouch] = useState(false) // grof aanwijsapparaat → on-screen besturing
-  const [portrait, setPortrait] = useState(false) // touch + portret → "draai je toestel"
+  const { isTouch, portrait } = useLandscapeGate()
   const [panelInfo, setPanelInfo] = useState<PanelInfo | null>(null)
   const [goalInfo, setGoalInfo] = useState<GoalInfo | null>(null)
   const [matchTeams, setMatchTeams] = useState<[TeamMeta, TeamMeta] | null>(null)
@@ -333,12 +325,10 @@ export default function SoccerClient() {
   // Team-builder
   const [teamName, setTeamName] = useState('')
   const [kit, setKit] = useState<TeamColors>(() => ({ shirt: KITS[0].shirt, trim: KITS[0].trim, keeper: KITS[0].keeper }))
-  const [formationId, setFormationId] = useState('2-3-1')
+  const [formationId, setFormationId] = useState('2-3')
   const [giantBall, setGiantBall] = useState(false)
   const [bigHeads, setBigHeads] = useState(false)
   const [slippery, setSlippery] = useState(false)
-  const [surfacePref, setSurfacePref] = useState<SurfacePref>('gras') // veld: standaard gras
-  const [weatherPref, setWeatherPref] = useState<WeatherPref>('random') // weer: standaard willekeurig
   const [lineup, setLineup] = useState<(PoolPlayer | null)[]>(() => Array.from({ length: PLAYERS_PER_TEAM }, (_, i) => PLAYER_POOL[i % PLAYER_POOL.length]))
   // Opgepakte speler: uit de pool (from=null) of van een veldplek (from=slotindex, voor swap).
   const [picked, setPicked] = useState<{ player: PoolPlayer; from: number | null } | null>(null)
@@ -361,8 +351,6 @@ export default function SoccerClient() {
   const giantBallRef = useRef<boolean>(giantBall)
   const bigHeadsRef = useRef<boolean>(bigHeads)
   const slipperyRef = useRef<boolean>(slippery)
-  const surfacePrefRef = useRef<SurfacePref>(surfacePref)
-  const weatherPrefRef = useRef<WeatherPref>(weatherPref)
   const humanTeamRef = useRef<TeamId>(0)
   const overlayRef = useRef<Overlay>(null)
   const score0Ref = useRef<HTMLSpanElement | null>(null)
@@ -412,7 +400,9 @@ export default function SoccerClient() {
   const prevSaveRef = useRef<number>(0)
   const prevPannaRef = useRef<number>(0)
   const prevBicycleRef = useRef<number>(0)
-  const slowmoUntilRef = useRef<number>(0) // performance.now() tot wanneer de sim vertraagd loopt (omhaal)
+  const prevBrawlRef = useRef<number>(0) // brawlCount van vorige tick (start-toast)
+  const prevBrawlWinnerRef = useRef<number>(-1) // laatste verwerkte brawl-winnaar
+  const slowmoUntilRef = useRef<number>(0) // performance.now() tot wanneer de sim vertraagd loopt (volle slapshot)
   const prevStreakerRef = useRef<boolean>(false)
   const toastTimerRef = useRef<number | null>(null)
   const goalOverlayTimerRef = useRef<number | null>(null)
@@ -444,8 +434,6 @@ export default function SoccerClient() {
   useEffect(() => { giantBallRef.current = giantBall }, [giantBall])
   useEffect(() => { bigHeadsRef.current = bigHeads }, [bigHeads])
   useEffect(() => { slipperyRef.current = slippery }, [slippery])
-  useEffect(() => { surfacePrefRef.current = surfacePref }, [surfacePref])
-  useEffect(() => { weatherPrefRef.current = weatherPref }, [weatherPref])
   // Houd het aantal verbonden controllers bij (voor de apparaat-kiezer in de instellingen).
   useEffect(() => {
     const upd = () => setPadCount(connectedGamepadCount())
@@ -479,8 +467,6 @@ export default function SoccerClient() {
         if (typeof s.giantBall === 'boolean') setGiantBall(s.giantBall)
         if (typeof s.bigHeads === 'boolean') setBigHeads(s.bigHeads)
         if (typeof s.slippery === 'boolean') setSlippery(s.slippery)
-        if (SURFACE_OPTS.includes(s.surfacePref)) setSurfacePref(s.surfacePref)
-        if (WEATHER_OPTS.includes(s.weatherPref)) setWeatherPref(s.weatherPref)
         if (DEVICE_IDS.includes(s.p1Device)) setP1Device(s.p1Device)
         if (DEVICE_IDS.includes(s.p2Device)) setP2Device(s.p2Device)
         if (DEVICE_IDS.includes(s.p3Device)) setP3Device(s.p3Device)
@@ -517,11 +503,11 @@ export default function SoccerClient() {
   useEffect(() => {
     if (!hydratedRef.current) return
     try {
-      localStorage.setItem(SETUP_KEY, JSON.stringify({ teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery, surfacePref, weatherPref, p1Device, p2Device, p3Device, p4Device }))
+      localStorage.setItem(SETUP_KEY, JSON.stringify({ teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery, p1Device, p2Device, p3Device, p4Device }))
     } catch {
       /* private mode / quota → stil overslaan */
     }
-  }, [teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery, surfacePref, weatherPref, p1Device, p2Device, p3Device, p4Device])
+  }, [teamName, kit, formationId, lineup, halfSec, difficulty, giantBall, bigHeads, slippery, p1Device, p2Device, p3Device, p4Device])
 
   // Uitslagen-geschiedenis inladen (lokaal, per apparaat) — mount-time, geen hydration-mismatch.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -567,25 +553,10 @@ export default function SoccerClient() {
   }, [stage, paused, countdown, shootout, foulFlash])
 
 
-  useEffect(() => {
-    const check = () => {
-      const touch = window.matchMedia('(pointer: coarse)').matches
-      setIsTouch(touch)
-      // Portret enkel relevant op touch: dan vragen we om te draaien; landscape = spelen.
-      setPortrait(touch && window.matchMedia('(orientation: portrait)').matches)
-    }
-    check()
-    window.addEventListener('resize', check)
-    window.addEventListener('orientationchange', check)
-    return () => {
-      window.removeEventListener('resize', check)
-      window.removeEventListener('orientationchange', check)
-    }
-  }, [])
 
   // Geluiden + kaart-afbeeldingen voorladen → geen vertraging/blanco beeld bij de eerste kaart.
   useEffect(() => {
-    for (const src of [...GOAL_SOUNDS, ...KICK_SOUNDS, ...WHISTLE_SOUNDS, ...TACKLE_SOUNDS, ...YELLOWCARD_SOUNDS, ...REDCARD_SOUNDS, ...EMO_SOUNDS]) primeSound(src)
+    for (const src of [...GOAL_SOUNDS, ...KICK_SOUNDS, ...WHISTLE_SOUNDS, ...TACKLE_SOUNDS, ...YELLOWCARD_SOUNDS, ...REDCARD_SOUNDS]) primeSound(src)
     for (const src of ['/spelers/ref-yellow.png', '/spelers/ref-red.png']) { const im = new window.Image(); im.src = src }
   }, [])
 
@@ -731,14 +702,35 @@ export default function SoccerClient() {
         toastTimerRef.current = window.setTimeout(() => setToast(null), 1600)
       }
     }
-    // Omhaal → korte slow-motion + "OMHAAL!"-popup (client vertraagt de sim heel even).
+    // Vechtpartij! Start-toast bij de opstoot, winnaar-toast na de beslissende klap.
+    if (s.brawlCount !== prevBrawlRef.current) {
+      const more = s.brawlCount > prevBrawlRef.current
+      prevBrawlRef.current = s.brawlCount
+      if (more) {
+        setToast('🥊 VECHTPARTIJ!')
+        pushComment('🥊 De handschoenen gaan uit — opstootje op het ijs!')
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+        toastTimerRef.current = window.setTimeout(() => setToast(null), 2200)
+      }
+    }
+    if (s.lastBrawlWinner !== prevBrawlWinnerRef.current) {
+      prevBrawlWinnerRef.current = s.lastBrawlWinner
+      const w = s.lastBrawlWinner >= 0 ? s.players[s.lastBrawlWinner] : null
+      if (w) {
+        setToast(`🥊 ${w.name} wint het gevecht!`)
+        pushComment(`🥊 ${w.name} deelt de beslissende klap uit — en de checker mag zo brommen.`)
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+        toastTimerRef.current = window.setTimeout(() => setToast(null), 2200)
+      }
+    }
+    // Volle slapshot → korte slow-motion + "KNAL!"-popup (client vertraagt de sim heel even).
     if (s.bicycleCount !== prevBicycleRef.current) {
       const more = s.bicycleCount > prevBicycleRef.current
       prevBicycleRef.current = s.bicycleCount
       if (more && roleRef.current !== 'guest') {
         slowmoUntilRef.current = performance.now() + SLOWMO_TIME * 1000
-        setToast('🚲 OMHAAL!')
-        pushComment('🚲 OMHAAL! Wat een actie!')
+        setToast('🏒 KNÁL! Wat een slapshot!')
+        pushComment('🏒 KNALHARDE slapshot — de keeper zag \'m niet eens!')
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
         toastTimerRef.current = window.setTimeout(() => setToast(null), 1800)
       }
@@ -783,7 +775,6 @@ export default function SoccerClient() {
       setGoalInfo(g ? { name: p?.name ?? '', teamName: s.teams[g.team]?.name ?? '', face: p?.face ?? null, team: g.team, ownGoal: g.ownGoal, color: s.teams[g.team].shirt, kind: s.lastGoalKind } : null)
       if (g) pushComment(goalQuip(p?.name ?? 'Iemand', s.teams[g.team]?.name ?? 'het team', g.ownGoal ? 'owngoal' : s.lastGoalKind))
       playSound(GOAL_SOUNDS)
-      if (g?.ownGoal) playSound(EMO_SOUNDS, 0.85) // eigen goal → emotional damage
       // Eerst een korte on-pitch viering laten zien; dan pas het full-screen goalscherm.
       if (goalOverlayTimerRef.current) clearTimeout(goalOverlayTimerRef.current)
       goalOverlayTimerRef.current = window.setTimeout(() => setOverlay('goal'), 900)
@@ -935,7 +926,7 @@ export default function SoccerClient() {
     if (manualHold4Ref.current > 0) manualHold4Ref.current = Math.max(0, manualHold4Ref.current - frameDt)
 
     if (!pausedRef.current) {
-      // Slow-motion na een omhaal: minder sim-tijd per frame → alles beweegt heel even vertraagd.
+      // Slow-motion na een volle slapshot: minder sim-tijd per frame → alles beweegt heel even vertraagd.
       const slow = performance.now() < slowmoUntilRef.current
       accRef.current += frameDt * (slow ? 0.3 : 1)
       let steps = 0
@@ -1015,44 +1006,17 @@ export default function SoccerClient() {
     setRole(r)
     humanTeamRef.current = humanTeam
     const s = createInitialState(humanTeam, hs, metas[0], metas[1])
-    // Venue + weer + wind: opgelegd (gast) of zelf willekeurig (host/lokaal). Ondergrond bepaalt
-    // de balwrijving, wind duwt de bal. De renderer krijgt venue/weer mee; de sim surface/wind.
-    let venue: 'stadion' | 'zaal' | 'strand' | 'sneeuw'
-    let weather: 'clear' | 'rain' | 'snow'
-    if (cosmetic) {
-      venue = cosmetic.venue
-      weather = cosmetic.weather
-    } else {
-      // Veld-voorkeur: 'random' verrast elke wedstrijd, anders het gekozen veld ('gras' → stadion).
-      if (surfacePrefRef.current === 'random') {
-        const VENUES = ['stadion', 'stadion', 'strand', 'zaal', 'sneeuw'] as const
-        venue = VENUES[Math.floor(Math.random() * VENUES.length)]
-      } else {
-        venue = surfacePrefRef.current === 'gras' ? 'stadion' : surfacePrefRef.current
-      }
-      // Weer-voorkeur: 'random' = de oude heuristiek (sneeuwveld sneeuwt, anders 40% regen),
-      // anders precies het gekozen weer. Binnen (zaal) is er nooit weer.
-      if (weatherPrefRef.current === 'random') {
-        weather = venue === 'sneeuw' ? 'snow' : (venue !== 'zaal' && Math.random() < 0.4 ? 'rain' : 'clear')
-      } else {
-        weather = weatherPrefRef.current
-      }
-      if (venue === 'zaal') weather = 'clear'
-    }
-    s.surface = venue === 'zaal' ? 'zaal' : venue === 'strand' ? 'strand' : venue === 'sneeuw' ? 'sneeuw' : 'gras'
-    // Wind: volledig willekeurig van richting én kracht — meestal mild, maar met pech flink
-    // (bias naar laag via ^1.7, tot ~150). Binnen (zaal) geen wind. Alleen host/lokaal simuleert.
-    const windMag = r === 'guest' || venue === 'zaal' ? 0 : Math.pow(Math.random(), 1.7) * 150
-    const wa = Math.random() * Math.PI * 2
-    s.wind = { x: Math.cos(wa) * windMag, y: Math.sin(wa) * windMag }
-    // Startweer + windvlaag-doel; daarna verandert het weer dynamisch tijdens het spel (sim).
-    s.weather = weather
-    s.windTarget = { x: s.wind.x, y: s.wind.y }
-    s.weatherTimer = 5 + Math.random() * 6
+    // IJshockey: altijd binnen in de ijshal — geen venues, geen weer, geen wind.
+    const venue = 'stadion' as const
+    s.surface = 'zaal' // binnen (sim: geen wind-effecten); de renderer tekent sowieso ijs
+    s.wind = { x: 0, y: 0 }
+    s.weather = 'clear'
+    s.windTarget = { x: 0, y: 0 }
+    s.weatherTimer = 9999
     s.ballScale = cosmetic ? (cosmetic.ballScale ?? 1) : (giantBallRef.current ? 2 : 1)
     s.bigHeads = cosmetic ? !!cosmetic.bigHeads : bigHeadsRef.current
     s.slippery = cosmetic ? !!cosmetic.slippery : slipperyRef.current
-    venueRef.current = { venue, weather }
+    venueRef.current = { venue, weather: 'clear' }
     placeForKickoff(s, s.kickoffTeam)
     controlledRef.current = r === 'guest' ? -1 : nearestTeammateToBall(s, humanTeam)
     controlledGuestRef.current = nearestTeammateToBall(s, 1)
@@ -1097,15 +1061,7 @@ export default function SoccerClient() {
     accRef.current = 0
     lastRef.current = performance.now() / 1000
     rendererRef.current?.resetCamera(s)
-    // Mobiel: meteen naar immersive/fullscreen + landscape (best-effort — desktop laat 't ongemoeid).
-    if (typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches) {
-      const rootEl = document.querySelector('[data-game-root]') as HTMLElement | null
-      rootEl?.setAttribute('data-immersive', 'true')
-      rootEl?.requestFullscreen?.().then(() => {
-        const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined
-        so?.lock?.('landscape').catch(() => {})
-      }).catch(() => { /* iOS Safari: in-app immersive volstaat */ })
-    }
+    enterImmersiveIfMobile()
     setStage('match')
   }, [])
 
@@ -1366,8 +1322,8 @@ export default function SoccerClient() {
       lastRef.current = performance.now() / 1000
       rafRef.current = requestAnimationFrame(loop)
       setReady(true)
-      // Omgevingsgeluid: publiek altijd, regen alleen bij regenweer (renderer koos 't).
-      crowdAudioRef.current = startLoop('/sfx/crowd.mp3', 0.28)
+      // Omgevingsgeluid: stadion-gejuich altijd (ijshockey-sfeer), regen alleen bij regenweer.
+      crowdAudioRef.current = startLoop('/sfx/stadium-cheer.mp3', 0.3)
       if (renderer.activeWeather === 'rain') rainAudioRef.current = startLoop('/sfx/rain.mp3', 0.3)
     })
     return () => {
@@ -1413,10 +1369,10 @@ export default function SoccerClient() {
 
   const myTeamName = matchTeams ? matchTeams[role === 'guest' ? 1 : 0].name : ''
   const controlHint = isTouch
-    ? (role !== null ? `Jij bent ${myTeamName} · joystick = lopen · knoppen rechts = schot & trucs` : 'joystick = lopen · Turbo = sprint · Schot · Stift · Kap · Slide · Wissel')
+    ? (role !== null ? `Jij bent ${myTeamName} · joystick = schaatsen · knoppen rechts = schot & trucs` : 'joystick = schaatsen · Turbo = sprint · Schot · Slap · Spin · Check · Wissel')
     : role !== null
-      ? `Jij bent ${myTeamName} · WASD = lopen · Shift = sprint · spatie = schot/pass · E = stift · R = kap · Q = panna/hakje/sliding · X = wisselen · 🎮 controller ondersteund`
-      : 'WASD = lopen · Shift = sprint · spatie = schot/pass · E = stift · R = kap · Q = panna/hakje/sliding · X = wisselen · 🎮 controller ondersteund'
+      ? `Jij bent ${myTeamName} · WASD = schaatsen · Shift = sprint · spatie = schot/pass · E = slapshot (laden!) · R = spin-o-rama · Q = bodycheck · X = wisselen · 🎮 controller ondersteund`
+      : 'WASD = schaatsen · Shift = sprint · spatie = schot/pass · E = slapshot (laden!) · R = spin-o-rama · Q = bodycheck · X = wisselen · 🎮 controller ondersteund'
 
   return (
     <div data-game-root className="relative min-h-screen bg-wk-bg text-wk-text overflow-hidden">
@@ -1432,21 +1388,15 @@ export default function SoccerClient() {
         </svg>
       </Link>
 
-      {portrait && (
-        <div className="fixed inset-0 z-[90] flex flex-col items-center justify-center gap-3 bg-wk-bg/95 px-8 text-center">
-          <span className="animate-pulse text-5xl">📱↻</span>
-          <h2 className="font-display text-2xl uppercase text-wk-gold">Draai je toestel</h2>
-          <p className="max-w-xs text-sm text-wk-soft">Kopstukken speel je liggend (landscape). Draai je telefoon een kwartslag.</p>
-        </div>
-      )}
+      {portrait && <RotateNotice game="Puckstukken" />}
 
-      {/* On-screen besturing op mobiel, alleen tijdens live spel (niet in menu/pauze/overlays). */}
+      {/* On-screen besturing op mobiel, alleen tijdens live spel. */}
       {isTouch && !portrait && stage === 'match' && !paused && overlay === null && countdown === null && !shootout && (
         <AnalogTouchControls getInput={() => inputRef.current} buttons={[
-          { action: 'feint', label: 'Kap', color: 'border-fuchsia-300/40 bg-fuchsia-500/25' },
+          { action: 'feint', label: 'Spin', color: 'border-fuchsia-300/40 bg-fuchsia-500/25' },
           { action: 'sprint', label: 'Turbo', color: 'border-cyan-300/40 bg-cyan-500/25' },
-          { action: 'chip', label: 'Stift', color: 'border-emerald-300/40 bg-emerald-500/25' },
-          { action: 'slide', label: 'Slide', color: 'border-rose-300/40 bg-rose-500/25' },
+          { action: 'chip', label: 'Slap', color: 'border-emerald-300/40 bg-emerald-500/25' },
+          { action: 'slide', label: 'Check', color: 'border-rose-300/40 bg-rose-500/25' },
           { action: 'switch', label: 'Wissel', color: 'border-white/25 bg-white/10' },
           { action: 'kick', label: 'Schot', color: 'border-wk-gold/70 bg-wk-gold/30 text-wk-gold', big: true },
         ]} />
@@ -1459,7 +1409,8 @@ export default function SoccerClient() {
           <div className="pointer-events-none absolute -right-48 top-1/4 h-[440px] w-[440px] rounded-full opacity-[0.08] blur-3xl" style={{ background: 'radial-gradient(closest-side, #2D6BE5, transparent)' }} />
 
           <header className="relative flex items-center justify-center px-10 pb-4 pt-6">
-            <Image src="/games/kopstukken.png" alt="Kopstukken" width={1408} height={704} priority className="h-20 w-auto" />
+            {/* Tijdelijk het Kopstukken-logo; Steve maakt een eigen Puckstukken-logo. */}
+            <Image src="/games/puckstukken.png" alt="Puckstukken" width={1024} height={1024} priority className="h-24 w-auto" />
             {results.length > 0 && (
               <button onClick={() => setShowResults(true)}
                 className="absolute left-10 top-1/2 -translate-y-1/2 rounded-full border border-white/15 bg-wk-surface/70 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-wk-soft hover:border-white/35 hover:text-wk-text">
@@ -1492,7 +1443,7 @@ export default function SoccerClient() {
                       </div>
                       {c.topScorers.length > 0 && (
                         <div className="rounded-lg bg-wk-bg2/60 px-3 py-2">
-                          <p className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-wk-muted">⚽ Topscorers (jouw teams)</p>
+                          <p className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-wk-muted">🏒 Topscorers (jouw teams)</p>
                           <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                             {c.topScorers.map(([name, n], i) => (
                               <span key={name} className="font-mono text-[11px] text-wk-soft">
@@ -1570,15 +1521,13 @@ export default function SoccerClient() {
 
                 {mode !== 'penalty' && (
                   <>
-                    <Field label="Veld"><Segmented options={SURFACE_LABELS} value={SURFACE_OPTS.indexOf(surfacePref)} onChange={(i) => setSurfacePref(SURFACE_OPTS[i])} /></Field>
-                    <Field label="Weer"><Segmented options={WEATHER_LABELS} value={WEATHER_OPTS.indexOf(weatherPref)} onChange={(i) => setWeatherPref(WEATHER_OPTS[i])} /></Field>
-                    <Field label="Bal"><Segmented options={['Normaal', '⚽ Giant']} value={giantBall ? 1 : 0} onChange={(i) => setGiantBall(i === 1)} /></Field>
+                    <Field label="Puck"><Segmented options={['Normaal', '⚫ Mega-puck']} value={giantBall ? 1 : 0} onChange={(i) => setGiantBall(i === 1)} /></Field>
                     <Field label="Chaos">
                       <div className="flex flex-wrap gap-2">
                         <button type="button" onClick={() => setBigHeads(!bigHeads)}
                           className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${bigHeads ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>🗿 Grote koppen</button>
                         <button type="button" onClick={() => setSlippery(!slippery)}
-                          className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${slippery ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>⛸️ Gladde mat</button>
+                          className={`rounded-lg border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wide transition ${slippery ? 'border-wk-gold bg-wk-gold/15 text-wk-gold' : 'border-white/15 text-wk-soft hover:border-white/35'}`}>⛸️ Spekglad</button>
                       </div>
                     </Field>
                   </>
@@ -1795,7 +1744,7 @@ export default function SoccerClient() {
                         className="flex w-full items-center justify-between rounded-lg border border-white/15 px-3 py-2.5 font-mono text-[11px] uppercase tracking-wide text-wk-soft transition hover:border-white/35 hover:text-wk-text">
                         <span>⚙ Instellingen</span>
                         <span className="text-wk-muted">
-                          {[giantBall && '⚽', bigHeads && '🗿', slippery && '⛸️'].filter(Boolean).join(' ') || 'standaard'}
+                          {[giantBall && '🥌', bigHeads && '🗿', slippery && '⛸️'].filter(Boolean).join(' ') || 'standaard'}
                         </span>
                       </button>
 
@@ -1808,7 +1757,7 @@ export default function SoccerClient() {
                         ) : mode === 'local' ? (
                           <>
                             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">Tegenstander: willekeurig land</p>
-                            <button onClick={startLocal} className={`${btnCool} w-full py-4 text-3xl`}>Aftrap →</button>
+                            <button onClick={startLocal} className={`${btnCool} w-full py-4 text-3xl`}>Face-off →</button>
                           </>
                         ) : mode === 'local2p' || mode === 'coop' || mode === 'local2v2' ? (() => {
                           const is2v2 = mode === 'local2v2'
@@ -1820,7 +1769,7 @@ export default function SoccerClient() {
                               <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">{hint} · apparaten via ⚙ instellingen</p>
                               {dup && <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-wk-red">Kies voor elke speler een ander apparaat (⚙ instellingen).</p>}
                               <button onClick={mode === 'coop' ? startCoop : is2v2 ? start2v2 : startLocal2p} disabled={dup} className={`${btnCool} w-full py-4 text-3xl ${dup ? 'opacity-50' : ''}`}>
-                                {mode === 'coop' ? 'Aftrap → co-op' : is2v2 ? 'Aftrap → 2v2' : 'Aftrap → 2 spelers'}
+                                {mode === 'coop' ? 'Face-off → co-op' : is2v2 ? 'Face-off → 2v2' : 'Face-off → 2 spelers'}
                               </button>
                             </>
                           )
@@ -1890,7 +1839,7 @@ export default function SoccerClient() {
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: matchTeams[0].shirt }} />
                 <span className="font-score text-base uppercase leading-none tracking-[0.02em] text-white">{matchTeams[0].short}</span>
                 <span ref={score0Ref} className="ml-1 inline-block min-w-[0.85em] text-center font-score text-xl leading-none text-white tabular-nums">0</span>
-                <span className="mx-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-wk-gold text-[13px] leading-none shadow-inner">⚽</span>
+                <span className="mx-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-wk-gold text-[13px] leading-none shadow-inner">🏒</span>
                 <span ref={score1Ref} className="mr-1 inline-block min-w-[0.85em] text-center font-score text-xl leading-none text-white tabular-nums">0</span>
                 <span className="font-score text-base uppercase leading-none tracking-[0.02em] text-white">{matchTeams[1].short}</span>
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: matchTeams[1].shirt }} />
@@ -1967,9 +1916,9 @@ export default function SoccerClient() {
               <div className="absolute left-1/2 top-1/2 h-[220vmax] w-[220vmax] -translate-x-1/2 -translate-y-1/2 opacity-20" style={{ background: 'repeating-conic-gradient(from 0deg, #E4610F00 0deg, #E4610F99 6deg, #E4610F00 13deg)', animation: 'goal-rays 9s linear infinite' }} />
               <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ border: '5px solid #E4610F', animation: 'goal-ring 0.7s ease-out both' }} />
               <div className="relative flex flex-col items-center gap-2" style={{ animation: 'goal-pop 0.45s cubic-bezier(0.2,1.4,0.4,1) both' }}>
-                <span className="text-5xl drop-shadow">🟠🎽</span>
+                <span className="text-5xl drop-shadow">🏒💥</span>
                 <h1 className="font-display text-6xl uppercase tracking-wider text-white drop-shadow-[0_4px_20px_rgba(0,0,0,0.85)]">Overtreding!</h1>
-                <p className="font-mono text-sm uppercase tracking-[0.24em] text-wk-gold">Vrije trap</p>
+                <p className="font-mono text-sm uppercase tracking-[0.24em] text-wk-gold">Face-off</p>
               </div>
             </div>
           )}
@@ -2062,16 +2011,17 @@ function FormationPitch({
   const slots = formationById(formationId).slots
   return (
     <div className="relative aspect-[16/8] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/15 shadow-2xl ring-1 ring-black/30"
-      style={{ background: 'repeating-linear-gradient(90deg,#1f7a37 0 8%,#237e3b 8% 16%)' }}>
+      style={{ background: 'repeating-linear-gradient(90deg,#dfeaf4 0 8%,#e9f2f9 8% 16%)' }}>
       {/* lichtval + vignette voor diepte */}
       <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(120% 90% at 30% 20%, rgba(255,255,255,0.10), transparent 55%)' }} />
       {/* veldlijnen: doel links (jouw kant), midlijn rechts */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-white/55" />
-      <div className="pointer-events-none absolute inset-y-[30%] left-0 w-11 rounded-r border-2 border-l-0 border-white/45" />
-      <div className="pointer-events-none absolute inset-y-[40%] left-0 w-4 rounded-r border-2 border-l-0 border-white/35" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/30" />
-      <div className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 translate-x-1/2 rounded-full border border-white/25" />
-      <span className="pointer-events-none absolute right-3 top-2 font-mono text-[9px] uppercase tracking-[0.2em] text-white/45">aanval →</span>
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-[#c23b45]/70" />
+      <div className="pointer-events-none absolute inset-y-[30%] left-0 w-11 rounded-r border-2 border-l-0 border-[#3d6fc2]/55" />
+      <div className="pointer-events-none absolute inset-y-[40%] left-0 w-4 rounded-r border-2 border-l-0 border-[#c23b45]/45" />
+      <div className="pointer-events-none absolute inset-y-0 left-[38%] w-[3px] bg-[#3d6fc2]/50" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-[2px] bg-[#c23b45]/55" />
+      <div className="pointer-events-none absolute right-0 top-1/2 h-24 w-24 -translate-y-1/2 translate-x-1/2 rounded-full border-2 border-[#c23b45]/45" />
+      <span className="pointer-events-none absolute right-3 top-2 font-mono text-[9px] uppercase tracking-[0.2em] text-[#22344a]/60">aanval →</span>
       {slots.map((s, i) => {
         const p = lineup[i]
         const left = (s.anchor.x / 0.8) * 90 // 0..0.72 → mooi over de linkerhelft spreiden
@@ -2137,9 +2087,9 @@ function LoadingScreen({ teams }: { teams: [TeamMeta, TeamMeta] }) {
       </div>
       {/* mini-veld: opstellingen op positie, tegenover elkaar */}
       <div className="relative aspect-[16/9] w-full max-w-3xl overflow-hidden rounded-xl border border-white/15 shadow-2xl ring-1 ring-black/30"
-        style={{ background: 'repeating-linear-gradient(90deg,#1f7a37 0 8%,#237e3b 8% 16%)' }}>
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/30" />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25" />
+        style={{ background: 'repeating-linear-gradient(90deg,#dfeaf4 0 8%,#e9f2f9 8% 16%)' }}>
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 w-[3px] -translate-x-1/2 bg-[#c23b45]/60" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#3d6fc2]/50" />
         <PitchTeam meta={teams[0]} side={0} />
         <PitchTeam meta={teams[1]} side={1} />
       </div>
@@ -2169,7 +2119,8 @@ function Countdown({ value }: { value: number | 'GO' }) {
   )
 }
 
-// Kaart-animatie — full-screen, langer/coole dan een normale overtreding.
+// Tijdstraf-animatie — full-screen. In hockey is red=true een "grote straf" (5 min, check
+// van achteren), anders de gewone 2 minuten. Zelfde scheids-beelden als bij voetbal.
 function CardCelebration({ card }: { card: { red: boolean; secondYellow: boolean; name: string; teamName: string; n: number } }) {
   const col = card.red ? '#E11D2E' : '#F5C518'
   // Optionele scheids-afbeelding (kaart omhoog); valt terug op een getekende kaart als 't bestand ontbreekt.
@@ -2198,13 +2149,11 @@ function CardCelebration({ card }: { card: { red: boolean; secondYellow: boolean
           />
         )}
         <h1 className="font-display text-6xl sm:text-7xl uppercase tracking-wider text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.85)]" style={{ animation: 'goal-pop 0.45s cubic-bezier(0.2,1.5,0.4,1) both' }}>
-          {card.red ? 'Rode kaart' : 'Gele kaart'}
+          {card.red ? '5 minuten!' : '2 minuten!'}
         </h1>
-        {card.secondYellow && (
-          <p className="font-score text-2xl sm:text-3xl uppercase tracking-[0.14em] text-[#F5C518] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]" style={{ animation: 'goal-pop 0.45s cubic-bezier(0.2,1.5,0.4,1) 0.1s both' }}>
-            🟨🟨 Tweede geel
-          </p>
-        )}
+        <p className="font-score text-2xl sm:text-3xl uppercase tracking-[0.14em] text-[#F5C518] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]" style={{ animation: 'goal-pop 0.45s cubic-bezier(0.2,1.5,0.4,1) 0.1s both' }}>
+          🧊 Naar het strafbankje
+        </p>
         {card.name && (
           <p className="font-score text-3xl sm:text-4xl uppercase tracking-wide text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]" style={{ animation: 'goal-rise 0.5s ease-out 0.12s both' }}>
             {card.name}
@@ -2432,23 +2381,23 @@ function GoalCelebration({ info }: { info: GoalInfo | null }) {
 }
 
 
-// Soort tijdlijn-event → icoon, label en accentkleur (voor de badge + het tekstlabel).
-type TlKind = 'goal' | 'og' | 'yellow' | 'red' | 'yr'
+// Soort tijdlijn-event → icoon, label en accentkleur. In hockey zijn "kaarten" strafbankje-
+// tijden (2 min klein, 5 min groot bij een check van achteren).
+type TlKind = 'goal' | 'og' | 'small' | 'big'
 const TL_META: Record<TlKind, { icon: string; label: string; color: string }> = {
-  goal: { icon: '⚽', label: 'goal', color: '#ffffff' },
+  goal: { icon: '🚨', label: 'goal', color: '#ffffff' },
   og: { icon: '🥅', label: 'eigen goal', color: '#c9d2dc' },
-  yellow: { icon: '🟨', label: 'geel', color: '#F4B92E' },
-  red: { icon: '🟥', label: 'rood', color: '#ff6b73' },
-  yr: { icon: '🟥', label: '2e geel → rood', color: '#ff6b73' },
+  small: { icon: '⏱️', label: '2 min', color: '#F4B92E' },
+  big: { icon: '⏱️', label: '5 min', color: '#ff6b73' },
 }
 
 // Freeze-scherm bij rust/einde.
 function BreakPanel({ info, teams, children }: { info: PanelInfo; teams: [TeamMeta, TeamMeta]; children: ReactNode }) {
-  // Alle wedstrijd-events (goals + kaarten) chronologisch voor de horizontale tijdlijn.
+  // Alle wedstrijd-events (goals + strafbankje) chronologisch voor de horizontale tijdlijn.
   const matchMin = (half: number, clock: number) => Math.max(0, Math.round((half - 1) * info.halfLen + clock / 60))
   const timelineEvents = [
     ...info.scorers.map((g) => ({ min: matchMin(g.half, g.clock), team: g.team, name: g.name, face: g.face ?? null, kind: (g.ownGoal ? 'og' : 'goal') as TlKind })),
-    ...info.cards.map((c) => ({ min: matchMin(c.half, c.clock), team: c.team, name: c.name, face: c.face, kind: (c.secondYellow ? 'yr' : c.red ? 'red' : 'yellow') as TlKind })),
+    ...info.cards.map((c) => ({ min: matchMin(c.half, c.clock), team: c.team, name: c.name, face: c.face, kind: (c.red ? 'big' : 'small') as TlKind })),
   ].sort((a, b) => a.min - b.min)
   const resultTxt = info.result === 'win' ? '🏆 Gewonnen!' : info.result === 'loss' ? 'Verloren' : info.result === 'draw' ? 'Gelijkspel' : null
   return (
@@ -2498,21 +2447,21 @@ function BreakPanel({ info, teams, children }: { info: PanelInfo; teams: [TeamMe
           </div>
           <div className="h-px w-full bg-white/15" />
           {timelineEvents.length === 0 ? (
-            <p className="pt-3 text-center font-mono text-[11px] text-white/40">Nog geen goals of kaarten</p>
+            <p className="pt-3 text-center font-mono text-[11px] text-white/40">Nog geen goals of straffen</p>
           ) : (
             <div className="flex gap-3 overflow-x-auto pt-3 pb-1">
               {timelineEvents.map((e, i) => {
                 const m = TL_META[e.kind]
                 return (
-                  <div key={i} className="flex shrink-0 flex-col items-center gap-1">
-                    <span className="font-mono text-[10px] tabular-nums text-white/60">{e.min}&apos;</span>
-                    <span className="relative block h-12 w-12 overflow-hidden rounded-full" style={{ boxShadow: `0 0 0 2px ${teams[e.team].shirt}` }}>
-                      <Image src={`/spelers/${e.face ?? 'default.png'}`} alt={e.name} width={48} height={48} className="h-full w-full object-cover" />
-                      <span className="absolute -bottom-1 -right-1 flex h-[22px] w-[22px] items-center justify-center rounded-full bg-wk-bg text-[13px] leading-none ring-1 ring-black/50">{m.icon}</span>
-                    </span>
-                    <span className="max-w-[68px] truncate font-mono text-[9px] uppercase tracking-wide text-white/85">{e.name}</span>
-                    <span className="font-mono text-[8px] font-bold uppercase tracking-[0.12em]" style={{ color: m.color }}>{m.label}</span>
-                  </div>
+                <div key={i} className="flex shrink-0 flex-col items-center gap-1">
+                  <span className="font-mono text-[10px] tabular-nums text-white/60">{e.min}&apos;</span>
+                  <span className="relative block h-12 w-12 overflow-hidden rounded-full" style={{ boxShadow: `0 0 0 2px ${teams[e.team].shirt}` }}>
+                    <Image src={`/spelers/${e.face ?? 'default.png'}`} alt={e.name} width={48} height={48} className="h-full w-full object-cover" />
+                    <span className="absolute -bottom-1 -right-1 flex h-[22px] w-[22px] items-center justify-center rounded-full bg-wk-bg text-[13px] leading-none ring-1 ring-black/50">{m.icon}</span>
+                  </span>
+                  <span className="max-w-[68px] truncate font-mono text-[9px] uppercase tracking-wide text-white/85">{e.name}</span>
+                  <span className="font-mono text-[8px] font-bold uppercase tracking-[0.12em]" style={{ color: m.color }}>{m.label}</span>
+                </div>
                 )
               })}
             </div>
@@ -2565,10 +2514,10 @@ function TeamCrest({ short, shirt, trim, size = 40 }: { short: string; shirt: st
 const ACTION_META: { id: ActionId; label: string }[] = [
   { id: 'kick', label: 'Schot / pass' },
   { id: 'sprint', label: 'Sprint' },
-  { id: 'slide', label: 'Sliding / truc' },
+  { id: 'slide', label: 'Bodycheck' },
   { id: 'switch', label: 'Speler wisselen' },
-  { id: 'chip', label: 'Voorzet / lange bal' },
-  { id: 'feint', label: 'Omhaal (2× = knal)' },
+  { id: 'chip', label: 'Slapshot (laden)' },
+  { id: 'feint', label: 'Spin-o-rama' },
 ]
 const KEY_LABELS: Record<string, string> = {
   Space: 'Spatie', Enter: 'Enter', ShiftLeft: 'Shift', ShiftRight: 'Shift R', ControlLeft: 'Ctrl', ControlRight: 'Ctrl R',

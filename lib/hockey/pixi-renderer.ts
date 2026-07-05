@@ -18,14 +18,12 @@ import {
   GOAL_DEPTH,
   GOAL_WIDTH,
   KICK_COOLDOWN,
-  PENALTY_H,
-  PENALTY_W,
   PITCH_LENGTH,
   PITCH_WIDTH,
   PLAYER_RADIUS,
   PLAYERS_PER_TEAM,
   TUMBLE_TIME,
-  BICYCLE_ANIM_TIME,
+  FEINT_TIME,
 } from './constants'
 import type { GameState, MatchPhase, PlayerState, TeamMeta } from './types'
 
@@ -33,18 +31,16 @@ const VIEW_WORLD_H = 545 // wereld-eenheden verticaal in beeld → zoom (lager =
 const CINE_DUR = 1.0 // duur van de cinematische omhaal-zoom (s): soepel in en weer uit
 const CINE_PEAK = 0.42 // hoeveel extra ingezoomd op de piek van de omhaal
 const FACES_DIR = '/spelers'
-const GRASS_DARK = 0x1f7a37
-const GRASS_LIGHT = 0x249041
 const HEAD_FACTOR = 1.08 // kop-grootte t.o.v. spelerstraal
-const STAND_DEPTH = 170 // diepte van de tribunes rond het veld
-const RUNOFF = 30 // gras-uitloop tussen lijn en tribune
+const STAND_DEPTH = 170 // diepte van de tribunes rond de rink
+const RUNOFF = 30 // ijs-uitloop tussen boarding en tribune
 const CROWD_STEP = 14 // rasterafstand van de toeschouwers
 const CROWD_COLORS = [0xe63946, 0xf4b92e, 0x2d6be5, 0x2ea84b, 0xffffff, 0xd9d2c5, 0xe8b48c, 0x3a4252, 0x8a5a3b]
 const FW_COLORS = [0xffd417, 0xe63946, 0x2d6be5, 0x2ea84b, 0xffffff, 0xff7ad9, 0x7c3aed, 0xff8a3d]
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // We typen Pixi los (any) omdat het dynamisch geladen wordt; de sim-types blijven strikt.
-type Node = { c: any; headGroup: any; head: any; tex: { front: any; left: any; right: any } | null; torso: any; legL: any; legR: any; armL: any; armR: any; ring: any }
+type Node = { c: any; headGroup: any; head: any; tex: { front: any; left: any; right: any } | null; torso: any; legL: any; legR: any; armL: any; armR: any; ring: any; stick: any }
 
 // Drie kijkrichtingen per gezicht via naamconventie: face.png / face-l.png / face-r.png.
 function faceVariants(face: string): { front: string; left: string; right: string } {
@@ -98,6 +94,7 @@ export class PixiSoccerRenderer {
   private started = false
   private prevPhase: MatchPhase | null = null
   private ballSpin = 0
+  private brawlFighters = new Set<number>() // speler-ids die NU op de vuist gaan (mep-pose)
   private vw = 0
   private vh = 0
   // Venue + weer (willekeurig per wedstrijd, puur cosmetisch)
@@ -134,7 +131,7 @@ export class PixiSoccerRenderer {
       height: canvas.clientHeight || 540,
       antialias: true,
       backgroundAlpha: 1,
-      background: this.venue === 'zaal' ? 0x07090c : this.venue === 'strand' ? 0x0f2233 : this.venue === 'sneeuw' ? 0x223041 : 0x0b1a12,
+      background: 0x0c1420, // koude, donkere ijshal rond de rink
       resolution: dpr,
       autoDensity: true,
     })
@@ -253,11 +250,11 @@ export class PixiSoccerRenderer {
       return
     }
 
-    // Stadion (standaard): beton-kader + trapsgewijze rand + gras-uitloop + reclameborden.
+    // IJshal: beton-kader + trapsgewijze rand + koude ijs-uitloop + reclameborden.
     g.rect(-D, -D, L + 2 * D, W + 2 * D).fill(0x141a24)
     g.rect(-D * 0.66, -D * 0.66, L + 2 * D * 0.66, W + 2 * D * 0.66).fill(0x1b2430)
     g.rect(-D * 0.33, -D * 0.33, L + 2 * D * 0.33, W + 2 * D * 0.33).fill(0x222c3a)
-    g.rect(-RUNOFF, -RUNOFF, L + 2 * RUNOFF, W + 2 * RUNOFF).fill(0x1c8039)
+    g.rect(-RUNOFF, -RUNOFF, L + 2 * RUNOFF, W + 2 * RUNOFF).fill(0xb9cddd)
     this.world.addChild(g)
     this.buildAdBoards(10)
 
@@ -363,42 +360,45 @@ export class PixiSoccerRenderer {
     const g = new PIXI.Graphics()
     const L = PITCH_LENGTH
     const W = PITCH_WIDTH
-    // Vloer per venue: gras-maaibanen / houten parket (zaal) / geharkt zand (strand).
-    if (this.venue === 'zaal') {
-      const planks = 22
-      const ph = W / planks
-      for (let i = 0; i < planks; i++) g.rect(0, i * ph, L, ph + 1).fill(i % 2 === 0 ? 0x9a6a34 : 0xa5763c)
-    } else if (this.venue === 'strand') {
-      const bands = 26
-      const bw2 = L / bands
-      for (let i = 0; i < bands; i++) g.rect(i * bw2, 0, bw2 + 1, W).fill(i % 2 === 0 ? 0xE3C68A : 0xDDBE7C)
-    } else if (this.venue === 'sneeuw') {
-      const bands = 16
-      const bw3 = L / bands
-      for (let i = 0; i < bands; i++) g.rect(i * bw3, 0, bw3 + 1, W).fill(i % 2 === 0 ? 0xf3f7fb : 0xe4ecf3) // besneeuwde banen
-    } else {
-      const bands = 16
-      const bw = L / bands
-      for (let i = 0; i < bands; i++) g.rect(i * bw, 0, bw + 1, W).fill(i % 2 === 0 ? GRASS_DARK : GRASS_LIGHT)
+    // IJsvloer: koud wit met subtiele banen (dweilsporen van de zamboni).
+    const bands = 18
+    const bw = L / bands
+    for (let i = 0; i < bands; i++) g.rect(i * bw, 0, bw + 1, W).fill(i % 2 === 0 ? 0xeaf2f8 : 0xe1ebf4)
+    // Lichte ijsglans in het midden.
+    g.ellipse(L / 2, W / 2, L * 0.32, W * 0.34).fill({ color: 0xffffff, alpha: 0.16 })
+
+    const RED = { width: 8, color: 0xd23b47, alpha: 0.85 }
+    const BLUE = { width: 8, color: 0x2d5fb8, alpha: 0.85 }
+    const THIN_RED = { width: 3, color: 0xd23b47, alpha: 0.8 }
+
+    // Middenlijn (rood) + blauwe lijnen (zone-grenzen op 1/3 en 2/3).
+    g.moveTo(L / 2, 0).lineTo(L / 2, W).stroke(RED)
+    g.moveTo(L * 0.335, 0).lineTo(L * 0.335, W).stroke(BLUE)
+    g.moveTo(L * 0.665, 0).lineTo(L * 0.665, W).stroke(BLUE)
+    // Middencirkel (blauw) + middenstip.
+    g.circle(L / 2, W / 2, CENTER_CIRCLE_R).stroke({ width: 3, color: 0x2d5fb8, alpha: 0.8 })
+    g.circle(L / 2, W / 2, 7).fill({ color: 0x2d5fb8, alpha: 0.9 })
+    // Vier face-off-cirkels met stip (in beide eindzones).
+    const foR = 64
+    for (const fx of [L * 0.17, L * 0.83]) {
+      for (const fy of [W * 0.27, W * 0.73]) {
+        g.circle(fx, fy, foR).stroke(THIN_RED)
+        g.circle(fx, fy, 5).fill({ color: 0xd23b47, alpha: 0.9 })
+      }
     }
-    // Lijnkleur: op sneeuw donkere/blauwe lijnen (wit-op-wit is onzichtbaar), op zand vaag wit, verder helder wit.
-    const line = this.venue === 'sneeuw'
-      ? { width: 3, color: 0x5b6b7d, alpha: 0.7 }
-      : this.venue === 'strand'
-        ? { width: 3, color: 0xffffff, alpha: 0.45 }
-        : { width: 3, color: 0xffffff, alpha: 0.72 }
-    // buitenlijnen + middenlijn + cirkel
-    g.rect(0, 0, L, W).stroke(line)
-    g.moveTo(L / 2, 0).lineTo(L / 2, W).stroke(line)
-    g.circle(L / 2, W / 2, CENTER_CIRCLE_R).stroke(line)
-    g.circle(L / 2, W / 2, 6).fill({ color: 0xffffff, alpha: 0.72 })
-    // strafschopgebieden
-    g.rect(0, W / 2 - PENALTY_H / 2, PENALTY_W, PENALTY_H).stroke(line)
-    g.rect(L - PENALTY_W, W / 2 - PENALTY_H / 2, PENALTY_W, PENALTY_H).stroke(line)
+    // Doellijnen (dun rood, over de hele breedte) + goal crease (lichtblauw halfrond).
+    g.moveTo(2, 0).lineTo(2, W).stroke(THIN_RED)
+    g.moveTo(L - 2, 0).lineTo(L - 2, W).stroke(THIN_RED)
+    const creaseR = 56
+    g.arc(0, W / 2, creaseR, -Math.PI / 2, Math.PI / 2).fill({ color: 0x9fc4e8, alpha: 0.5 }).stroke(THIN_RED)
+    g.arc(L, W / 2, creaseR, Math.PI / 2, Math.PI * 1.5).fill({ color: 0x9fc4e8, alpha: 0.5 }).stroke(THIN_RED)
+    // Boarding: stevige rand met een gele kickplate onderaan (arcade-look).
+    g.rect(0, 0, L, W).stroke({ width: 10, color: 0xf7f9fb, alpha: 0.95 })
+    g.rect(0, 0, L, W).stroke({ width: 3, color: 0xd8b23a, alpha: 0.8 })
     // doelen (netjes gevuld + omlijnd)
     const gy = W / 2 - GOAL_WIDTH / 2
-    g.rect(-GOAL_DEPTH, gy, GOAL_DEPTH, GOAL_WIDTH).fill({ color: 0xffffff, alpha: 0.12 }).stroke({ width: 3.5, color: 0xffffff, alpha: 0.9 })
-    g.rect(L, gy, GOAL_DEPTH, GOAL_WIDTH).fill({ color: 0xffffff, alpha: 0.12 }).stroke({ width: 3.5, color: 0xffffff, alpha: 0.9 })
+    g.rect(-GOAL_DEPTH, gy, GOAL_DEPTH, GOAL_WIDTH).fill({ color: 0xd23b47, alpha: 0.15 }).stroke({ width: 3.5, color: 0xd23b47, alpha: 0.9 })
+    g.rect(L, gy, GOAL_DEPTH, GOAL_WIDTH).fill({ color: 0xd23b47, alpha: 0.15 }).stroke({ width: 3.5, color: 0xd23b47, alpha: 0.9 })
     this.world.addChild(g)
     // doelnetten (mazenraster) — trillen kort bij een goal
     this.netL = new PIXI.Graphics()
@@ -448,7 +448,6 @@ export class PixiSoccerRenderer {
     const kit = p.role === 'GK' ? meta.keeper : meta.shirt
     const r = PLAYER_RADIUS
     const SKIN = 0xe8b48c
-    const SHOE = 0x1b1b1b
 
     // schaduw op de grond (aparte laag, onder iedereen)
     const sh = new PIXI.Graphics()
@@ -464,10 +463,12 @@ export class PixiSoccerRenderer {
     ring.visible = false
 
     // beentjes met schoentjes — getekend vanaf de heup omlaag (wat groter)
+    // Hockeybroek-pijp + witte schaatsschoen + zilverkleurig ijzer eronder.
     const makeLeg = () => {
       const g = new PIXI.Graphics()
-      g.roundRect(-r * 0.21, 0, r * 0.42, r * 0.62, r * 0.16).fill(SKIN).stroke({ width: 1, color: 0x000000, alpha: 0.3 })
-      g.roundRect(-r * 0.28, r * 0.5, r * 0.56, r * 0.24, r * 0.1).fill(SHOE)
+      g.roundRect(-r * 0.23, 0, r * 0.46, r * 0.5, r * 0.14).fill(shadeHex(kit, -0.35)).stroke({ width: 1, color: 0x000000, alpha: 0.3 }) // broekspijp in donkere teamkleur
+      g.roundRect(-r * 0.26, r * 0.42, r * 0.52, r * 0.3, r * 0.09).fill(0xf2f4f7).stroke({ width: 1, color: 0x9aa4b0, alpha: 0.8 }) // schaatsschoen (wit)
+      g.rect(-r * 0.24, r * 0.74, r * 0.48, r * 0.07).fill(0xcfd8e0) // het ijzer
       return g
     }
     const legL = makeLeg()
@@ -489,7 +490,9 @@ export class PixiSoccerRenderer {
     // (leest als een tenue i.p.v. een bolletje; extra hoog voor duidelijke teamkleur)
     const torso = new PIXI.Graphics()
     torso.roundRect(-r * 0.86, -r * 0.86, r * 1.72, r * 1.56, r * 0.3).fill(kit).stroke({ width: 2, color: meta.trim, alpha: 0.95 })
-    torso.poly([-r * 0.26, -r * 0.86, r * 0.26, -r * 0.86, 0, -r * 0.46]).fill(0xffffff)
+    // schouderpads: brede balk over de schouders (hockey-silhouet) + borststreep in trim-kleur
+    torso.roundRect(-r * 0.98, -r * 0.92, r * 1.96, r * 0.42, r * 0.2).fill(shadeHex(kit, -0.18)).stroke({ width: 1.5, color: meta.trim, alpha: 0.8 })
+    torso.rect(-r * 0.86, -r * 0.2, r * 1.72, r * 0.16).fill(meta.trim)
     // Rugnummer op de onderkant van het shirt (keeper = 1). Kind van de torso → bobt vanzelf mee.
     const shirtNo = (p.id % PLAYERS_PER_TEAM) + 1
     const num = new PIXI.Text({ text: String(shirtNo), style: { fontFamily: 'Arial', fontSize: 18, fontWeight: '900', fill: 0xffffff, stroke: { color: 0x000000, width: 3.5 } } })
@@ -520,12 +523,26 @@ export class PixiSoccerRenderer {
       headGroup.addChild(head)
     }
 
+    // Helm: dome in teamkleur bovenop de kop (met een lichte glans en een randje).
+    const helmet = new PIXI.Graphics()
+    helmet.arc(0, -headR * 0.32, headR * 0.78, Math.PI, 0).fill(shadeHex(kit, -0.1)).stroke({ width: 1.6, color: 0x11141a, alpha: 0.4 })
+    helmet.roundRect(-headR * 0.8, -headR * 0.38, headR * 1.6, headR * 0.16, headR * 0.07).fill(shadeHex(kit, -0.28))
+    helmet.ellipse(-headR * 0.3, -headR * 0.72, headR * 0.22, headR * 0.12).fill({ color: 0xffffff, alpha: 0.35 })
+    headGroup.addChild(helmet)
+
+    // Stick: schacht + blad, gedragen rechts-voor; zwaait mee en gaat omhoog bij de windup.
+    const stick = new PIXI.Graphics()
+    stick.roundRect(-r * 0.06, -r * 0.1, r * 0.12, r * 1.5, r * 0.05).fill(0x8a5a2b).stroke({ width: 1, color: 0x000000, alpha: 0.3 }) // schacht
+    stick.roundRect(-r * 0.09, r * 1.32, r * 0.52, r * 0.16, r * 0.06).fill(0x2a2d33) // blad (tape)
+    stick.pivot.set(0, -r * 0.1)
+    stick.rotation = 0.5
+
     // arms vóór de torso zodat ze altijd zichtbaar blijven (ook wanneer ze bij het rennen
-    // naar binnen zwaaien); daarna pas de kop bovenop.
-    c.addChild(ring, legL, legR, torso, armL, armR, headGroup)
+    // naar binnen zwaaien); daarna pas de kop bovenop. De stick zit onder de armen.
+    c.addChild(ring, legL, legR, torso, armL, armR, stick, headGroup)
     this.entityLayer.addChild(c)
     this.legPhase[p.id] = 0
-    this.nodes[p.id] = { c, headGroup, head, tex, torso, legL, legR, armL, armR, ring }
+    this.nodes[p.id] = { c, headGroup, head, tex, torso, legL, legR, armL, armR, ring, stick }
   }
 
   // Loop-animatie: stappende beentjes (tempo ~ snelheid), torso/kop-bob, kleine kop-turn
@@ -581,24 +598,27 @@ export class PixiSoccerRenderer {
     }
     // kop iets meedraaien met de looprichting (subtiel; de plaatjes doen het meeste werk)
     n.headGroup.position.set(fx * r * 0.1, -r * 1.5 - bob)
-    // tuimel-pose: omvergelopen → tuimelt over de kop (2,4 slag, uitdempend), ledematen spartelen,
-    // en een squash bij de landing. Anders: sliding-pose (bijna plat) of rechtop.
+
+    // Stick: ALTIJD zichtbaar — hij spiegelt mee naar de kant waar de speler heen kijkt en
+    // steekt laag naast het lijf uit (blad op het ijs), dus nooit verstopt achter kop of torso.
+    // Windup (E vasthouden) tilt 'm op; vlak na het schot zwiept-ie door.
+    const winding = p.charge > 0.12
+    const swinging = p.kickCooldown > KICK_COOLDOWN * 0.45
+    const stickSide = fx < -0.05 ? -1 : 1 // kijk je links → stick links (gespiegeld)
+    n.stick.position.set(stickSide * r * 0.78, -r * 0.12 - bob)
+    n.stick.scale.set(stickSide, 1) // spiegelen → blad wijst altijd van het lijf af
+    n.stick.rotation = swinging ? 1.35 : winding ? -0.75 - Math.min(1, p.charge) * 0.7 : 0.62 + Math.sin(ph) * 0.06
+
+    // tuimel-pose: gecheckt → tuimelt over het ijs; check-pose: schouder erin; spin-o-rama: rondje.
     n.c.scale.set(1, 1)
-    if ((p.bicycleTimer ?? 0) > 0) {
-      // OMHAAL: het poppetje klapt achterover — kop zakt laag, béíde benen zwiepen hoog de lucht in
-      // (voeten boven, hoofd beneden). Bewust géén volledige spin: dat oogde als een kopbal/pirouette.
-      const prog = 1 - p.bicycleTimer / BICYCLE_ANIM_TIME // 0→1
-      const strike = Math.sin(Math.min(1, prog * 1.4) * Math.PI) // 0→1→0, piek vroeg = het trapmoment
-      const sign = p.facing.x >= 0 ? 1 : -1
-      n.c.rotation = sign * strike * 0.5 // lichte kanteling voor dynamiek (geen rondje)
-      n.c.scale.set(1 + strike * 0.05, 1 + strike * 0.05)
-      // Kop omlaag/achterover, torso iets omhoog, benen gestrekt hoog boven het lichaam.
-      n.headGroup.position.set(-sign * strike * r * 0.5, -r * 1.5 + strike * r * 2.3)
-      n.torso.position.set(0, r * 0.05 - strike * r * 0.25)
-      n.legL.position.set(-r * 0.32 - sign * strike * r * 0.25, HIP_Y - strike * r * 2.0)
-      n.legR.position.set(r * 0.32 - sign * strike * r * 0.25, HIP_Y - strike * r * 2.3)
-      n.armL.rotation = -1.5 - strike * 0.9
-      n.armR.rotation = 1.5 + strike * 0.9
+    if (this.brawlFighters.has(p.id)) {
+      // VECHTPARTIJ: in de kraag gegrepen — vuisten razendsnel om en om, licht voorover.
+      const t = performance.now() * 0.022
+      const dir = p.facing.x >= 0 ? 1 : -1
+      n.c.rotation = dir * 0.14
+      n.armL.rotation = -1.35 + Math.sin(t + p.id * 2.1) * 1.0
+      n.armR.rotation = 1.35 - Math.sin(t * 1.27 + p.id * 1.4) * 1.0
+      n.stick.rotation = 2.2 // stick valt naar het ijs — handschoenen uit!
     } else if (p.tumbleTimer > 0) {
       const prog = 1 - p.tumbleTimer / TUMBLE_TIME // 0→1
       const ease = 1 - (1 - prog) * (1 - prog) // ease-out → snel begin, zachte landing
@@ -612,8 +632,17 @@ export class PixiSoccerRenderer {
       n.legL.position.set(-r * 0.34, HIP_Y - Math.abs(flail) * r * 0.5)
       n.legR.position.set(r * 0.34, HIP_Y - Math.abs(Math.sin(prog * 26 + 1)) * r * 0.5)
     } else if (p.slideTimer > 0 && p.slideTackle) {
-      n.c.rotation = p.facing.x >= 0 ? 1.45 : -1.45 // bijna plat op het gras
-      n.legR.position.set(r * 0.4, HIP_Y - r * 0.5) // gestrekt been vooruit
+      // BODYCHECK: schouder erin — voorover leunen in de dash-richting (geen platte sliding).
+      const lean = p.facing.x >= 0 ? 1 : -1
+      n.c.rotation = lean * 0.42
+      n.c.scale.set(1.05, 0.93) // iets ingedoken
+      n.armL.rotation = -1.15
+      n.armR.rotation = 1.15
+    } else if (p.feintTimer > 0) {
+      // SPIN-O-RAMA: één volledige pirouette over de duur van de move (de puck draait mee).
+      const prog = 1 - p.feintTimer / FEINT_TIME
+      const dir = p.facing.x >= 0 ? 1 : -1
+      n.c.rotation = dir * prog * Math.PI * 2
     } else {
       n.c.rotation = 0
     }
@@ -741,14 +770,11 @@ export class PixiSoccerRenderer {
 
     const c = new PIXI.Container()
     const g = new PIXI.Graphics()
-    // Bal-skin per venue: op sneeuw een oranje winterbal (beter zichtbaar), anders wit met zwarte panelen.
-    const snow = this.venue === 'sneeuw'
-    const base = snow ? 0xff7a1a : 0xffffff
-    const panel = snow ? 0x7a2e00 : 0x141414
-    g.circle(0, 0, BALL_RADIUS).fill(base).stroke({ width: 1.2, color: 0x000000, alpha: 0.35 })
-    // een paar "panelen" zodat de rotatie zichtbaar is
-    g.circle(0, -BALL_RADIUS * 0.35, BALL_RADIUS * 0.28).fill(panel)
-    g.circle(BALL_RADIUS * 0.4, BALL_RADIUS * 0.35, BALL_RADIUS * 0.2).fill(panel)
+    // De puck: platte zwarte schijf (ellips voor het top-down-perspectief) met een grijze rand
+    // en een klein logo-stipje zodat de rotatie/glide zichtbaar blijft op het witte ijs.
+    g.ellipse(0, BALL_RADIUS * 0.22, BALL_RADIUS * 1.15, BALL_RADIUS * 0.55).fill(0x101216) // zijkant
+    g.ellipse(0, 0, BALL_RADIUS * 1.15, BALL_RADIUS * 0.62).fill(0x1c2026).stroke({ width: 1.2, color: 0x3a414c, alpha: 0.9 }) // bovenkant
+    g.circle(0, 0, BALL_RADIUS * 0.22).fill({ color: 0x4a5563, alpha: 0.9 })
     c.addChild(g)
     this.entityLayer.addChild(c)
     this.ballNode = c
@@ -905,6 +931,13 @@ export class PixiSoccerRenderer {
     this.world.position.set(this.vw / 2 - this.cam.x * zoom + shx, this.vh / 2 - this.cam.y * zoom + shy)
 
     // spelers (met loop-animatie: zwaaiende beentjes, torso-bob, trap-pose)
+    // Wie is er aan het knokken? (mep-pose + stofwolkjes; alleen tijdens de 'fight'-fase)
+    this.brawlFighters.clear()
+    if (state.brawl && state.brawl.phase === 'fight') {
+      this.brawlFighters.add(state.brawl.slider)
+      this.brawlFighters.add(state.brawl.victim)
+    }
+
     for (const p of state.players) {
       const n = this.nodes[p.id]
       if (!n) continue
@@ -925,6 +958,9 @@ export class PixiSoccerRenderer {
       this.bicycleWas[p.id] = bicycling
       // stof-veeg tijdens een glijdende tackle
       if (p.slideTimer > 0 && p.slideTackle && dt > 0 && Math.random() < 0.6) this.spawnSlideDust(p.pos.x, p.pos.y, p.facing)
+      if (this.brawlFighters.has(p.id) && dt > 0 && Math.random() < 0.55) {
+        this.spawnSlideDust(p.pos.x + (Math.random() - 0.5) * 26, p.pos.y + (Math.random() - 0.5) * 18, p.facing)
+      }
       this.animatePlayer(p, n, dt)
       if (sh) sh.position.set(p.pos.x, p.pos.y + PLAYER_RADIUS * 1.15)
     }
@@ -991,8 +1027,10 @@ export class PixiSoccerRenderer {
     this.ballNode.zIndex = b.pos.y + PLAYER_RADIUS // y-sortering: meestal vóór de voeten
     const lift = 1 + b.z / 130
     this.ballNode.scale.set(lift * this.ballScale)
+    // Een puck rolt niet: hij ligt plat op het ijs en glijdt. Hooguit een héél trage
+    // pirouette op hoge snelheid (zoals echt), geen bal-rotatie.
     const speed = Math.hypot(b.vel.x, b.vel.y)
-    this.ballSpin += (speed / BALL_RADIUS) * dt * 0.6
+    this.ballSpin += Math.min(1.6, speed * 0.004) * dt
     this.ballNode.rotation = this.ballSpin
     this.ballShadow.position.set(b.pos.x + 1 + b.z * 0.15, b.pos.y + 2)
     const shScale = Math.max(0.45, 1 - b.z / 120) * this.ballScale
