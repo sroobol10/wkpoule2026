@@ -54,6 +54,12 @@ export default function KanonClient() {
   const [over, setOver] = useState<{ title: string; sub: string } | null>(null)
   const [popup, setPopup] = useState<{ text: string; n: number } | null>(null)
   const popupN = useRef(0)
+  // Popups ('☄️ Meteorenregen', combo's) horen kort te flitsen — hier automatisch weer weghalen.
+  useEffect(() => {
+    if (!popup) return
+    const t = setTimeout(() => setPopup((p) => (p && p.n === popup.n ? null : p)), 1400)
+    return () => clearTimeout(t)
+  }, [popup])
 
   useEffect(() => {
     for (const p of PLAYER_POOL) {
@@ -368,15 +374,15 @@ function draw(
   const oy = (ch - H * sc) / 2 + shake
   ctx.save(); ctx.translate(ox, oy); ctx.scale(sc, sc)
 
-  // Lucht + heuvels + grond.
+  // Lucht + heuvels + grond — kleuren komen per level uit de scène (zie SCENES in sim.ts).
   const sky = ctx.createLinearGradient(0, 0, 0, GROUND_Y)
-  sky.addColorStop(0, '#2a3f66'); sky.addColorStop(1, '#7fb0d8')
+  sky.addColorStop(0, g.st.skyTop); sky.addColorStop(1, g.st.skyBot)
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, GROUND_Y)
   if (g.st.meteorT > 0) { ctx.fillStyle = 'rgba(180,40,20,0.18)'; ctx.fillRect(0, 0, W, GROUND_Y) } // meteorenregen kleurt de lucht
-  ctx.fillStyle = '#3f7a4e'
+  ctx.fillStyle = g.st.hill
   for (const hx of [180, 520, 860]) { ctx.beginPath(); ctx.arc(hx, GROUND_Y, 180, Math.PI, 0); ctx.fill() }
-  ctx.fillStyle = '#6b4a2a'; ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y)
-  ctx.fillStyle = '#5aa35f'; ctx.fillRect(0, GROUND_Y - 6, W, 10)
+  ctx.fillStyle = g.st.ground; ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y)
+  ctx.fillStyle = g.st.grass; ctx.fillRect(0, GROUND_Y - 6, W, 10)
 
   // Trampolines op de grond (veren + rood-witte mat).
   for (const p of g.st.pads) {

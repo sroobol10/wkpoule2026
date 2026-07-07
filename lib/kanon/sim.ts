@@ -30,14 +30,22 @@ function randomPower(): PowerKind {
   return (['bomb', 'boost', 'slam', 'split', 'giant', 'magnet', 'rocket'] as PowerKind[])[Math.floor(Math.random() * 7)]
 }
 
-// Zwaartekracht-thema per (solo) level: normaal, ruimte (zweverig) of loodzwaar.
-export type GravTheme = { name: string; grav: number; sky: string }
-const GRAV_THEMES: GravTheme[] = [
-  { name: '', grav: GRAV, sky: '#2a3f66' },
-  { name: '🌙 Ruimte — lage zwaartekracht', grav: GRAV * 0.42, sky: '#0b1030' },
-  { name: '🪐 Zware planeet', grav: GRAV * 1.5, sky: '#3a1f2a' },
-  { name: '🌬️ Stormachtig', grav: GRAV * 0.9, sky: '#33465e' },
+// Scène per level: lucht-gradiënt (boven→onder), heuvel- en grondkleur + zwaartekracht. Elk level
+// ziet er anders uit; sommige scènes veranderen ook de zwaartekracht (ruimte zweverig, planeet zwaar).
+export type Scene = { name: string; skyTop: string; skyBot: string; hill: string; ground: string; grass: string; grav: number }
+const SCENES: Scene[] = [
+  { name: '', skyTop: '#2a3f66', skyBot: '#7fb0d8', hill: '#3f7a4e', ground: '#6b4a2a', grass: '#5aa35f', grav: GRAV }, // heldere dag
+  { name: '🌅 Zonsopkomst', skyTop: '#3a2c5a', skyBot: '#f2a65a', hill: '#4a6b45', ground: '#5e4326', grass: '#6aa35a', grav: GRAV },
+  { name: '🌆 Avondrood', skyTop: '#241436', skyBot: '#e8623a', hill: '#39543f', ground: '#4a3320', grass: '#4f8a54', grav: GRAV },
+  { name: '🌌 Nacht', skyTop: '#080d22', skyBot: '#2a3550', hill: '#1f3a2f', ground: '#2a2418', grass: '#356b3a', grav: GRAV },
+  { name: '❄️ Sneeuwland', skyTop: '#5a7a9a', skyBot: '#d4e6f2', hill: '#dbe9f0', ground: '#aebcc6', grass: '#e8f2f7', grav: GRAV },
+  { name: '🌙 Ruimte — lage zwaartekracht', grav: GRAV * 0.42, skyTop: '#04060f', skyBot: '#161c40', hill: '#262a44', ground: '#33384a', grass: '#3a4258' },
+  { name: '🪐 Zware planeet', grav: GRAV * 1.5, skyTop: '#3a1f2a', skyBot: '#9a5450', hill: '#5a3838', ground: '#472828', grass: '#6a4040' },
+  { name: '🌬️ Stormachtig', grav: GRAV * 0.9, skyTop: '#2c3c50', skyBot: '#61707e', hill: '#3a5545', ground: '#494535', grass: '#4f8a54' },
 ]
+// Grav-neutrale scènes (voor eerlijke 1v1-modi — wel wisselend uiterlijk, geen rare zwaartekracht).
+const FAIR_SCENES = SCENES.filter((sc) => sc.grav === GRAV)
+const pickScene = (arr: Scene[]) => arr[Math.floor(Math.random() * arr.length)]
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
@@ -102,7 +110,8 @@ export type KanonState = {
   skyT: number // afteller voor de volgende 'iets valt uit de lucht' (solo)
   wind: number // horizontale windversnelling op het projectiel (wisselt per schot)
   grav: number // zwaartekracht van dit level (thema)
-  gravName: string // label van het zwaartekracht-thema
+  gravName: string // label van de scène (getoond in de HUD)
+  skyTop: string; skyBot: string; hill: string; ground: string; grass: string // scène-kleuren per level
   nextPower: PowerKind // power van de nu-geladen kop (zichtbaar vóór het schot)
   shotPops: number // koppen gesloopt met het huidige schot (voor combo's)
   blackhole: { x: number; y: number; t: number } | null // actief zwart gat (magnet-power)
@@ -187,7 +196,10 @@ function buildBodies(s: KanonState): void {
       const bx = 620 + Math.random() * 200
       bodies.push({ x: bx, y: GROUND_Y - TARGET_R * 1.8, w: TARGET_R * 3.6, h: TARGET_R * 3.6, vx: 0, vy: 0, angle: 0, va: 0, kind: 'target', face: pick(nT + 3), hp: 3, popped: false, sleep: 1 })
     }
-    s.ammo = [Array.from({ length: nT + 3 }, () => s.picks[0]), []]
+    // Munitie = precies genoeg voor alle doelwitten (boss telt z'n treffers mee) + 1 marge-schot.
+    // Zo kun je écht dóór je schoten heen en wél 'af' gaan — mikken telt weer.
+    const need = bodies.reduce((n, b) => n + (b.kind === 'target' ? (b.hp ?? 1) : 0), 0)
+    s.ammo = [Array.from({ length: Math.max(3, need + 1) }, () => s.picks[0]), []]
   } else if (s.mode === 'tower') {
     for (let c = 0; c < 3; c++) structure(bodies, 560 + c * 120, undefined, pick(c), L)
     s.ammo = [Array.from({ length: 4 }, () => s.picks[0]), Array.from({ length: 4 }, () => s.picks[1])]
@@ -205,12 +217,16 @@ function buildBodies(s: KanonState): void {
 }
 
 export function makeGame(mode: KanonMode, picks: [string, string], targetPool: string[], level = 1): KanonState {
-  // Zwaartekracht-thema: solo krijgt af en toe een gekke variant; 1v1 blijft normaal (eerlijk).
-  const theme = mode === 'solo' && level > 1 && Math.random() < 0.5 ? GRAV_THEMES[1 + Math.floor(Math.random() * (GRAV_THEMES.length - 1))] : GRAV_THEMES[0]
+  // Scène: level 1 solo start neutraal; daarna elke ronde een andere look (soms met gekke zwaartekracht).
+  // 1v1-modi krijgen wél een wisselend uiterlijk, maar altijd normale zwaartekracht (eerlijk).
+  const scene = mode !== 'solo' ? pickScene(FAIR_SCENES)
+    : level <= 1 ? SCENES[0]
+      : pickScene(SCENES)
   const s: KanonState = {
     mode, bodies: [], ball: null, shards: [], turn: 0, ammo: [[], []], score: [0, 0], hits: [0, 0],
     level, picks, targetPool, phase: 'aim', settleT: 0, winner: -1, skyT: 4 + Math.random() * 4,
-    wind: (Math.random() * 2 - 1) * WIND_MAX, grav: theme.grav, gravName: theme.name, nextPower: randomPower(), shotPops: 0,
+    wind: (Math.random() * 2 - 1) * WIND_MAX, grav: scene.grav, gravName: scene.name, nextPower: randomPower(), shotPops: 0,
+    skyTop: scene.skyTop, skyBot: scene.skyBot, hill: scene.hill, ground: scene.ground, grass: scene.grass,
     blackhole: null, meteorT: 0, meteorCd: 14 + Math.random() * 16, pads: [],
   }
   buildBodies(s)
