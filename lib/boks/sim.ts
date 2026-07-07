@@ -10,6 +10,7 @@ import {
   REST_HEAL, REST_TIME, RING_MAX_X, RING_MIN_X, ROUND_TIME, STAM_REGEN_BLOCK,
   STAM_REGEN_IDLE, STAM_REGEN_MOVE, TRAIT_CHIN, TRAIT_DMG, TRAIT_SPEED,
   DODGE_TIME, DODGE_CD, DODGE_STEP,
+  GRAB_WINDUP, GRAB_TOTAL, GRAB_RANGE, GRAB_DMG, GRAB_STAM, GRAB_PUSHBACK, GRAB_STUN,
   UPPERCUT_BLOCK_REDUCE, UPPERCUT_DMG, UPPERCUT_KD, UPPERCUT_RANGE, UPPERCUT_STAM,
   UPPERCUT_TOTAL, UPPERCUT_WINDUP, ULT_BLOCK_REDUCE, ULT_DMG, ULT_GAIN_CLEAN, ULT_GAIN_LAND,
   ULT_GAIN_TAKE, ULT_MAX, ULT_RANGE, ULT_TOTAL, ULT_WINDUP, ULT_RUSH_SPEED,
@@ -39,7 +40,7 @@ export function makeMatch(picks: [{ face: string; name: string; traits: PlayerTr
     f: [mk(0), mk(1)], round: 1, rounds, clock: ROUND_TIME,
     phase: 'fight', count: 0, down: -1, restT: 0, winner: -1, how: null,
     prevJab: [false, false], prevHook: [false, false], prevUppercut: [false, false], prevUltimate: [false, false],
-    prevDodge: [false, false],
+    prevDodge: [false, false], prevGrab: [false, false],
   }
 }
 
@@ -106,6 +107,26 @@ function resolvePunch(m: Match, att: Fighter, kind: PunchKind, events: BoksEvent
   // Ultimate schoon binnen = gegarandeerde knock-down; uppercut vloert met een flinke kans.
   const forceDown = kind === 'ultimate' || (kind === 'uppercut' && Math.random() < UPPERCUT_KD)
   if (def.hp <= 0 || forceDown) knockDown(m, att, def, events)
+}
+
+// Clinch (anti-dodge): raakt dwars door een dodge én een blok heen. Matige schade, flinke
+// terugduw + langere stun. Alleen kort bereik; mis = niks (lange recovery in de state-machine).
+function resolveGrab(m: Match, att: Fighter, events: BoksEvent[]): void {
+  const def = m.f[att.side === 0 ? 1 : 0]
+  const dist = Math.abs(def.x - att.x)
+  if (dist > GRAB_RANGE || def.state === 'down') { events.push({ type: 'grab', by: att.side, hit: false }); return }
+  const dir = att.side === 0 ? 1 : -1
+  let dmg = GRAB_DMG * (1 + (att.traits.tackle - 3) * TRAIT_DMG)
+  dmg *= 1 - (def.traits.tackle - 3) * TRAIT_CHIN
+  def.hp -= dmg
+  def.state = 'hit'
+  def.t = -(GRAB_STUN - HIT_STUN) // extra lange stun: begin de hit-timer eerder zodat-ie langer duurt
+  def.headKnock = 1
+  def.x = clamp(def.x + dir * GRAB_PUSHBACK, RING_MIN_X, RING_MAX_X)
+  att.points += 1
+  att.ultimate = Math.min(ULT_MAX, att.ultimate + ULT_GAIN_LAND)
+  events.push({ type: 'grab', by: att.side, hit: true })
+  if (def.hp <= 0) knockDown(m, att, def, events)
 }
 
 function startRound(m: Match, events: BoksEvent[]): void {
@@ -195,23 +216,36 @@ export function step(m: Match, inputs: [BoksInput, BoksInput], dt: number): Boks
     const uppercutEdge = input.uppercut && !m.prevUppercut[f.side]
     const ultimateEdge = input.ultimate && !m.prevUltimate[f.side]
     const dodgeEdge = input.dodge && !m.prevDodge[f.side]
+    const grabEdge = input.grab && !m.prevGrab[f.side]
     m.prevJab[f.side] = input.jab
     m.prevHook[f.side] = input.hook
     m.prevUppercut[f.side] = input.uppercut
     m.prevUltimate[f.side] = input.ultimate
     m.prevDodge[f.side] = input.dodge
+    m.prevGrab[f.side] = input.grab
 
     if (f.headKnock > 0) f.headKnock = Math.max(0, f.headKnock - dt * 3)
     if (f.dodgeCd > 0) f.dodgeCd = Math.max(0, f.dodgeCd - dt)
 
     const punching = f.state === 'jab' || f.state === 'hook' || f.state === 'uppercut' || f.state === 'ultimate'
-    // Stamina-herstel per houding (niet tijdens een stoot).
+    // Stamina-herstel per houding (niet tijdens een stoot/clinch).
     const regen = f.state === 'block' ? STAM_REGEN_BLOCK : Math.abs(input.move) > 0.1 ? STAM_REGEN_MOVE : STAM_REGEN_IDLE
-    if (!punching && f.state !== 'dodge') f.stamina = Math.min(MAX_STAM, f.stamina + regen * dt)
+    if (!punching && f.state !== 'dodge' && f.state !== 'grab') f.stamina = Math.min(MAX_STAM, f.stamina + regen * dt)
 
     if (f.state === 'hit') {
       f.t += dt
       if (f.t >= HIT_STUN) { f.state = 'idle'; f.t = 0 }
+      continue
+    }
+    // Clinch (anti-dodge): korte duw die dwars door dodge/blok raakt.
+    if (f.state === 'grab') {
+      f.t += dt / speedMul(f)
+      if (!f.struck && f.t >= GRAB_WINDUP) {
+        f.struck = true
+        resolveGrab(m, f, events)
+        if (m.phase !== 'fight') return events
+      }
+      if (f.t >= GRAB_TOTAL) { f.state = 'idle'; f.t = 0 }
       continue
     }
     // Ontwijken: hop naar achteren (weg van de tegenstander) met i-frames.
@@ -254,6 +288,13 @@ export function step(m: Match, inputs: [BoksInput, BoksInput], dt: number): Boks
     // Ontwijken (W/↑): snappe uitwijk met i-frames — voorrang op stoten, mits niet op cooldown.
     if (dodgeEdge && f.dodgeCd <= 0) {
       f.state = 'dodge'; f.t = 0
+      continue
+    }
+
+    // Clinch (F): de anti-dodge. Raakt door een dodge/blok heen.
+    if (grabEdge && f.stamina >= GRAB_STAM) {
+      f.state = 'grab'; f.t = 0; f.struck = false
+      f.stamina -= GRAB_STAM
       continue
     }
 

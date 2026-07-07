@@ -9,7 +9,7 @@ import { AnalogTouchControls } from '@/components/playground/analog-touch-contro
 import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile, isCoarsePointer } from '@/components/playground/mobile-play'
 import {
   FIXED_DT, MAX_STEPS_PER_FRAME, CONTROL_RADIUS, PLAYER_RADIUS, MAX_CHARGE_TIME,
-  PLAYERS_PER_TEAM, SLOWMO_TIME,
+  PLAYERS_PER_TEAM, SLOWMO_TIME, BOOST_DURATION,
 } from '@/lib/hockey/constants'
 import {
   createInitialState, KITS, COUNTRIES, PLAYER_POOL, FORMATIONS, formationById, buildTeamMeta, randomAiTeam, ensureDistinctKit,
@@ -69,6 +69,12 @@ const WHISTLE_SOUNDS = ['/sfx/whistle.mp3'] // scheidsfluit (aftrap/overtreding/
 const TACKLE_SOUNDS = ['/sfx/tackle.mp3']   // dreun bij een sliding-tackle die iemand omver loopt
 const YELLOWCARD_SOUNDS = ['/sfx/yellowcard.mp3'] // bij een gele kaart
 const REDCARD_SOUNDS = ['/sfx/redcard.mp3']       // bij een rode kaart
+const ZAMBONI_SOUNDS = ['/sfx/zamboni.mp3'] // brommende dweilmachine (fun)
+const CRITTER_SOUNDS = ['/sfx/splat.mp3']   // octopus/pinguïn ploft op het ijs (fun)
+const DINO_SOUNDS = ['/sfx/dino-roar.mp3']  // T-rex brult op het ijs (fun)
+const BOOST_SOUNDS = ['/sfx/powerup.mp3']   // power-up opgepakt (fun)
+const BOMB_SOUNDS = ['/sfx/boom.mp3']       // TNT-puck explodeert (fun)
+const SIREN_SOUNDS = ['/sfx/goal-siren.mp3'] // extra doelpuntsirene bovenop de goalhoorn
 // Voorgeladen audio-pool → geen decode-vertraging bij de eerste keer (bijv. de kaartfluit).
 const audioPool = new Map<string, HTMLAudioElement>()
 function primeSound(src: string) {
@@ -404,6 +410,11 @@ export default function HockeyClient() {
   const prevBrawlWinnerRef = useRef<number>(-1) // laatste verwerkte brawl-winnaar
   const slowmoUntilRef = useRef<number>(0) // performance.now() tot wanneer de sim vertraagd loopt (volle slapshot)
   const prevStreakerRef = useRef<boolean>(false)
+  const prevZamboniRef = useRef<boolean>(false) // was de zamboni er vorige tick? (fun-toast)
+  const prevCritterRef = useRef<boolean>(false) // was er vorige tick een ijs-beest?
+  const prevPuckBombRef = useRef<boolean>(false) // was de puck vorige tick een bom?
+  const prevExplodeRef = useRef<number>(0) // puckExplodeCount vorige tick
+  const prevBoostRef = useRef<number>(0) // boostPickupCount vorige tick (power-up toast)
   const toastTimerRef = useRef<number | null>(null)
   const goalOverlayTimerRef = useRef<number | null>(null)
   const cardTimerRef = useRef<number | null>(null)
@@ -556,7 +567,7 @@ export default function HockeyClient() {
 
   // Geluiden + kaart-afbeeldingen voorladen → geen vertraging/blanco beeld bij de eerste kaart.
   useEffect(() => {
-    for (const src of [...GOAL_SOUNDS, ...KICK_SOUNDS, ...WHISTLE_SOUNDS, ...TACKLE_SOUNDS, ...YELLOWCARD_SOUNDS, ...REDCARD_SOUNDS]) primeSound(src)
+    for (const src of [...GOAL_SOUNDS, ...KICK_SOUNDS, ...WHISTLE_SOUNDS, ...TACKLE_SOUNDS, ...YELLOWCARD_SOUNDS, ...REDCARD_SOUNDS, ...ZAMBONI_SOUNDS, ...CRITTER_SOUNDS, ...DINO_SOUNDS, ...BOOST_SOUNDS, ...BOMB_SOUNDS, ...SIREN_SOUNDS]) primeSound(src)
     for (const src of ['/spelers/ref-yellow.png', '/spelers/ref-red.png']) { const im = new window.Image(); im.src = src }
   }, [])
 
@@ -735,6 +746,50 @@ export default function HockeyClient() {
         toastTimerRef.current = window.setTimeout(() => setToast(null), 1800)
       }
     }
+    // ── Fun-gimmicks: toasts + geluid (host/lokaal; de gast ziet de puck-gevolgen wél) ──
+    const flashToast = (msg: string, ms: number) => {
+      setToast(msg)
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = window.setTimeout(() => setToast(null), ms)
+    }
+    const zamboniHere = !!s.zamboni
+    if (zamboniHere && !prevZamboniRef.current) {
+      flashToast('🚜 ZAMBONI OP HET IJS!', 2400)
+      pushComment('🚜 De zamboni komt het ijs op — wég allemaal!')
+      playSound(ZAMBONI_SOUNDS, 0.6)
+    }
+    prevZamboniRef.current = zamboniHere
+    const critterHere = !!s.critter
+    if (critterHere && !prevCritterRef.current) {
+      const kind = s.critter?.kind
+      if (kind === 'dino') {
+        flashToast('🦖 T-REX OP HET IJS!', 2600)
+        pushComment('🦖 Een T-REX stampt het ijs op — wég allemaal!')
+        playSound(DINO_SOUNDS, 0.8)
+      } else {
+        const oct = kind === 'octopus'
+        flashToast(oct ? '🐙 OCTOPUS OP HET IJS!' : '🐧 De pinguïn-mascotte!', 2200)
+        pushComment(oct ? '🐙 Er ligt een octopus op het ijs — Detroit-stijl!' : '🐧 De mascotte waggelt het ijs op!')
+        playSound(CRITTER_SOUNDS, 0.7)
+      }
+    }
+    prevCritterRef.current = critterHere
+    // Power-up opgepakt → toast + geluid. Zoek de speler die 'm net kreeg (verse boost-timer).
+    if (s.boostPickupCount !== prevBoostRef.current) {
+      prevBoostRef.current = s.boostPickupCount
+      const grabber = s.players.find((p) => p.boost && p.boost.t > BOOST_DURATION - 0.4)
+      const k = grabber?.boost?.kind
+      const label = k === 'speed' ? '⚡ SUPERSNEL!' : k === 'giant' ? '🐘 REUS!' : k === 'tiny' ? '🐜 MINI!' : k === 'magnet' ? '🧲 MAGNEET!' : '✨ POWER-UP!'
+      flashToast(label, 1500)
+      playSound(BOOST_SOUNDS, 0.8)
+    }
+    const bombHere = s.puckBomb > 0
+    if (bombHere && !prevPuckBombRef.current) { flashToast('💣 TIKKENDE PUCK — tik \'m weg!', 1800); pushComment('💣 De puck tikt af… wie durft \'m nog te raken?') }
+    prevPuckBombRef.current = bombHere
+    if (s.puckExplodeCount !== prevExplodeRef.current) {
+      if (s.puckExplodeCount > prevExplodeRef.current) { flashToast('💥 BOEM!', 1600); pushComment('💥 De puck ontplofte — iedereen ligt op het ijs!'); playSound(BOMB_SOUNDS, 0.85) }
+      prevExplodeRef.current = s.puckExplodeCount
+    }
     // Fase-overgangen: aftel-animatie bij (her)start, korte overtredings-flits bij een vrije trap,
     // en de controls-hint verdwijnt zodra het spel echt loopt.
     if (s.phase !== prevPhaseUiRef.current) {
@@ -775,6 +830,7 @@ export default function HockeyClient() {
       setGoalInfo(g ? { name: p?.name ?? '', teamName: s.teams[g.team]?.name ?? '', face: p?.face ?? null, team: g.team, ownGoal: g.ownGoal, color: s.teams[g.team].shirt, kind: s.lastGoalKind } : null)
       if (g) pushComment(goalQuip(p?.name ?? 'Iemand', s.teams[g.team]?.name ?? 'het team', g.ownGoal ? 'owngoal' : s.lastGoalKind))
       playSound(GOAL_SOUNDS)
+      playSound(SIREN_SOUNDS, 0.55) // doelpuntsirene bovenop de goalhoorn (fun)
       // Eerst een korte on-pitch viering laten zien; dan pas het full-screen goalscherm.
       if (goalOverlayTimerRef.current) clearTimeout(goalOverlayTimerRef.current)
       goalOverlayTimerRef.current = window.setTimeout(() => setOverlay('goal'), 900)

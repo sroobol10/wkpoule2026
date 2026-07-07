@@ -5,7 +5,7 @@
 
 import {
   HOOK_RANGE, HOOK_STAM, JAB_RANGE, JAB_STAM, LOW_STAM, RING_MAX_X, RING_MIN_X,
-  UPPERCUT_RANGE, UPPERCUT_STAM, ULT_MAX, ULT_RANGE,
+  UPPERCUT_RANGE, UPPERCUT_STAM, ULT_MAX, ULT_RANGE, GRAB_RANGE, GRAB_STAM,
 } from './constants'
 // idle-input met alle knoppen los
 import type { BoksInput, Fighter, Match, Side } from './types'
@@ -16,7 +16,7 @@ export function aiInput(m: Match, side: Side, difficulty: number): BoksInput {
   const diff = Math.max(0, Math.min(1, difficulty))
   const me = m.f[side]
   const opp = m.f[1 - side]
-  const idle: BoksInput = { move: 0, block: false, jab: false, hook: false, uppercut: false, ultimate: false, dodge: false }
+  const idle: BoksInput = { move: 0, block: false, jab: false, hook: false, uppercut: false, ultimate: false, dodge: false, grab: false }
 
   // Neergeslagen → rammen om op te staan (betere AI "ramt" sneller).
   if (m.phase === 'count' && m.down === side) return { ...idle, jab: Math.random() < 0.28 + 0.3 * diff }
@@ -32,12 +32,18 @@ export function aiInput(m: Match, side: Side, difficulty: number): BoksInput {
     return { ...idle, ultimate: true }
   }
 
+  // Clinch (anti-dodge) van de AI zelf: als de speler staat te turtelen (blokken/ontwijken) en
+  // dichtbij is, af en toe erdoorheen duwen. Zeldzaam, schaalt met de moeilijkheid.
+  if ((opp.state === 'block' || opp.state === 'dodge') && dist < GRAB_RANGE - 6 && me.stamina >= GRAB_STAM && Math.random() < 0.015 + 0.05 * diff) {
+    return { ...idle, grab: true }
+  }
+
   // Ontwijken op een aankomende zware stoot (hoek/uppercut/ultimate). Schaalt STERK met de
   // moeilijkheid: op makkelijk wijkt-ie bijna nooit uit, op pittig een echte kunst.
   if (oppPunching && me.dodgeCd <= 0 && dist < UPPERCUT_RANGE + 24) {
-    const d = opp.state === 'ultimate' ? 0.1 + 0.55 * diff
-      : opp.state === 'uppercut' ? 0.05 + 0.5 * diff
-      : opp.state === 'hook' ? 0.02 + 0.35 * diff
+    const d = opp.state === 'ultimate' ? 0.06 + 0.6 * diff
+      : opp.state === 'uppercut' ? 0.02 + 0.5 * diff
+      : opp.state === 'hook' ? 0.3 * diff
       : 0
     if (d > 0 && Math.random() < d) return { ...idle, dodge: true }
   }
@@ -45,10 +51,10 @@ export function aiInput(m: Match, side: Side, difficulty: number): BoksInput {
   // Blokken op een aankomende stoot — hoe zwaarder de stoot, hoe beter te lezen. Ook dit veel
   // milder op makkelijk (lage basiskans), zodat je stoten er gewoon doorkomen.
   if (oppPunching && dist < HOOK_RANGE + 30 && me.stamina > 12) {
-    const p = opp.state === 'ultimate' ? 0.15 + 0.6 * diff
-      : opp.state === 'uppercut' ? 0.1 + 0.55 * diff
-      : opp.state === 'hook' ? 0.08 + 0.5 * diff
-      : 0.03 + 0.4 * diff
+    const p = opp.state === 'ultimate' ? 0.1 + 0.6 * diff
+      : opp.state === 'uppercut' ? 0.05 + 0.55 * diff
+      : opp.state === 'hook' ? 0.04 + 0.5 * diff
+      : 0.02 + 0.4 * diff
     if (Math.random() < p) return { ...idle, block: true }
   }
 
@@ -69,11 +75,13 @@ export function aiInput(m: Match, side: Side, difficulty: number): BoksInput {
   const pressing = beat > 0.15
 
   if (pressing) {
-    if (dist > JAB_RANGE - 4) return { ...idle, move: dir * (0.5 + 0.4 * diff) } // instappen tot slagbereik
+    if (dist > JAB_RANGE - 4) return { ...idle, move: dir * (0.4 + 0.45 * diff) } // instappen tot slagbereik
     // Op slagafstand: af en toe uithalen (welke stoot wisselt met het ritme), verder stilstaan.
-    if (me.stamina >= HOOK_STAM && jitter > 0.5 && Math.random() < 0.014 + 0.024 * diff) return { ...idle, hook: true }
-    if (me.stamina >= UPPERCUT_STAM && jitter < -0.55 && Math.random() < 0.008 + 0.016 * diff) return { ...idle, uppercut: true }
-    if (me.stamina >= JAB_STAM && Math.random() < 0.025 + 0.05 * diff) return { ...idle, jab: true }
+    // De aanvalslust schaalt sterk met de moeilijkheid → op makkelijk gooit-ie veel minder.
+    const atk = 0.35 + 0.65 * diff
+    if (me.stamina >= HOOK_STAM && jitter > 0.5 && Math.random() < (0.008 + 0.03 * diff) * atk) return { ...idle, hook: true }
+    if (me.stamina >= UPPERCUT_STAM && jitter < -0.55 && Math.random() < (0.005 + 0.02 * diff) * atk) return { ...idle, uppercut: true }
+    if (me.stamina >= JAB_STAM && Math.random() < (0.012 + 0.06 * diff) * atk) return { ...idle, jab: true }
     return idle // blijf staan op afstand — niet de speler volgen
   }
 

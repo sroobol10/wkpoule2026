@@ -24,7 +24,7 @@ export type VSide = 0 | 1 // 0 = links, 1 = rechts
 export type VInput = { moveX: number; jump: boolean; hit: boolean; dink: boolean; dive: boolean; block: boolean }
 
 export type VPlayer = {
-  id: number // 0,1 = team links · 2,3 = team rechts
+  id: number // 0 = speler links (team 0) · 1 = speler rechts (team 1) — 1v1
   team: VSide
   face: string
   name: string
@@ -41,7 +41,7 @@ export type VBall = { x: number; y: number; vx: number; vy: number }
 export type VEvent = { to: VSide; reason: string } | null
 
 export type VState = {
-  players: [VPlayer, VPlayer, VPlayer, VPlayer]
+  players: [VPlayer, VPlayer]
   ball: VBall
   touches: number // aanrakingen van het team dat 'm nu speelt
   lastTeam: VSide | -1
@@ -57,15 +57,15 @@ export function makeVState(faces: { face: string; name: string }[]): VState {
     id, team, face: faces[id].face, name: faces[id].name, x, y: FLOOR, vy: 0, swingT: 0, diveT: 0, blockT: 0,
   })
   return {
-    players: [mk(0, 0, 180), mk(1, 0, 360), mk(2, 1, W - 360), mk(3, 1, W - 180)],
-    ball: { x: 180, y: FLOOR - 240, vx: 0, vy: 0 },
+    players: [mk(0, 0, W * 0.28), mk(1, 1, W * 0.72)],
+    ball: { x: W * 0.28, y: FLOOR - 240, vx: 0, vy: 0 },
     touches: 0,
     lastTeam: -1,
     serving: Math.random() < 0.5 ? 0 : 1,
     live: false,
-    prevHit: [false, false, false, false],
-    prevDink: [false, false, false, false],
-    prevDive: [false, false, false, false],
+    prevHit: [false, false],
+    prevDink: [false, false],
+    prevDive: [false, false],
   }
 }
 
@@ -90,7 +90,7 @@ function arcTo(fromX: number, fromY: number, targetX: number): { vx: number; vy:
 
 // Serveren: nette boog diagonaal het vak in (haalt altijd het net).
 export function serve(s: VState, side: VSide, aim: number): void {
-  const server = s.players[side === 0 ? 0 : 3]
+  const server = s.players[side]
   const dir = side === 0 ? 1 : -1
   const fromX = server.x
   const fromY = server.y - 120

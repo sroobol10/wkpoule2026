@@ -14,10 +14,22 @@ export const MAX_HP = 100
 export const MAX_STAM = 100
 
 // ── Dodge (ontwijken) ──────────────────────────────────────────────────────────
-// Snelle uitwijk-beweging: hop naar achteren + duik. Tijdens de i-frames mist elke stoot.
+// Snelle uitwijk-beweging: hop naar achteren + duik. Tijdens de i-frames mist elke stóót
+// (maar NIET de clinch — dat is de anti-dodge).
 export const DODGE_TIME = 0.26 // duur van de uitwijk (i-frames) — snappy
-export const DODGE_CD = 0.42 // herstel voor je opnieuw kunt ontwijken
+export const DODGE_CD = 0.72 // herstel voor je opnieuw kunt ontwijken (voorkomt eindeloos dodge-spam)
 export const DODGE_STEP = 95 // hoe ver je naar achteren wijkt
+
+// ── Clinch (F) — de ANTI-DODGE ─────────────────────────────────────────────────
+// Een korte duw/greep die dwars door een dodge én een blok heen raakt: matige schade maar
+// een flinke terugduw + stun. Mis = lange recovery (dan sta je open). Kort bereik.
+export const GRAB_WINDUP = 0.16
+export const GRAB_TOTAL = 0.5
+export const GRAB_RANGE = 84
+export const GRAB_DMG = 12
+export const GRAB_STAM = 14
+export const GRAB_PUSHBACK = 76 // duwt de tegenstander flink naar achteren
+export const GRAB_STUN = 0.5 // seconden versuft na een clinch (langer dan een gewone treffer)
 
 // ── Stoten ───────────────────────────────────────────────────────────────────
 // Alles bliksemsnel: korte windup + kort herstel → rappe, dynamische uitwisselingen.

@@ -16,12 +16,18 @@ export const NET_H = 16
 export const GRAV = 900
 export const BOUNCE = 0.72
 export const BALL_R = 5
-export const PADDLE_REACH = 46 // hoe ver in x je bat de bal nog raakt
-export const REACH_Z = 48 // hoe ver in z (diepte) je bat de bal nog raakt — je moet er dus bij staan
+export const PADDLE_REACH = 52 // hoe ver in x je bat de bal nog raakt
+export const REACH_Z = 54 // hoe ver in z (diepte) je bat de bal nog raakt
+export const PLAYER_TRACK_SPEED = 360 // hoe snel je bat AUTOMATISCH naar de bal schuift (positioneren = auto)
 export const PLAYER_Z = 8 // z-vlak van het speler-bat (net vóór de tafelrand)
 export const OPP_Z = L - 8
 export const PZ_MIN = -8 // speler mag iets achter de baseline...
 export const PZ_MAX = NET_Z - 30 // ...en naar voren tot vlak bij het net (korte ballen halen)
+export const PZ1_MIN = NET_Z + 30 // idem gespiegeld voor speler 1 (online-gast)
+export const PZ1_MAX = L + 8
+
+// Losse besturing per speler (offline: speler 0 = mens, speler 1 = AI; online: beide mens).
+export type PongInput = { aimX: number; aimDepth: number; charge: boolean; dink: boolean; lob: boolean; smash: boolean }
 export const HITZONE = 78 // (tegenstander) bal binnen deze z van z'n rand → slagbaar
 export const MISS_Z = 34 // bal zó ver voorbij je bat-vlak → gemist → punt tegen
 
@@ -76,9 +82,9 @@ export type PongMatch = {
   serveT: number // aftel-timer vóór de serve
   pointT: number // pauze na een punt
   winner: Side | -1
-  prevDink: boolean // edge-detectie voor de speciale slagen (Q/E/R)
-  prevLob: boolean
-  prevSmash: boolean
+  prevDink: [boolean, boolean] // edge-detectie voor de speciale slagen (Q/E/R), per speler
+  prevLob: [boolean, boolean]
+  prevSmash: [boolean, boolean]
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
@@ -97,9 +103,9 @@ export function makeMatch(faces: [{ face: string; name: string }, { face: string
     serveT: 1.1,
     pointT: 0,
     winner: -1,
-    prevDink: false,
-    prevLob: false,
-    prevSmash: false,
+    prevDink: [false, false],
+    prevLob: [false, false],
+    prevSmash: [false, false],
   }
 }
 
@@ -128,27 +134,22 @@ function aimShot(b: PongBall, tx: number, tz: number, pace: number, maxT = 0.88)
   b.vz = (tz - b.z) / T
 }
 
-// Een echte slag: `power` (0..1, uit de laadtijd) bepaalt snelheid + diepte, `quality` (0..1) =
-// hoe dicht bij de sweet spot getimed, `paddleVx` = zijwaartse batsnelheid → daarmee mik je naar
-// de zijkanten. Weinig kracht = een hoog, traag boogballetje; volle kracht = een vlakke smash die
-// bij slechte timing riskant lang/in-het-net gaat.
-function hitBall(m: PongMatch, side: Side, power: number, quality: number, paddleVx: number, kind: SwingKind = 'normal'): void {
+// Een echte slag: `power` (0..1, uit de laadtijd) bepaalt de snelheid, `quality` (0..1) = hoe dicht
+// bij de sweet spot getimed. Je MIKT los: `aimX` (-1..1) = links/rechts op de overkant, `aimDepth`
+// (0..1) = kort/diep. Weinig kracht = een trage bal; volle kracht = een vlakke smash die bij
+// slechte timing riskant lang/in-het-net gaat.
+function hitBall(m: PongMatch, side: Side, power: number, quality: number, aimX: number, aimDepth: number, kind: SwingKind = 'normal'): void {
   const b = m.ball
   let pace = (PACE_MIN + (PACE_MAX - PACE_MIN) * power) * (0.78 + 0.22 * quality)
-  // Diepte op de overkant: veel kracht = dieper, weinig kracht = korter. Iets ondieper dan het
-  // tafeleinde zodat een nette slag niet vanzelf uit vliegt.
-  let depth = (0.30 + 0.40 * power) * (L / 2 - 30) + 20
+  // Diepte op de overkant (jij kiest 'm): iets ondieper dan het tafeleinde zodat een nette slag
+  // niet vanzelf uit vliegt.
+  let depth = (0.28 + 0.5 * clamp(aimDepth, 0, 1)) * (L / 2 - 30) + 20
   let maxT = 0.88 // boog-plafond; laag = strak
   // Speciale slagen (Q/E/R) overschrijven de vorm.
   if (kind === 'dink') { pace = 150; depth = 22; maxT = 1.15 } // net over het net plukken (drop shot)
   else if (kind === 'lob') { pace = 150; depth = L / 2 - 26; maxT = 1.6 } // trage, hoge boog diep achterin
   else if (kind === 'smash') { pace = PACE_MAX * 1.12; depth = L / 2 - 24; maxT = 0.7 } // vlakke knal diep
-  // Plaatsing: vooral wáár je de bal op je bat raakt (bal links/rechts van je bat → daarheen),
-  // met een klein beetje bijsturing door je batbeweging. Zo plaats je 'm bewust i.p.v. dat-ie
-  // wegschiet zodra je beweegt.
-  const offset = (b.x - m.players[side].x) / (PADDLE_REACH * 1.25) // -1..1, contactpunt op je bat
-  const aimX = clamp(offset + paddleVx / 720, -1, 1)
-  const tx = clamp(aimX * (HW - 10), -HW + 6, HW - 6)
+  const tx = clamp(clamp(aimX, -1, 1) * (HW - 8), -HW + 6, HW - 6)
   aimShot(b, tx, side === 0 ? NET_Z + depth : NET_Z - depth, pace, maxT)
   // Alleen een écht slecht getimede knal is riskant (uit of in het net) — milder dan voorheen.
   if ((power > 0.72 || kind === 'smash') && quality < 0.38) {
@@ -201,57 +202,78 @@ function swingQuality(t: number): number {
   return clamp(1 - Math.abs(t - SWING_SWEET) / half, 0, 1)
 }
 
-export function step(m: PongMatch, playerX: number, playerZ: number, playerCharge: boolean, dink: boolean, lob: boolean, smash: boolean, aiX: number, difficulty: number, dt: number): PongEvent[] {
+// Eén speler besturen: automatisch positioneren naar de bal + mikken/laden/specials verwerken.
+function controlSide(m: PongMatch, side: Side, inp: PongInput, dt: number): void {
+  const p = m.players[side]
+  const b = m.ball
+  const toMe = m.phase === 'rally' && (side === 0 ? (b.vz < 0 && b.z < NET_Z) : (b.vz > 0 && b.z > NET_Z))
+  const zmin = side === 0 ? PZ_MIN : PZ1_MIN
+  const zmax = side === 0 ? PZ_MAX : PZ1_MAX
+  const home = side === 0 ? PLAYER_Z : OPP_Z
+  const tx = toMe ? clamp(b.x, -HW, HW) : 0
+  const tz = toMe ? clamp(b.z, zmin, zmax) : home
+  const pcap = PLAYER_TRACK_SPEED * dt
+  const prevX = p.x
+  p.x = clamp(p.x + clamp(tx - p.x, -pcap, pcap), -HW, HW)
+  p.z = clamp(p.z + clamp(tz - p.z, -pcap, pcap), zmin, zmax)
+  p.vx = dt > 0 ? (p.x - prevX) / dt : 0
+
+  // Speciale slagen (Q/E/R): directe swing met een vaste vorm (edge-getriggerd).
+  const trySpec = (held: boolean, prev: boolean, kind: SwingKind, power: number) => {
+    if (held && !prev && !p.swing && m.phase === 'rally') { p.swing = { t: 0, power, face: 'fore', kind, hit: false }; p.charging = false }
+  }
+  trySpec(inp.dink, m.prevDink[side], 'dink', 0.14)
+  trySpec(inp.lob, m.prevLob[side], 'lob', 0.42)
+  trySpec(inp.smash, m.prevSmash[side], 'smash', 0.95)
+  m.prevDink[side] = inp.dink; m.prevLob[side] = inp.lob; m.prevSmash[side] = inp.smash
+
+  // Kracht laden met de spatie: vasthouden = opladen, loslaten = slaan.
+  if (inp.charge && !p.charging && !p.swing && m.phase === 'rally') { p.charging = true; p.chargeT = 0 }
+  if (p.charging) {
+    if (inp.charge) p.chargeT = Math.min(CHARGE_MAX, p.chargeT + dt)
+    else { const power = clamp(POWER_MIN + (p.chargeT / CHARGE_MAX) * (1 - POWER_MIN), POWER_MIN, 1); p.swing = { t: 0, power, face: 'fore', kind: 'normal', hit: false }; p.charging = false }
+  }
+}
+
+// Slag-contact voor een mens-bestuurde kant (swing moet in het contactvenster + bat bij de bal).
+function humanContact(m: PongMatch, side: Side, inp: PongInput, events: PongEvent[]): void {
+  const b = m.ball
+  const p = m.players[side]
+  const incoming = side === 0 ? (b.vz < 0 && b.z < NET_Z && b.z > -MISS_Z) : (b.vz > 0 && b.z > NET_Z && b.z < L + MISS_Z)
+  if (b.owner === side || b.lastBounceSide !== side || !incoming) return
+  const sw = p.swing
+  if (sw && !sw.hit && sw.t >= SWING_HIT_MIN && sw.t <= SWING_HIT_MAX
+    && Math.abs(b.x - p.x) < PADDLE_REACH && Math.abs(b.z - p.z) < REACH_Z) {
+    sw.hit = true
+    sw.face = b.x >= p.x ? 'fore' : 'back'
+    const q = swingQuality(sw.t)
+    hitBall(m, side, sw.power, q, inp.aimX, inp.aimDepth, sw.kind)
+    events.push({ type: 'hit', by: side, power: sw.power, face: sw.face, sweet: q > 0.7 })
+  }
+}
+
+// `in0` = speler 0 (host/lokaal). `guest` gezet → speler 1 is óók mens (online); anders AI.
+export function step(m: PongMatch, in0: PongInput, aiX: number, difficulty: number, dt: number, guest?: PongInput): PongEvent[] {
   const events: PongEvent[] = []
   if (m.phase === 'over') return events
 
-  // Speler-bat: positie (x + diepte z) + zijwaartse snelheid (voor de plaatsing van je slag).
-  const px = clamp(playerX, -HW, HW)
-  m.players[0].vx = dt > 0 ? (px - m.players[0].x) / dt : 0
-  m.players[0].x = px
-  m.players[0].z = clamp(playerZ, PZ_MIN, PZ_MAX)
-  // CPU-bat schuift met een snelheidslimiet naar z'n doel (aiX) → vloeiend, geen getril.
-  const cap = AI_MAX_SPEED * (0.5 + 0.5 * clamp(difficulty, 0, 1)) * dt
-  const ox = clamp(m.players[1].x + clamp(aiX - m.players[1].x, -cap, cap), -HW, HW)
-  m.players[1].vx = dt > 0 ? (ox - m.players[1].x) / dt : 0
-  m.players[1].x = ox
+  controlSide(m, 0, in0, dt)
+  if (guest) {
+    controlSide(m, 1, guest, dt)
+  } else {
+    // CPU-bat schuift met een snelheidslimiet naar z'n doel (aiX) → vloeiend, geen getril.
+    const cap = AI_MAX_SPEED * (0.5 + 0.5 * clamp(difficulty, 0, 1)) * dt
+    const ox = clamp(m.players[1].x + clamp(aiX - m.players[1].x, -cap, cap), -HW, HW)
+    m.players[1].vx = dt > 0 ? (ox - m.players[1].x) / dt : 0
+    m.players[1].x = ox
+  }
 
-  // Speciale slagen (Q/E/R): directe swing met een vaste vorm (edge-getriggerd). Overrulet het laden.
-  const p0 = m.players[0]
-  const special = (held: boolean, prev: boolean, kind: SwingKind, power: number) => {
-    if (held && !prev && !p0.swing && m.phase === 'rally') {
-      p0.swing = { t: 0, power, face: 'fore', kind, hit: false }
-      p0.charging = false
-    }
-  }
-  special(dink, m.prevDink, 'dink', 0.14)
-  special(lob, m.prevLob, 'lob', 0.42)
-  special(smash, m.prevSmash, 'smash', 0.95)
-  m.prevDink = dink
-  m.prevLob = lob
-  m.prevSmash = smash
-
-  // Kracht laden met de spatie: vasthouden = opladen (bat gaat naar achteren), loslaten = slaan.
-  if (playerCharge && !p0.charging && !p0.swing && m.phase === 'rally') {
-    p0.charging = true
-    p0.chargeT = 0
-  }
-  if (p0.charging) {
-    if (playerCharge) {
-      p0.chargeT = Math.min(CHARGE_MAX, p0.chargeT + dt)
-    } else {
-      // losgelaten → slag met de opgebouwde kracht (een tik = lichte boogbal)
-      const power = clamp(POWER_MIN + (p0.chargeT / CHARGE_MAX) * (1 - POWER_MIN), POWER_MIN, 1)
-      p0.swing = { t: 0, power, face: 'fore', kind: 'normal', hit: false }
-      p0.charging = false
-    }
-  }
   // Slag-timers laten lopen; whiff als een slag afloopt zonder de bal te raken.
   for (const p of m.players) {
     if (!p.swing) continue
     p.swing.t += dt
     if (p.swing.t >= SWING_DUR) {
-      if (!p.swing.hit && p.side === 0) events.push({ type: 'whiff', by: 0 })
+      if (!p.swing.hit && (p.side === 0 || guest)) events.push({ type: 'whiff', by: p.side })
       p.swing = null
     }
   }
@@ -305,31 +327,22 @@ export function step(m: PongMatch, playerX: number, playerZ: number, playerCharg
 
   // ── Slag-detectie ──────────────────────────────────────────────────────────
   // Je mag pas terugslaan NÁ precies één stuit op je helft (echte tafeltennis-regel).
-  // Speler (dichtbij): mag pas terugslaan NÁ een stuit op ZIJN helft, en moet dan ACTIEF slaan —
-  // het bat moet in x ÉN in z (diepte) bij de bal staan. Vandaar het vooruit/achteruit lopen.
-  if (b.owner !== 0 && b.lastBounceSide === 0 && b.vz < 0 && b.z < NET_Z && b.z > -MISS_Z) {
-    const p = m.players[0]
-    const sw = p.swing
-    if (sw && !sw.hit && sw.t >= SWING_HIT_MIN && sw.t <= SWING_HIT_MAX
-      && Math.abs(b.x - p.x) < PADDLE_REACH && Math.abs(b.z - p.z) < REACH_Z) {
-      sw.hit = true
-      sw.face = b.x >= p.x ? 'fore' : 'back'
-      const q = swingQuality(sw.t)
-      hitBall(m, 0, sw.power, q, p.vx, sw.kind)
-      events.push({ type: 'hit', by: 0, power: sw.power, face: sw.face, sweet: q > 0.7 })
-    }
-  }
+  humanContact(m, 0, in0, events)
   // Bal voorbij het speler-vlak: stuiterde-ie eerst in jouw helft → jij miste (punt tegenstander);
   // vloog-ie er zonder stuit overheen → de tegenstander sloeg 'm uit (punt voor jou).
   if (b.owner === 1 && b.z <= -MISS_Z) return point(m, b.lastBounceSide === 0 ? 1 : 0, b.lastBounceSide === 0 ? 'jij mist' : 'bal uit', events)
-  // Tegenstander (ver): slaat automatisch als de bal — ná een stuit op ZIJN helft — binnen bereik komt.
-  if (b.owner !== 1 && b.lastBounceSide === 1 && b.vz > 0 && b.z > L - HITZONE && b.z < L + MISS_Z) {
+  // Tegenstander (ver): online-gast slaat zelf (mens), offline slaat de CPU automatisch.
+  if (guest) {
+    humanContact(m, 1, guest, events)
+  } else if (b.owner !== 1 && b.lastBounceSide === 1 && b.vz > 0 && b.z > L - HITZONE && b.z < L + MISS_Z) {
     if (Math.abs(b.x - m.players[1].x) < PADDLE_REACH) {
       const diff = clamp(difficulty, 0, 1)
       const q = 0.45 + 0.5 * diff * Math.random()
       const power = clamp(0.4 + 0.4 * diff * Math.random() + (Math.random() < 0.2 ? 0.3 : 0), 0.15, 1)
       m.players[1].swing = { t: 0, power, face: b.x >= m.players[1].x ? 'fore' : 'back', kind: 'normal', hit: true }
-      hitBall(m, 1, power, q, m.players[1].vx + (Math.random() * 2 - 1) * 40 * (1 - diff))
+      // CPU mikt weg van waar jij staat, met een mikfout die op lage moeilijkheid groter is.
+      const aiAim = clamp(-m.players[0].x / HW * 0.7 + (Math.random() * 2 - 1) * (0.35 + 0.5 * (1 - diff)), -1, 1)
+      hitBall(m, 1, power, q, aiAim, 0.45 + 0.45 * Math.random())
       events.push({ type: 'hit', by: 1, power, face: m.players[1].swing.face, sweet: q > 0.7 })
     }
   }

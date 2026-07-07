@@ -47,7 +47,6 @@ type Props = {
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
   reachedStage?: Record<string, string[]>
-  wonAnyKo?: string[]
   eliminatedTeams?: string[]
 }
 
@@ -80,7 +79,6 @@ export default function KnockoutClient({
   actualWinners = {},
   advancedFromStage = {},
   reachedStage = {},
-  wonAnyKo = [],
   eliminatedTeams = [],
 }: Props) {
   // Bracket is op slot zodra de eerste groepswedstrijd gespeeld is (niet puur op tijd)
@@ -98,7 +96,6 @@ export default function KnockoutClient({
         actualWinners={actualWinners}
         advancedFromStage={advancedFromStage}
         reachedStage={reachedStage}
-        wonAnyKo={wonAnyKo}
         eliminatedTeams={eliminatedTeams}
         slotDist={slotDist}
       />
@@ -236,8 +233,7 @@ function LiveMatchCard({
   const pts     = prediction?.points_awarded
 
   // "Wie koos wat" is standaard open; klapt automatisch in 48u na de aftrap.
-  const collapsedByTime = Date.now() > kickoff.getTime() + 48 * 60 * 60 * 1000
-  const [distOpen, setDistOpen] = useState(!collapsedByTime)
+  const [distOpen, setDistOpen] = useState(() => Date.now() <= kickoff.getTime() + 48 * 60 * 60 * 1000)
 
   function pick(teamId: string) {
     if (closed || isPending) return

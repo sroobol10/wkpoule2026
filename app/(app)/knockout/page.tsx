@@ -141,8 +141,6 @@ export default async function KnockoutPage() {
   const reachedStage: Record<string, string[]> = Object.fromEntries(
     Object.entries(teamsInStage).map(([k, v]) => [k, [...v]]),
   )
-  // Teams die minstens één KO-wedstrijd wonnen (voor "pick is al een ronde door" → groen).
-  const wonAnyKo = [...new Set(Object.values(actualWinners))]
 
   // ── "Wie koos wat" per live KO-wedstrijd (over je eigen league) ─────────────
   // Per deelnemer resolven we de volledige bracket en tellen we, per actueel team
@@ -285,7 +283,6 @@ export default async function KnockoutPage() {
       actualWinners={actualWinners}
       advancedFromStage={advancedFromStage}
       reachedStage={reachedStage}
-      wonAnyKo={wonAnyKo}
       eliminatedTeams={eliminatedTeams}
     />
   )

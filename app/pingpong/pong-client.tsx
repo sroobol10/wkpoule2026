@@ -10,14 +10,22 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PLAYER_POOL } from '@/lib/soccer/teams'
 import {
-  BALL_R, HW, L, NET_H, NET_Z, PADDLE_REACH, PLAYER_Z, PZ_MIN, PZ_MAX, SWING_DUR, CHARGE_MAX,
-  aiPaddleX, makeMatch, step, type PongMatch, type PongPlayer,
+  BALL_R, HW, L, NET_H, NET_Z, PADDLE_REACH, SWING_DUR, CHARGE_MAX,
+  aiPaddleX, makeMatch, step, type PongMatch, type PongPlayer, type PongInput, type PongEvent,
 } from '@/lib/pong/sim'
 import ImmersiveToggle from './immersive-toggle'
 import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile, isCoarsePointer } from '@/components/playground/mobile-play'
 import { TouchGamepad } from '@/components/playground/touch-gamepad'
+import { GameNet, makeRoomCode } from '@/components/playground/game-net'
+import { createSfx, type Sfx } from '@/components/playground/sfx'
 
 const FIXED_DT = 1 / 120
+type Mode = 'ai' | 'online'
+const IDLE_PINPUT: PongInput = { aimX: 0, aimDepth: 0.55, charge: false, dink: false, lob: false, smash: false }
+type PPick = { face: string; name: string }
+type PongStart = { picks: [PPick, PPick]; target: number }
+type PongSnap = { m: PongMatch; ev: PongEvent[] }
+type PongNet = GameNet<PongInput, PongSnap, PongStart, PPick>
 const POOL_ALPHA = [...PLAYER_POOL].sort((a, b) => a.name.localeCompare(b.name, 'nl'))
 const DIFFICULTY = [
   { label: 'Makkelijk', val: 0.3 },
@@ -44,9 +52,10 @@ const project = (x: number, y: number, z: number): Proj => {
 type Game = {
   match: PongMatch
   difficulty: number
-  px: number // wereld-x van het speler-bat
-  pz: number // wereld-z (diepte) van het speler-bat — vooruit/achteruit
+  aimX: number // -1..1 — waar op de overkant je mikt (links/rechts)
+  aimDepth: number // 0..1 — kort/diep
   shakeT: number
+  net?: 'host' | 'guest' // online-rol
 }
 
 export default function PongClient() {
@@ -54,19 +63,32 @@ export default function PongClient() {
   const gameRef = useRef<Game | null>(null)
   const facesRef = useRef<Record<string, HTMLImageElement>>({})
   const keysRef = useRef<Set<string>>(new Set())
-  const mouseXRef = useRef(0) // laatst bekende wereld-x uit de muis
-  const mouseZRef = useRef(PLAYER_Z) // laatst bekende wereld-z (diepte) uit de muis-y
-  const usingMouseRef = useRef(true)
+  const aimXRef = useRef(0) // -1..1 mikrichting uit de muis (of pijltjes)
+  const aimDepthRef = useRef(0.55) // 0..1 mikdiepte uit de muis-y
   const mouseChargeRef = useRef(false) // muisknop ingedrukt = kracht laden (loslaten = slaan)
   const sixSevenRef = useRef<HTMLAudioElement | null>(null)
   const wowRef = useRef<HTMLAudioElement | null>(null)
+  const sfxRef = useRef<Sfx | null>(null)
+  useEffect(() => { sfxRef.current = createSfx(['pingpong-hit', 'pingpong-net']) }, [])
+  // Online 1v1
+  const netRef = useRef<PongNet | null>(null)
+  const guestInputRef = useRef<PongInput>(IDLE_PINPUT)
+  const guestPickRef = useRef<PPick | null>(null)
+  const pendingSnapRef = useRef<PongSnap | null>(null)
+  const lastSnapSendRef = useRef(0)
+  const lastInputSendRef = useRef(0)
 
   const [stage, setStage] = useState<'menu' | 'playing'>('menu')
   const { isTouch, portrait } = useLandscapeGate()
+  const [mode, setMode] = useState<Mode>('ai')
   const [difficulty, setDifficulty] = useState(0.58)
   const [target, setTarget] = useState(11)
   const [youPick, setYouPick] = useState(-1)
   const [oppPick, setOppPick] = useState(-1)
+  const [netRole, setNetRole] = useState<'host' | 'guest' | null>(null)
+  const [roomCode, setRoomCode] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [netConnected, setNetConnected] = useState(false)
   const [popup, setPopup] = useState<{ text: string; color: string; n: number } | null>(null)
   const [matchOver, setMatchOver] = useState<{ name: string; score: [number, number] } | null>(null)
   const popupN = useRef(0)
@@ -94,17 +116,73 @@ export default function PongClient() {
     gameRef.current = {
       match: makeMatch([{ face: you.face, name: you.name }, { face: opp.face, name: `${opp.name} (CPU)` }], target),
       difficulty,
-      px: 0,
-      pz: PLAYER_Z,
+      aimX: 0,
+      aimDepth: 0.55,
       shakeT: 0,
     }
-    mouseXRef.current = 0
-    mouseZRef.current = PLAYER_Z
+    aimXRef.current = 0
+    aimDepthRef.current = 0.55
     setPopup(null)
     setMatchOver(null)
     enterImmersiveIfMobile()
     setStage('playing')
   }, [difficulty, target, youPick, oppPick])
+
+  // ── Online 1v1 ──────────────────────────────────────────────────────────────
+  const pickOf = useCallback((idx: number): PPick => {
+    const p = idx >= 0 ? POOL_ALPHA[idx] : POOL_ALPHA[Math.floor(Math.random() * POOL_ALPHA.length)]
+    return { face: p.face, name: p.name }
+  }, [])
+
+  const leaveNet = useCallback(() => {
+    netRef.current?.leave(); netRef.current = null
+    guestPickRef.current = null; pendingSnapRef.current = null
+    setNetRole(null); setNetConnected(false); setRoomCode('')
+  }, [])
+
+  const startOnlineGame = useCallback((picks: [PPick, PPick], tgt: number, role: 'host' | 'guest') => {
+    guestInputRef.current = IDLE_PINPUT
+    pendingSnapRef.current = null
+    aimXRef.current = 0; aimDepthRef.current = 0.55
+    gameRef.current = { match: makeMatch(picks, tgt), difficulty, aimX: 0, aimDepth: 0.55, shakeT: 0, net: role }
+    setPopup(null); setMatchOver(null)
+    enterImmersiveIfMobile()
+    setStage('playing')
+  }, [difficulty])
+
+  const hostGame = useCallback(() => {
+    leaveNet()
+    const code = makeRoomCode(Date.now())
+    setRoomCode(code); setNetRole('host')
+    const net: PongNet = new GameNet('pong', 'host', code, {
+      onGuestJoined: () => setNetConnected(true),
+      onPeerLeft: () => setNetConnected(false),
+      onJoin: (pick) => { guestPickRef.current = pick },
+      onInput: (cmd) => { guestInputRef.current = cmd },
+    })
+    net.connect(); netRef.current = net
+  }, [leaveNet])
+
+  const joinGame = useCallback(() => {
+    const code = joinCode.trim().toUpperCase()
+    if (code.length < 4) return
+    leaveNet()
+    setRoomCode(code); setNetRole('guest')
+    const myPick = pickOf(youPick)
+    const net: PongNet = new GameNet('pong', 'guest', code, {
+      onGuestJoined: () => { setNetConnected(true); net.sendJoin(myPick, myPick.name) },
+      onPeerLeft: () => setNetConnected(false),
+      onStart: (payload) => startOnlineGame(payload.picks, payload.target, 'guest'),
+      onSnapshot: (snap) => { pendingSnapRef.current = snap },
+    })
+    net.connect(); netRef.current = net
+  }, [joinCode, leaveNet, pickOf, youPick, startOnlineGame])
+
+  const startOnlineHost = useCallback(() => {
+    const picks: [PPick, PPick] = [pickOf(youPick), guestPickRef.current ?? pickOf(-1)]
+    netRef.current?.sendStart({ picks, target })
+    startOnlineGame(picks, target, 'host')
+  }, [pickOf, youPick, target, startOnlineGame])
 
   useEffect(() => {
     if (stage !== 'playing') return
@@ -119,26 +197,19 @@ export default function PongClient() {
       setPopup({ text, color, n: popupN.current })
     }
 
-    // Muis-x = bat-x, muis-y = diepte (omhoog bewegen = naar het net toe, korte ballen halen).
-    const fracToZ = (fracY: number) => {
-      const t = Math.max(0, Math.min(1, (fracY - 0.45) / 0.55)) // alleen de onderste schermhelft stuurt de diepte
-      return PZ_MIN + (1 - t) * (PZ_MAX - PZ_MIN)
-    }
-    const onMove = (e: MouseEvent) => {
+    // Positioneren gaat automatisch — met de muis MIK je alleen: x = links/rechts op de overkant,
+    // y = kort (onder) of diep (boven). Je bat volgt de bal vanzelf.
+    const aimFrom = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
-      mouseXRef.current = ((e.clientX - rect.left) / rect.width - 0.5) * 2 * HW * 1.06
-      mouseZRef.current = fracToZ((e.clientY - rect.top) / rect.height)
-      usingMouseRef.current = true
+      aimXRef.current = Math.max(-1, Math.min(1, ((clientX - rect.left) / rect.width - 0.5) * 2))
+      aimDepthRef.current = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height))
     }
+    const onMove = (e: MouseEvent) => aimFrom(e.clientX, e.clientY)
     canvas.addEventListener('mousemove', onMove)
-    // Mobiel: sleep met je vinger over de tafel = batje-x + diepte. Alleen voor touch-pointers, zodat
-    // de desktop-muisbesturing exact hetzelfde blijft werken.
+    // Mobiel: sleep met je vinger over het beeld om te mikken (zelfde mapping als de muis).
     const onTouchDrag = (e: PointerEvent) => {
       if (e.pointerType !== 'touch') return
-      const rect = canvas.getBoundingClientRect()
-      mouseXRef.current = ((e.clientX - rect.left) / rect.width - 0.5) * 2 * HW * 1.06
-      mouseZRef.current = fracToZ((e.clientY - rect.top) / rect.height)
-      usingMouseRef.current = true
+      aimFrom(e.clientX, e.clientY)
       e.preventDefault()
     }
     canvas.addEventListener('pointerdown', onTouchDrag)
@@ -149,50 +220,43 @@ export default function PongClient() {
     canvas.addEventListener('mousedown', onMouseDown)
     window.addEventListener('mouseup', onMouseUp)
 
-    const update = (g: Game, dt: number) => {
-      // Bat-x + diepte(z): A/D + W/S (of pijltjes) hebben voorrang als je ze gebruikt, anders de muis.
-      // Het bat beweegt met een snelheidslimiet (dus niet 1:1 met de muis): rustiger te sturen,
-      // en geen wilde uithalen meer waardoor je slag naar de zijkant wegschiet.
-      const PADDLE_SPD = 210 // wereld-eenheden/s zijwaarts
-      const Z_SPD = 190 // vooruit/achteruit
+    // Lokale mikinput (muis/toetsen) → PongInput. `g` alleen voor de aim-lerp met toetsen.
+    const localInput = (g: Game, dt: number): PongInput => {
       const kl = keys.has('KeyA') || keys.has('ArrowLeft')
       const kr = keys.has('KeyD') || keys.has('ArrowRight')
-      const kf = keys.has('KeyW') || keys.has('ArrowUp') // vooruit (naar het net)
-      const kb = keys.has('KeyS') || keys.has('ArrowDown') // achteruit
-      if (kl || kr || kf || kb) {
-        usingMouseRef.current = false
-        g.px += ((kr ? 1 : 0) - (kl ? 1 : 0)) * PADDLE_SPD * dt
-        g.pz += ((kf ? 1 : 0) - (kb ? 1 : 0)) * Z_SPD * dt
-      } else if (usingMouseRef.current) {
-        const sx = PADDLE_SPD * dt
-        const sz = Z_SPD * dt
-        g.px += Math.max(-sx, Math.min(sx, mouseXRef.current - g.px)) // schuift naar de muis, gecapt
-        g.pz += Math.max(-sz, Math.min(sz, mouseZRef.current - g.pz))
+      const kf = keys.has('KeyW') || keys.has('ArrowUp') // dieper mikken
+      const kb = keys.has('KeyS') || keys.has('ArrowDown') // korter mikken
+      if (kl || kr) g.aimX = Math.max(-1, Math.min(1, g.aimX + ((kr ? 1 : 0) - (kl ? 1 : 0)) * 1.6 * dt))
+      else g.aimX = aimXRef.current
+      if (kf || kb) g.aimDepth = Math.max(0, Math.min(1, g.aimDepth + ((kf ? 1 : 0) - (kb ? 1 : 0)) * 1.2 * dt))
+      else g.aimDepth = aimDepthRef.current
+      return {
+        aimX: g.aimX, aimDepth: g.aimDepth,
+        charge: keys.has('Space') || mouseChargeRef.current,
+        dink: keys.has('KeyQ'), lob: keys.has('KeyE'), smash: keys.has('KeyR'),
       }
-      g.px = Math.max(-HW, Math.min(HW, g.px))
-      g.pz = Math.max(PZ_MIN, Math.min(PZ_MAX, g.pz))
+    }
 
-      // Kracht laden met de spatie of linkermuisknop (mobiel: knop). Loslaten = slaan.
-      const charge = keys.has('Space') || mouseChargeRef.current
-      const dink = keys.has('KeyQ')
-      const lob = keys.has('KeyE')
-      const smash = keys.has('KeyR')
-      const aiX = aiPaddleX(g.match)
-      const events = step(g.match, g.px, g.pz, charge, dink, lob, smash, aiX, g.difficulty, dt)
+    // Events → geluid/popups/shake, vanuit het perspectief van de lokale speler (0 = host/offline, 1 = gast).
+    const applyEvents = (g: Game, events: PongEvent[]) => {
+      const me: 0 | 1 = g.net === 'guest' ? 1 : 0
       for (const ev of events) {
         if (ev.type === 'point') {
           g.shakeT = 0.18
+          if (ev.reason === 'in het net') sfxRef.current?.play('pingpong-net')
           const [sa, sb] = g.match.score
           if ((sa === 6 && sb === 7) || (sa === 7 && sb === 6)) {
             const a = sixSevenRef.current
             if (a) { try { a.currentTime = 0; void a.play() } catch { /* autoplay geweigerd → stil */ } }
           }
-          show(ev.to === 0 ? `Punt! 🏓 (${ev.reason})` : `Tegenpunt — ${ev.reason}`, ev.to === 0 ? '#4FA8E0' : '#E63946')
-        } else if (ev.type === 'hit' && ev.by === 0) {
+          show(ev.to === me ? `Punt! 🏓 (${ev.reason})` : `Tegenpunt — ${ev.reason}`, ev.to === me ? '#4FA8E0' : '#E63946')
+        } else if (ev.type === 'hit') {
+          sfxRef.current?.play('pingpong-hit', 0.5 + ev.power * 0.5) // de bat-tik (harder = luider)
+          if (ev.by !== me) continue
           if (ev.power > 0.6) g.shakeT = Math.max(g.shakeT, ev.power * 0.2)
           if (ev.power > 0.72) show(`💥 ${ev.face === 'fore' ? 'FOREHAND' : 'BACKHAND'} SMASH!`, '#f4b92e')
           else if (ev.power < 0.26) show(`🪁 boogbal (${ev.face === 'fore' ? 'forehand' : 'backhand'})`, '#7db8e8')
-          if (ev.sweet && ev.power > 0.85) { // perfect getimede smash → wow-factor
+          if (ev.sweet && ev.power > 0.85) {
             const w = wowRef.current
             if (w) { try { w.currentTime = 0; void w.play() } catch { /* autoplay geweigerd → stil */ } }
           }
@@ -202,19 +266,50 @@ export default function PongClient() {
       }
     }
 
+    const update = (g: Game, dt: number) => {
+      const in0 = localInput(g, dt)
+      const aiX = g.net ? 0 : aiPaddleX(g.match)
+      const guest = g.net === 'host' ? guestInputRef.current : undefined
+      const events = step(g.match, in0, aiX, g.difficulty, dt, guest)
+      applyEvents(g, events)
+      return events
+    }
+
     let raf = 0
     let last = performance.now()
     let acc = 0
+    let hostEvents: PongEvent[] = []
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
       const g = gameRef.current
       if (!g) return
-      acc += Math.min(0.1, (now - last) / 1000)
+      const rdt = Math.min(0.1, (now - last) / 1000)
       last = now
+
+      // ── Gast: geen sim — render de host-snapshots en stuur je eigen input (speler 1). ──
+      if (g.net === 'guest') {
+        const snap = pendingSnapRef.current
+        if (snap) { g.match = snap.m; if (snap.ev.length) applyEvents(g, snap.ev); pendingSnapRef.current = null }
+        if (now - lastInputSendRef.current > 33) {
+          netRef.current?.sendInput(localInput(g, rdt))
+          lastInputSendRef.current = now
+        }
+        if (g.shakeT > 0) g.shakeT = Math.max(0, g.shakeT - rdt)
+        draw(ctx, canvas, g, facesRef.current)
+        return
+      }
+
+      acc += rdt
       while (acc >= FIXED_DT) {
-        update(g, FIXED_DT)
+        const ev = update(g, FIXED_DT)
+        if (g.net === 'host' && ev.length) for (const e of ev) hostEvents.push(e)
         if (g.shakeT > 0) g.shakeT = Math.max(0, g.shakeT - FIXED_DT)
         acc -= FIXED_DT
+      }
+      if (g.net === 'host' && now - lastSnapSendRef.current > 33) {
+        netRef.current?.sendSnapshot({ m: g.match, ev: hostEvents })
+        hostEvents = []
+        lastSnapSendRef.current = now
       }
       draw(ctx, canvas, g, facesRef.current)
     }
@@ -223,7 +318,7 @@ export default function PongClient() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space'].includes(e.code)) e.preventDefault()
       keys.add(e.code)
-      if (e.code === 'Escape') setStage('menu')
+      if (e.code === 'Escape') { leaveNet(); setStage('menu') }
     }
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code)
     window.addEventListener('keydown', onKeyDown)
@@ -240,7 +335,7 @@ export default function PongClient() {
       window.removeEventListener('keyup', onKeyUp)
       keys.clear()
     }
-  }, [stage])
+  }, [stage, leaveNet])
 
   return (
     <div data-game-root className="fixed inset-0 bg-wk-bg text-wk-text">
@@ -252,28 +347,83 @@ export default function PongClient() {
           </div>
 
           <div className="w-full max-w-4xl space-y-4 rounded-2xl border border-white/10 bg-wk-surface/70 p-6 backdrop-blur-sm">
-            <MenuRow label="Moeilijkheid">
-              <Seg options={DIFFICULTY.map((d) => d.label)} value={DIFFICULTY.findIndex((d) => d.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} />
+            <MenuRow label="Modus">
+              <Seg options={['Vs computer', 'Online 1v1']} value={mode === 'ai' ? 0 : 1}
+                onChange={(i) => { setMode(i === 0 ? 'ai' : 'online'); if (i !== 1) leaveNet() }} />
             </MenuRow>
-            <MenuRow label="Tot">
-              <Seg options={['7', '11']} value={target === 7 ? 0 : 1} onChange={(i) => setTarget(i === 0 ? 7 : 11)} />
-            </MenuRow>
-            {/* Jij links, tegenstander rechts — rustig gescheiden. */}
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <div className="sm:border-r sm:border-white/10 sm:pr-5">
-                <FacePicker label="Jij" pick={youPick} onPick={(i) => setYouPick(youPick === i ? -1 : i)} color="#4FA8E0" />
+            {mode === 'ai' && (
+              <MenuRow label="Moeilijkheid">
+                <Seg options={DIFFICULTY.map((d) => d.label)} value={DIFFICULTY.findIndex((d) => d.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} />
+              </MenuRow>
+            )}
+            {(mode === 'ai' || netRole === 'host') && (
+              <MenuRow label="Tot">
+                <Seg options={['7', '11']} value={target === 7 ? 0 : 1} onChange={(i) => setTarget(i === 0 ? 7 : 11)} />
+              </MenuRow>
+            )}
+
+            {mode === 'ai' ? (
+              <>
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                  <div className="sm:border-r sm:border-white/10 sm:pr-5">
+                    <FacePicker label="Jij" pick={youPick} onPick={(i) => setYouPick(youPick === i ? -1 : i)} color="#4FA8E0" />
+                  </div>
+                  <FacePicker label="Tegenstander" pick={oppPick} onPick={(i) => setOppPick(oppPick === i ? -1 : i)} color="#E63946" />
+                </div>
+                <button onClick={startMatch}
+                  className="w-full rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-4 font-score text-3xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25">
+                  Opslaan 🏓
+                </button>
+              </>
+            ) : netRole === null ? (
+              <div className="space-y-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-wk-muted">Speel 1v1 tegen een collega op een ander scherm.</p>
+                <button onClick={hostGame}
+                  className="w-full rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-3 font-score text-2xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25">
+                  Nieuwe kamer maken
+                </button>
+                <div className="flex items-center gap-2">
+                  <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 4))} placeholder="CODE"
+                    className="w-28 rounded-lg border border-white/15 bg-wk-bg2 px-3 py-2 text-center font-mono text-lg uppercase tracking-[0.3em] text-wk-text outline-none focus:border-wk-gold/60" />
+                  <button onClick={joinGame} disabled={joinCode.trim().length < 4}
+                    className="flex-1 rounded-lg border border-white/20 py-2 font-mono text-sm uppercase tracking-[0.14em] text-wk-soft transition hover:border-white/40 disabled:opacity-40">
+                    Meedoen met code
+                  </button>
+                </div>
               </div>
-              <FacePicker label="Tegenstander" pick={oppPick} onPick={(i) => setOppPick(oppPick === i ? -1 : i)} color="#E63946" />
-            </div>
-            <button onClick={startMatch}
-              className="w-full rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-4 font-score text-3xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25">
-              Opslaan 🏓
-            </button>
+            ) : netRole === 'host' ? (
+              <div className="space-y-3">
+                <p className="text-center font-mono text-sm uppercase tracking-[0.16em] text-wk-soft">
+                  Kamercode: <span className="font-score text-3xl tracking-[0.3em] text-wk-gold">{roomCode}</span>
+                </p>
+                <p className="text-center font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: netConnected ? '#5fbf6e' : '#f4b92e' }}>
+                  {netConnected ? '✓ Tegenstander verbonden' : 'Wachten op tegenstander…'}
+                </p>
+                <FacePicker label="Jij (dichtbij)" pick={youPick} onPick={(i) => setYouPick(youPick === i ? -1 : i)} color="#4FA8E0" />
+                <div className="flex gap-2">
+                  <button onClick={startOnlineHost} disabled={!netConnected}
+                    className="flex-1 rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-3 font-score text-2xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25 disabled:opacity-40">
+                    Opslaan 🏓
+                  </button>
+                  <button onClick={leaveNet} className="rounded-xl border border-white/15 px-4 font-mono text-xs uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Annuleren</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-center font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: netConnected ? '#5fbf6e' : '#f4b92e' }}>
+                  {netConnected ? `✓ Verbonden met kamer ${roomCode} — wacht tot de host serveert…` : `Verbinden met ${roomCode}…`}
+                </p>
+                <FacePicker label="Jij (overkant)" pick={youPick}
+                  onPick={(i) => { const v = youPick === i ? -1 : i; setYouPick(v); if (netConnected) { const pk = pickOf(v); netRef.current?.sendJoin(pk, pk.name) } }}
+                  color="#E63946" />
+                <button onClick={leaveNet} className="w-full rounded-xl border border-white/15 py-2 font-mono text-xs uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Annuleren</button>
+              </div>
+            )}
           </div>
 
           <div className="max-w-xl text-center font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">
-            MUIS of WASD = bat bewegen (ook vooruit/achteruit — loop naar korte ballen toe) · SPATIE/muisknop vasthouden = kracht laden, loslaten = slaan<br />
-            Q = dinkje net over · E = hoge lob · R = smash · veeg je bat opzij om te mikken · bal rechts = forehand, links = backhand · Esc = menu
+            je bat volgt de bal AUTOMATISCH — met de MUIS (of WASD/pijltjes) MIK je: links/rechts + omhoog=diep, omlaag=kort (zie het blauwe kruis)<br />
+            SPATIE/muisknop vasthouden = kracht laden, loslaten = slaan · Q = dinkje · E = lob · R = smash · Esc = menu
           </div>
         </div>
       ) : (
@@ -289,7 +439,7 @@ export default function PongClient() {
             ]} />
           )}
           {isTouch && portrait && <RotateNotice game="Tafelkoppen" />}
-          <button onClick={() => setStage('menu')}
+          <button onClick={() => { leaveNet(); setStage('menu') }}
             className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-wk-soft hover:border-white/35 hover:text-wk-text">
             ← Menu
           </button>
@@ -307,8 +457,8 @@ export default function PongClient() {
                 <h2 className="font-score text-7xl uppercase text-wk-gold drop-shadow-[0_4px_24px_rgba(0,0,0,0.85)]">{matchOver.name} wint! 🏆</h2>
                 <p className="font-score text-5xl text-white">{matchOver.score[0]} <span className="text-white/40">:</span> {matchOver.score[1]}</p>
                 <div className="flex gap-3 pt-2">
-                  <button onClick={startMatch} className="rounded-xl border border-wk-gold/60 bg-wk-gold/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-gold hover:bg-wk-gold/25">Revanche</button>
-                  <button onClick={() => setStage('menu')} className="rounded-xl border border-white/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Menu</button>
+                  {!netRole && <button onClick={startMatch} className="rounded-xl border border-wk-gold/60 bg-wk-gold/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-gold hover:bg-wk-gold/25">Revanche</button>}
+                  <button onClick={() => { leaveNet(); setStage('menu') }} className="rounded-xl border border-white/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Menu</button>
                 </div>
               </div>
             </div>
@@ -405,6 +555,18 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     ctx.beginPath(); ctx.moveTo(tb.sx, tb.sy); ctx.lineTo(tt.sx, tt.sy); ctx.stroke()
   }
 
+  // Mik-reticle op de overkant: waar je 'm heen stuurt (links/rechts uit aimX, kort/diep uit aimDepth).
+  {
+    const tx = Math.max(-1, Math.min(1, g.aimX)) * (HW - 8)
+    const tz = NET_Z + (0.28 + 0.5 * Math.max(0, Math.min(1, g.aimDepth))) * (L / 2 - 30) + 20
+    const r = project(tx, 0, tz)
+    ctx.strokeStyle = 'rgba(90,200,255,0.85)'
+    ctx.lineWidth = 2.5
+    ctx.beginPath(); ctx.ellipse(r.sx, r.sy, 16 * r.p, 8 * r.p, 0, 0, Math.PI * 2); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(r.sx - 12 * r.p, r.sy); ctx.lineTo(r.sx + 12 * r.p, r.sy); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(r.sx, r.sy - 7 * r.p); ctx.lineTo(r.sx, r.sy + 7 * r.p); ctx.stroke()
+  }
+
   // Tegenstander: lijf + kop + arm die het bat vasthoudt, áchter de verre tafelrand.
   drawOpponent(ctx, faces, m.players[1], b.x)
 
@@ -426,8 +588,8 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     ctx.stroke()
   }
 
-  // Speler (dichtbij): rode bat op z'n diepte (pz), in forehand/backhand-stand met arm + krachtbalk.
-  drawPlayerBat(ctx, g.px, g.pz, m.players[0], b.x)
+  // Speler (dichtbij): rode bat op z'n auto-positie, in forehand/backhand-stand met arm + krachtbalk.
+  drawPlayerBat(ctx, m.players[0].x, m.players[0].z, m.players[0], b.x)
 
   ctx.restore()
 

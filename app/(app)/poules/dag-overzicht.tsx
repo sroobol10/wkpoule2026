@@ -267,12 +267,14 @@ function Team({ team }: { team: TeamRef }) {
   )
 }
 
-function PtsBadge({ pts, joker }: { pts: number | null; joker: boolean }) {
+// binary = bonusvraag (goed/fout → groen/rood). Anders (wedstrijden): goud voor een deel-score
+// (bijv. toto goed maar niet exact), groen voor een volledige/hoge score, rood voor 0.
+function PtsBadge({ pts, joker, binary = false }: { pts: number | null; joker: boolean; binary?: boolean }) {
   if (pts === null || pts === undefined) return null
   const base = joker ? pts / 2 : pts
   const cls = pts === 0
     ? 'bg-wk-red/10 border-wk-red/30 text-wk-red'
-    : base >= 10
+    : binary || base >= 10
       ? 'bg-wk-green/10 border-wk-green/30 text-wk-green'
       : 'bg-wk-gold/10 border-wk-gold/30 text-wk-gold'
   return (
@@ -419,7 +421,7 @@ function DailyBonus({ q, answer }: { q: Question; answer: AnswerEntry | null }) 
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm sm:text-[15px] font-semibold text-wk-text leading-snug flex-1">{q.question}</p>
         {scored
-          ? <PtsBadge pts={answer!.points_awarded} joker={false} />
+          ? <PtsBadge pts={answer!.points_awarded} joker={false} binary />
           : <span className="font-mono text-[10px] text-wk-muted tracking-[0.1em] uppercase shrink-0">In afwachting</span>}
       </div>
       <p className="mt-2 font-mono text-[11px] text-wk-muted tracking-[0.12em]">
@@ -461,7 +463,7 @@ function GeneralRow({ q, answer, country, points, flag }: { q: Question; answer:
         <Image src={flag} alt={country} width={26} height={18} className="rounded-sm object-cover w-6 h-4 shrink-0" />
       )}
       {scored
-        ? <PtsBadge pts={points} joker={false} />
+        ? <PtsBadge pts={points} joker={false} binary />
         : <span className="font-mono text-[10px] text-wk-muted tracking-[0.1em] uppercase shrink-0">Loopt</span>}
     </div>
   )

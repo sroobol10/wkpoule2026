@@ -16,6 +16,7 @@ import type { GolfPlayer, Hole } from '@/lib/golf/types'
 import ImmersiveToggle from './immersive-toggle'
 import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile } from '@/components/playground/mobile-play'
 import { TouchGamepad } from '@/components/playground/touch-gamepad'
+import { FacePicker, POOL_ALPHA } from '@/components/playground/face-picker'
 
 const PLAYER_COLORS = ['#E63946', '#F4B92E', '#4FA8E0', '#5fbf6e'] as const
 const HOLES = 9
@@ -69,6 +70,7 @@ export default function GolfClient() {
   const [stage, setStage] = useState<'menu' | 'playing'>('menu')
   const { isTouch, portrait } = useLandscapeGate()
   const [playerCount, setPlayerCount] = useState(2)
+  const [picks, setPicks] = useState<number[]>([-1, -1, -1, -1]) // gekozen speler per slot (-1 = willekeurig)
   const [popup, setPopup] = useState<{ text: string; color: string; n: number } | null>(null)
   // Snapshot voor de scorekaart-overlay (render mag niet in gameRef kijken → react-hooks/refs).
   const [scorecard, setScorecard] = useState<{
@@ -95,9 +97,18 @@ export default function GolfClient() {
     const pool = [...PLAYER_POOL].sort(() => Math.random() - 0.5)
     const faces = PLAYER_POOL.map((p) => p.face)
     const holes = Array.from({ length: HOLES }, (_, i) => generateHole(i, faces))
-    const players: GolfPlayer[] = Array.from({ length: playerCount }, (_, i) => ({
-      face: pool[i].face,
-      name: pool[i].name,
+    // Gekozen speler per slot (-1 = willekeurig), zonder dubbelen.
+    const used = new Set<string>()
+    const chosen = Array.from({ length: playerCount }, (_, i) => {
+      let pick = picks[i] >= 0 ? POOL_ALPHA[picks[i]] : null
+      if (pick && used.has(pick.face)) pick = null
+      if (!pick) pick = pool.find((p) => !used.has(p.face)) ?? pool[i]
+      used.add(pick.face)
+      return pick
+    })
+    const players: GolfPlayer[] = chosen.map((pk) => ({
+      face: pk.face,
+      name: pk.name,
       strokes: [],
       ball: { x: holes[0].tee.x, y: holes[0].tee.y, vx: 0, vy: 0, spin: 0, sinking: 0 },
       holed: false,
@@ -114,7 +125,7 @@ export default function GolfClient() {
     setScorecard(null)
     enterImmersiveIfMobile()
     setStage('playing')
-  }, [playerCount])
+  }, [playerCount, picks])
 
   // De reset zelf gebeurt in de game-loop (refs muteren mag daar wél van de linter).
   const nextHole = () => {
@@ -310,10 +321,18 @@ export default function GolfClient() {
             <Image src="/games/putjesscheppers.png" alt="Putjesscheppers" width={1024} height={1024} priority className="h-24 w-auto" />
           </div>
 
-          <div className="w-full max-w-md space-y-4 rounded-2xl border border-white/10 bg-wk-surface/70 p-6 backdrop-blur-sm">
+          <div className="w-full max-w-3xl space-y-4 rounded-2xl border border-white/10 bg-wk-surface/70 p-6 backdrop-blur-sm">
             <MenuRow label="Spelers">
               <Seg options={['1 (vs par)', '2', '3', '4']} value={playerCount - 1} onChange={(i) => setPlayerCount(i + 1)} />
             </MenuRow>
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
+              {Array.from({ length: playerCount }, (_, i) => (
+                <div key={i} className={i % 2 === 0 ? 'sm:border-r sm:border-white/10 sm:pr-5' : ''}>
+                  <FacePicker label={`Speler ${i + 1}`} pick={picks[i]} color={PLAYER_COLORS[i]}
+                    onPick={(v) => setPicks((prev) => { const n = [...prev]; n[i] = v; return n })} />
+                </div>
+              ))}
+            </div>
             <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">
               9 random gegenereerde holes — elke ronde een nieuwe baan. Om de beurt speel je de hele hole uit; minste slagen wint.
             </p>

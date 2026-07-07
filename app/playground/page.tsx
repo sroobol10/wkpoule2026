@@ -58,6 +58,12 @@ const GAMES = [
     shot: '/games/screenshots/tafelkoppen.png',
     features: ['Perspectief-tafel (echt 3D)', 'Muis of A/D', 'Tegenstander mét kop', 'Tot 7 of 11, win met 2'],
   },
+  {
+    href: '/kanon', emoji: '🎯', title: 'Koppenkanon', accent: '#F4B92E',
+    tagline: 'Angry Birds met koppen — katapulteer een collega de toren in',
+    shot: '/games/screenshots/koppenkanon.png',
+    features: ['Trek terug & laat los', 'Wankele torens vol kisten', 'Sloop elke doelwit-kop', 'Steeds moeilijker per level'],
+  },
 ]
 
 export default async function PlaygroundPage() {
@@ -79,7 +85,7 @@ export default async function PlaygroundPage() {
             <span className="text-wk-gold">Play</span>ground
           </h1>
           <p className="max-w-xl font-mono text-[11px] uppercase leading-relaxed tracking-[0.2em] text-wk-muted">
-            De Ennovate-arcadehal · acht sporten
+            De Ennovate-arcadehal · negen spellen
           </p>
         </header>
 

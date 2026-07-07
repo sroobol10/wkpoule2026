@@ -9,6 +9,7 @@ export type FighterState =
   | 'uppercut' // opstoot: traag, kort bereik, ramt door de dekking en vloert
   | 'ultimate' // finisher: enorme uithaal, alleen met een volle meter
   | 'dodge' // ontwijken: hop naar achteren + duik, met i-frames
+  | 'grab' // clinch: korte duw die dwars door dodge/blok raakt (anti-dodge)
   | 'block' // dubbele dekking (schuifelt langzaam)
   | 'hit' // versuft na een treffer (combo-venster voor de ander)
   | 'down' // tegen het canvas — de teller loopt
@@ -22,6 +23,7 @@ export type BoksInput = {
   uppercut: boolean // Q
   ultimate: boolean // R (alleen bij een volle meter)
   dodge: boolean // W / ↑ — ontwijken naar achteren
+  grab: boolean // F — clinch (anti-dodge): raakt door dodge/blok heen
 }
 
 export type PlayerTraits = { pace: number; shot: number; tackle: number }
@@ -51,6 +53,7 @@ export type BoksEvent =
   | { type: 'getup'; who: Side }
   | { type: 'ultimate'; by: Side } // finisher afgevuurd
   | { type: 'dodge'; by: Side; kind: PunchKind } // stoot ontweken (kind = de gemiste stoot)
+  | { type: 'grab'; by: Side; hit: boolean } // clinch afgevuurd (hit = raak)
   | { type: 'bell'; round: number; last: boolean } // einde van een ronde
   | { type: 'round'; round: number } // start van een nieuwe ronde
   | { type: 'end'; winner: Side | -1; how: 'ko' | 'tko' | 'points' | 'draw' }
@@ -71,4 +74,5 @@ export type Match = {
   prevUppercut: [boolean, boolean]
   prevUltimate: [boolean, boolean]
   prevDodge: [boolean, boolean]
+  prevGrab: [boolean, boolean]
 }

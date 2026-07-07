@@ -36,7 +36,15 @@ export type PlayerState = {
   yellow: boolean // ongebruikt in hockey (erfenis van voetbal; kaarten bestaan hier niet)
   sentOff: boolean // zit op het strafbankje (of definitief van het ijs)
   penaltyTimer: number // >0 = resterende tijdstraf (sim-s); bij 0 keert de speler terug op het ijs
+  boost: { kind: BoostKind; t: number } | null // actieve power-up + resterende tijd (s)
 }
+
+// Power-up boosts (fun): opgepakt van een token op het ijs. speed = supersnel, giant = reus,
+// tiny = dwerg, magnet = trekt de puck aan.
+export type BoostKind = 'speed' | 'giant' | 'tiny' | 'magnet'
+
+// Zwevend boost-token op het ijs (fun).
+export type BoostToken = { kind: BoostKind; pos: Vec2; life: number }
 
 export type BallState = {
   pos: Vec2
@@ -105,9 +113,41 @@ export type StreakerState = {
   tackled: boolean // al eens getackeld (voorkomt dubbel-spawnen van extra bestormers)
 }
 
+// Zamboni (fun): dweilmachine rijdt recht over het ijs. Wie in het pad staat tuimelt weg, de puck
+// wordt opzij geschept en achter 'm blijft een spiegelgladde schone baan liggen (`trail`, render).
+export type ZamboniState = {
+  pos: Vec2
+  vel: Vec2
+  angle: number
+  trail: Vec2[]
+}
+
+// IJs-beest (fun): een octopus die rondglibbert en de puck wegketst (Detroit-traditie), of een
+// pinguïn-mascotte die binnen waddelt, de puck even meegrist en een buikschuiver over het ijs doet.
+export type CritterState = {
+  kind: 'octopus' | 'penguin' | 'dino'
+  pos: Vec2
+  vel: Vec2
+  target: Vec2
+  timer: number
+  phase: number // animatiefase (waggelen / kronkelende tentakels)
+  slide: number // >0 = pinguïn doet net een buikschuiver
+}
+
 export type GameState = {
   players: PlayerState[]
   ball: BallState
+  // ── Fun-gimmicks (host-side; puck/speler-gevolgen syncen via de gewone snapshot) ──
+  zamboni: ZamboniState | null
+  zamboniCooldown: number
+  critter: CritterState | null
+  critterCooldown: number
+  boosts: BoostToken[] // zwevende power-up tokens op het ijs (fun)
+  boostCooldown: number // sec tot een nieuw token mag spawnen
+  boostPickupCount: number // teller — client hangt hier de toast + sfx aan
+  puckBomb: number // >0 = de puck is een tikkende bom; resterende lont-seconden
+  puckBombCooldown: number // sec tot een volgende bom-puck mag ontstaan
+  puckExplodeCount: number // teller — client hangt hier de "BOEM!"-toast + sfx aan
   ref: { pos: Vec2; vel: Vec2; tumble: number } // scheidsrechter (loopt mee; kan getackeld worden → tuimelt, fun)
   streaker: StreakerState | null // actieve (eerste) veldbestormer, of null
   extraStreakers: StreakerState[] // extra bestormers: tackle er één → +1 (max 3 totaal), leeg als de eerste weg is

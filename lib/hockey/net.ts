@@ -66,7 +66,12 @@ export type Snapshot = {
   sk: number[] // veldbestormer: [x, y, variant, tumble] als actief, anders lege array
   sk2: number[] // extra bestormers: [x, y, variant, tumble] per stuk (plat), anders leeg
   se: number[] // beveiliger: [x, y] als actief, anders lege array
+  bo?: number[] // per speler: boost-code (0 geen, 1 speed, 2 giant, 3 tiny, 4 magnet)
 }
+
+// Boost ↔ compacte code (voor de snapshot).
+const BOOST_CODE: Record<string, number> = { speed: 1, giant: 2, tiny: 3, magnet: 4 }
+const BOOST_KIND = ['', 'speed', 'giant', 'tiny', 'magnet'] as const
 
 type Handlers = {
   onGuestJoined?: () => void
@@ -132,6 +137,7 @@ export function buildSnapshot(state: GameState, tick: number, controlledGuest: n
     sk: state.streaker ? [r0(state.streaker.pos.x), r0(state.streaker.pos.y), state.streaker.variant, Math.round(state.streaker.tumble * 100) / 100] : [],
     sk2: state.extraStreakers.flatMap((e) => [r0(e.pos.x), r0(e.pos.y), e.variant, Math.round(e.tumble * 100) / 100]),
     se: state.security ? [r0(state.security.pos.x), r0(state.security.pos.y), Math.round(state.security.tumble * 100) / 100] : [],
+    bo: state.players.map((pl) => (pl.boost ? BOOST_CODE[pl.boost.kind] ?? 0 : 0)),
   }
 }
 
@@ -154,6 +160,9 @@ export function lerpSnapshotInto(target: GameState, a: Snapshot, b: Snapshot, al
     if (pose === -1) { pl.slideTimer = 1; pl.slideTackle = true; pl.tumbleTimer = 0 }
     else if (pose > 0) { pl.tumbleTimer = pose; pl.slideTimer = 0; pl.slideTackle = false }
     else { pl.slideTimer = 0; pl.tumbleTimer = 0; pl.slideTackle = false }
+    // Boost (voor de reus/dwerg-schaal + aura bij de gast).
+    const bc = b.bo?.[i] ?? 0
+    pl.boost = bc > 0 ? { kind: BOOST_KIND[bc] as NonNullable<typeof pl.boost>['kind'], t: 1 } : null
   }
   const ball = target.ball
   ball.pos.x = a.b[0] + (b.b[0] - a.b[0]) * t

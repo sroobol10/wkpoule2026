@@ -9,19 +9,21 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PLAYER_POOL } from '@/lib/soccer/teams'
 import {
-  COUNT_MAX, DEFAULT_ROUNDS, DODGE_TIME, FIXED_DT, GETUP_BASE, GETUP_PER_KD, HOOK_TOTAL, HOOK_WINDUP,
+  COUNT_MAX, DEFAULT_ROUNDS, DODGE_TIME, FIXED_DT, GETUP_BASE, GETUP_PER_KD, GRAB_WINDUP, HOOK_TOTAL, HOOK_WINDUP,
   JAB_RANGE, JAB_TOTAL, JAB_WINDUP, MAX_HP, MAX_STAM, UPPERCUT_TOTAL,
   UPPERCUT_WINDUP, ULT_MAX, ULT_RANGE, ULT_TOTAL, ULT_WINDUP,
 } from '@/lib/boks/constants'
 import { makeMatch, step } from '@/lib/boks/sim'
 import { aiInput } from '@/lib/boks/ai'
 import type { BoksEvent, BoksInput, Fighter, Match, Side } from '@/lib/boks/types'
+import { BoksNet, makeRoomCode, type BoksSnap, type BoksStart, type FighterPick } from '@/lib/boks/net'
 import ImmersiveToggle from './immersive-toggle'
 import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile, isCoarsePointer } from '@/components/playground/mobile-play'
 import { TouchGamepad } from '@/components/playground/touch-gamepad'
 
 const CORNER_COLORS = ['#E63946', '#F4B92E'] as const
-type Mode = 'ai' | '2p'
+type Mode = 'ai' | '2p' | 'online'
+const IDLE_INPUT: BoksInput = { move: 0, block: false, jab: false, hook: false, uppercut: false, ultimate: false, dodge: false, grab: false }
 
 const DIFFICULTY = [
   { label: 'Makkelijk', val: 0.25 },
@@ -38,8 +40,10 @@ type Game = {
   difficulty: number
   match: Match
   humans: Partial<Record<Side, 'p1' | 'p2'>>
+  net?: 'host' | 'guest' // online-rol (host draait de sim, gast rendert snapshots)
   shakeT: number
   slowmoT: number // resterende slow-motion na een knock-down
+  crowdFall: number[] // per POOL_ALPHA-index: >0 = toeschouwer valt van de tribune (dooft uit)
 }
 
 export default function BoksClient() {
@@ -61,6 +65,18 @@ export default function BoksClient() {
   const popupN = useRef(0)
   const soundsRef = useRef<Record<string, HTMLAudioElement>>({})
   const bgmRef = useRef<HTMLAudioElement | null>(null) // zacht achtergrondmuziekje tijdens het gevecht
+
+  // ── Online 1v1 ──────────────────────────────────────────────────────────────
+  const netRef = useRef<BoksNet | null>(null)
+  const guestInputRef = useRef<BoksInput>(IDLE_INPUT) // host: laatste input van de gast (bokser 1)
+  const guestPickRef = useRef<FighterPick | null>(null) // host: bokser-keuze van de gast
+  const pendingSnapRef = useRef<BoksSnap | null>(null) // gast: laatst ontvangen snapshot
+  const lastSnapSendRef = useRef(0)
+  const lastInputSendRef = useRef(0)
+  const [netRole, setNetRole] = useState<'host' | 'guest' | null>(null)
+  const [roomCode, setRoomCode] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [netConnected, setNetConnected] = useState(false)
 
   useEffect(() => {
     for (const p of PLAYER_POOL) {
@@ -106,7 +122,7 @@ export default function BoksClient() {
         { face: b.face, name: b.name, traits: b.traits },
       ], rounds),
       humans: mode === 'ai' ? { 0: 'p1' } : { 0: 'p1', 1: 'p2' },
-      shakeT: 0, slowmoT: 0,
+      shakeT: 0, slowmoT: 0, crowdFall: new Array(POOL_ALPHA.length).fill(0),
     }
     particlesRef.current = []
     setPopup(null)
@@ -114,6 +130,80 @@ export default function BoksClient() {
     enterImmersiveIfMobile()
     setStage('playing')
   }, [mode, difficulty, rounds, p1Pick, p2Pick])
+
+  // ── Online 1v1 ──────────────────────────────────────────────────────────────
+  const pickOf = useCallback((idx: number): FighterPick => {
+    const p = idx >= 0 ? POOL_ALPHA[idx] : POOL_ALPHA[Math.floor(Math.random() * POOL_ALPHA.length)]
+    return { face: p.face, name: p.name, traits: p.traits }
+  }, [])
+
+  const leaveNet = useCallback(() => {
+    netRef.current?.leave()
+    netRef.current = null
+    guestPickRef.current = null
+    pendingSnapRef.current = null
+    setNetRole(null)
+    setNetConnected(false)
+    setRoomCode('')
+  }, [])
+
+  const hostGame = useCallback(() => {
+    leaveNet()
+    const code = makeRoomCode(Date.now())
+    setRoomCode(code)
+    setNetRole('host')
+    const net = new BoksNet('host', code, {
+      onGuestJoined: () => setNetConnected(true),
+      onPeerLeft: () => setNetConnected(false),
+      onJoin: (pick) => { guestPickRef.current = pick },
+      onInput: (cmd) => { guestInputRef.current = cmd },
+    })
+    net.connect()
+    netRef.current = net
+  }, [leaveNet])
+
+  const joinGame = useCallback(() => {
+    const code = joinCode.trim().toUpperCase()
+    if (code.length < 4) return
+    leaveNet()
+    setRoomCode(code)
+    setNetRole('guest')
+    const myPick = pickOf(p1Pick)
+    const net = new BoksNet('guest', code, {
+      onGuestJoined: () => { setNetConnected(true); net.sendJoin(myPick, myPick.name) }, // host gezien → stuur je keuze
+      onPeerLeft: () => setNetConnected(false),
+      onStart: (payload: BoksStart) => {
+        guestInputRef.current = IDLE_INPUT
+        pendingSnapRef.current = null
+        gameRef.current = {
+          mode: 'online', difficulty, match: makeMatch(payload.picks, payload.rounds),
+          humans: {}, net: 'guest', shakeT: 0, slowmoT: 0, crowdFall: new Array(POOL_ALPHA.length).fill(0),
+        }
+        particlesRef.current = []
+        setPopup(null); setMatchOver(null)
+        enterImmersiveIfMobile()
+        setStage('playing')
+      },
+      onSnapshot: (snap) => { pendingSnapRef.current = snap },
+    })
+    net.connect()
+    netRef.current = net
+  }, [joinCode, leaveNet, pickOf, p1Pick, difficulty])
+
+  // Host start het gevecht: eigen keuze + de ontvangen keuze van de gast.
+  const startOnlineHost = useCallback(() => {
+    const picks: [FighterPick, FighterPick] = [pickOf(p1Pick), guestPickRef.current ?? pickOf(-1)]
+    netRef.current?.sendStart({ picks, rounds })
+    guestInputRef.current = IDLE_INPUT
+    gameRef.current = {
+      mode: 'online', difficulty, match: makeMatch(picks, rounds),
+      humans: { 0: 'p1' }, net: 'host', shakeT: 0, slowmoT: 0, crowdFall: new Array(POOL_ALPHA.length).fill(0),
+    }
+    particlesRef.current = []
+    setPopup(null); setMatchOver(null)
+    enterImmersiveIfMobile()
+    setStage('playing')
+  }, [pickOf, p1Pick, rounds, difficulty])
 
   useEffect(() => {
     if (stage !== 'playing') return
@@ -139,6 +229,7 @@ export default function BoksClient() {
           uppercut: has('KeyQ') || (merged && has('Period')),
           ultimate: has('KeyR') || (merged && has('Comma')),
           dodge: has('KeyW') || (merged && has('ArrowUp')),
+          grab: has('KeyF') || (merged && has('ShiftRight')),
         }
       }
       return {
@@ -149,6 +240,7 @@ export default function BoksClient() {
         uppercut: has('Period'),
         ultimate: has('Comma'),
         dodge: has('ArrowUp'),
+        grab: has('ShiftRight'),
       }
     }
 
@@ -187,6 +279,14 @@ export default function BoksClient() {
           g.shakeT = Math.max(g.shakeT, 0.3)
           playSound('falconpunch')
           show(`💢 ${m.f[ev.by].name.toUpperCase()} — HAYMAKER!`, CORNER_COLORS[ev.by])
+        } else if (ev.type === 'grab') {
+          if (ev.hit) {
+            const def = m.f[ev.by === 0 ? 1 : 0]
+            spawnSweat(def, ev.by === 0 ? 1 : -1, true)
+            g.shakeT = Math.max(g.shakeT, 0.2)
+            playSound('slap')
+            show(`🤼 ${m.f[ev.by].name} — CLINCH!`, CORNER_COLORS[ev.by])
+          }
         } else if (ev.type === 'dodge') {
           // Je zware uithaal (ult/uppercut) in de lucht geslagen → bruh.
           if (ev.kind === 'ultimate' || ev.kind === 'uppercut') playSound('bruh')
@@ -223,22 +323,61 @@ export default function BoksClient() {
     let raf = 0
     let last = performance.now()
     let acc = 0
+    let hostEvents: BoksEvent[] = [] // host: events sinds de laatste verstuurde snapshot
+    const stepParticles = (dt: number) => {
+      for (const pt of particlesRef.current) {
+        pt.x += pt.vx * dt
+        pt.y += pt.vy * dt
+        pt.vy += 700 * dt
+        if (pt.vr !== undefined) pt.rot = (pt.rot ?? 0) + pt.vr * dt
+        pt.life -= dt
+      }
+      particlesRef.current = particlesRef.current.filter((pt) => pt.life > 0)
+    }
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame)
       const g = gameRef.current
       if (!g) return
-      acc += Math.min(0.1, (now - last) / 1000)
+      const rdt = Math.min(0.1, (now - last) / 1000)
       last = now
+
+      // Publiek: af en toe kukelt er willekeurig een toeschouwer van de tribune (puur fun, cosmetisch).
+      const cf = g.crowdFall
+      for (let i = 0; i < cf.length; i++) if (cf[i] > 0) cf[i] = Math.max(0, cf[i] - rdt)
+      if (Math.random() < rdt * 0.3) { const i = Math.floor(Math.random() * cf.length); if (cf[i] <= 0) cf[i] = 1.5 }
+
+      // ── Gast: geen sim — render de host-snapshots en stuur je eigen input (bokser 1). ──
+      if (g.net === 'guest') {
+        const snap = pendingSnapRef.current
+        if (snap) {
+          g.match = snap.m
+          if (snap.ev.length) handleEvents(g, snap.ev)
+          pendingSnapRef.current = null
+        }
+        if (now - lastInputSendRef.current > 33) {
+          netRef.current?.sendInput(keyInput('p1', false))
+          lastInputSendRef.current = now
+        }
+        stepParticles(rdt)
+        if (g.shakeT > 0) g.shakeT = Math.max(0, g.shakeT - rdt)
+        draw(ctx, canvas, g, facesRef.current, particlesRef.current, now)
+        return
+      }
+
+      acc += rdt
       while (acc >= FIXED_DT) {
         if (g.slowmoT > 0) g.slowmoT = Math.max(0, g.slowmoT - FIXED_DT)
         const sdt = FIXED_DT * (g.slowmoT > 0 ? 0.34 : 1) // slow-motion na een knock-down
         const merged = g.mode === 'ai'
-        const inputs: [BoksInput, BoksInput] = [
-          g.humans[0] ? keyInput(g.humans[0], merged) : aiInput(g.match, 0, g.difficulty),
-          g.humans[1] ? keyInput(g.humans[1], merged && false) : aiInput(g.match, 1, g.difficulty),
-        ]
+        // Host: bokser 0 = jij (P1), bokser 1 = de gast-input. Offline: keyboards/AI zoals altijd.
+        const inputs: [BoksInput, BoksInput] = g.net === 'host'
+          ? [keyInput('p1', false), guestInputRef.current]
+          : [
+            g.humans[0] ? keyInput(g.humans[0], merged) : aiInput(g.match, 0, g.difficulty),
+            g.humans[1] ? keyInput(g.humans[1], merged && false) : aiInput(g.match, 1, g.difficulty),
+          ]
         const events = step(g.match, inputs, sdt)
-        if (events.length) handleEvents(g, events)
+        if (events.length) { handleEvents(g, events); if (g.net === 'host') for (const e of events) hostEvents.push(e) }
         if (g.shakeT > 0) g.shakeT = Math.max(0, g.shakeT - FIXED_DT)
         // Ultimate-rush: gouden vonken-spoor achter de stormende bokser.
         for (const f of g.match.f) {
@@ -250,16 +389,14 @@ export default function BoksClient() {
             life: 0.3 + Math.random() * 0.25, ult: true,
           })
         }
-        // zweetdruppels + gebitsbeschermer
-        for (const pt of particlesRef.current) {
-          pt.x += pt.vx * sdt
-          pt.y += pt.vy * sdt
-          pt.vy += 700 * sdt
-          if (pt.vr !== undefined) pt.rot = (pt.rot ?? 0) + pt.vr * sdt
-          pt.life -= sdt
-        }
-        particlesRef.current = particlesRef.current.filter((pt) => pt.life > 0)
+        stepParticles(sdt) // zweetdruppels + gebitsbeschermer + ult-vonken
         acc -= FIXED_DT
+      }
+      // Host: broadcast ~30×/s de volledige Match + de opgespaarde events.
+      if (g.net === 'host' && now - lastSnapSendRef.current > 33) {
+        netRef.current?.sendSnapshot({ m: g.match, ev: hostEvents })
+        hostEvents = []
+        lastSnapSendRef.current = now
       }
       draw(ctx, canvas, g, facesRef.current, particlesRef.current, now)
     }
@@ -268,7 +405,7 @@ export default function BoksClient() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Enter', 'Slash'].includes(e.code)) e.preventDefault()
       keys.add(e.code)
-      if (e.code === 'Escape') setStage('menu')
+      if (e.code === 'Escape') { leaveNet(); setStage('menu') }
     }
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code)
     window.addEventListener('keydown', onKeyDown)
@@ -281,7 +418,7 @@ export default function BoksClient() {
       keys.clear()
       if (bgmRef.current) { bgmRef.current.pause(); bgmRef.current.currentTime = 0 }
     }
-  }, [stage, playSound])
+  }, [stage, playSound, leaveNet])
 
   return (
     <div data-game-root className="fixed inset-0 bg-wk-bg text-wk-text">
@@ -294,34 +431,84 @@ export default function BoksClient() {
 
           <div className="w-full max-w-4xl space-y-4 rounded-2xl border border-white/10 bg-wk-surface/70 p-6 backdrop-blur-sm">
             <MenuRow label="Modus">
-              <Seg options={['Vs computer', '2 spelers']} value={mode === 'ai' ? 0 : 1} onChange={(i) => setMode(i === 0 ? 'ai' : '2p')} />
+              <Seg options={['Vs computer', '2 spelers', 'Online 1v1']} value={mode === 'ai' ? 0 : mode === '2p' ? 1 : 2}
+                onChange={(i) => { setMode(i === 0 ? 'ai' : i === 1 ? '2p' : 'online'); if (i !== 2) leaveNet() }} />
             </MenuRow>
             {mode === 'ai' && (
               <MenuRow label="Moeilijkheid">
                 <Seg options={DIFFICULTY.map((d) => d.label)} value={DIFFICULTY.findIndex((d) => d.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} />
               </MenuRow>
             )}
-            <MenuRow label="Rondes">
-              <Seg options={['1', '2', '3']} value={rounds - 1} onChange={(i) => setRounds(i + 1)} />
-            </MenuRow>
+            {(mode !== 'online' || netRole === 'host') && (
+              <MenuRow label="Rondes">
+                <Seg options={['1', '2', '3']} value={rounds - 1} onChange={(i) => setRounds(i + 1)} />
+              </MenuRow>
+            )}
 
-            {/* Jij links (rode hoek), tegenstander rechts (gele hoek) — rustig en duidelijk gescheiden. */}
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <div className="sm:border-r sm:border-white/10 sm:pr-5">
-                <FighterPicker label={mode === 'ai' ? 'Jouw bokser' : 'Bokser 1 (rood)'} pick={p1Pick} onPick={setP1Pick} color={CORNER_COLORS[0]} />
+            {mode !== 'online' ? (
+              <>
+                {/* Jij links (rode hoek), tegenstander rechts (gele hoek). */}
+                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                  <div className="sm:border-r sm:border-white/10 sm:pr-5">
+                    <FighterPicker label={mode === 'ai' ? 'Jouw bokser' : 'Bokser 1 (rood)'} pick={p1Pick} onPick={setP1Pick} color={CORNER_COLORS[0]} />
+                  </div>
+                  <FighterPicker label={mode === 'ai' ? 'Tegenstander' : 'Bokser 2 (geel)'} pick={p2Pick} onPick={setP2Pick} color={CORNER_COLORS[1]} />
+                </div>
+                <button onClick={startMatch}
+                  className="w-full rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-4 font-score text-3xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25">
+                  Start het gevecht 🥊
+                </button>
+              </>
+            ) : netRole === null ? (
+              // Online-lobby: kamer maken of code invullen.
+              <div className="space-y-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-wk-muted">Speel 1v1 tegen een collega op een ander scherm.</p>
+                <button onClick={hostGame}
+                  className="w-full rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-3 font-score text-2xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25">
+                  Nieuwe kamer maken
+                </button>
+                <div className="flex items-center gap-2">
+                  <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 4))} placeholder="CODE"
+                    className="w-28 rounded-lg border border-white/15 bg-wk-bg2 px-3 py-2 text-center font-mono text-lg uppercase tracking-[0.3em] text-wk-text outline-none focus:border-wk-gold/60" />
+                  <button onClick={joinGame} disabled={joinCode.trim().length < 4}
+                    className="flex-1 rounded-lg border border-white/20 py-2 font-mono text-sm uppercase tracking-[0.14em] text-wk-soft transition hover:border-white/40 disabled:opacity-40">
+                    Meedoen met code
+                  </button>
+                </div>
               </div>
-              <FighterPicker label={mode === 'ai' ? 'Tegenstander' : 'Bokser 2 (geel)'} pick={p2Pick} onPick={setP2Pick} color={CORNER_COLORS[1]} />
-            </div>
-
-            <button onClick={startMatch}
-              className="w-full rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-4 font-score text-3xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25">
-              Start het gevecht 🥊
-            </button>
+            ) : netRole === 'host' ? (
+              <div className="space-y-3">
+                <p className="text-center font-mono text-sm uppercase tracking-[0.16em] text-wk-soft">
+                  Kamercode: <span className="font-score text-3xl tracking-[0.3em] text-wk-gold">{roomCode}</span>
+                </p>
+                <p className="text-center font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: netConnected ? '#5fbf6e' : '#f4b92e' }}>
+                  {netConnected ? '✓ Tegenstander verbonden' : 'Wachten op tegenstander…'}
+                </p>
+                <FighterPicker label="Jouw bokser (rood)" pick={p1Pick} onPick={setP1Pick} color={CORNER_COLORS[0]} />
+                <div className="flex gap-2">
+                  <button onClick={startOnlineHost} disabled={!netConnected}
+                    className="flex-1 rounded-xl border border-wk-gold/60 bg-wk-gold/15 py-3 font-score text-2xl uppercase tracking-wide text-wk-gold transition hover:bg-wk-gold/25 disabled:opacity-40">
+                    Start het gevecht 🥊
+                  </button>
+                  <button onClick={leaveNet} className="rounded-xl border border-white/15 px-4 font-mono text-xs uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Annuleren</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-center font-mono text-[11px] uppercase tracking-[0.14em]" style={{ color: netConnected ? '#5fbf6e' : '#f4b92e' }}>
+                  {netConnected ? `✓ Verbonden met kamer ${roomCode} — wacht tot de host start…` : `Verbinden met ${roomCode}…`}
+                </p>
+                <FighterPicker label="Jouw bokser (geel)" pick={p1Pick}
+                  onPick={(i) => { setP1Pick(i); if (netConnected) { const pk = pickOf(i); netRef.current?.sendJoin(pk, pk.name) } }}
+                  color={CORNER_COLORS[1]} />
+                <button onClick={leaveNet} className="w-full rounded-xl border border-white/15 py-2 font-mono text-xs uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Annuleren</button>
+              </div>
+            )}
           </div>
 
           <div className="max-w-lg text-center font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">
-            P1: A/D lopen · S blok · W ontwijk · spatie jab · E hoek · Q uppercut · R ultimate — P2: pijltjes · ↓ · ↑ · enter · / · . · ,<br />
-            snelle stoten · W/↑ = wegwippen met i-frames (elke stoot mist) · uppercut ramt door de dekking · ultimate (R) bij volle meter = vloert<br />
+            P1: A/D lopen · S blok · W ontwijk · F clinch · spatie jab · E hoek · Q uppercut · R ultimate — P2: pijltjes · ↓ · ↑ · R-shift · enter · / · . · ,<br />
+            W/↑ = wegwippen (elke stoot mist) · F = CLINCH: raakt dwars door dodge & blok heen (de anti-dodge) · uppercut ramt door de dekking · ultimate (R) = rush + vloert<br />
             neergeslagen? RAM spatie om op te staan · 3× neer = TKO · geen KO? de jury telt de punten · Esc = menu
           </div>
         </div>
@@ -329,7 +516,7 @@ export default function BoksClient() {
         <div className="relative h-full w-full">
           <canvas ref={canvasRef} className="block h-full w-full" />
           <div className="absolute right-4 top-4"><ImmersiveToggle /></div>
-          <button onClick={() => setStage('menu')}
+          <button onClick={() => { leaveNet(); setStage('menu') }}
             className="absolute left-4 top-4 rounded-full border border-white/15 bg-black/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-wk-soft hover:border-white/35 hover:text-wk-text">
             ← Menu
           </button>
@@ -361,8 +548,8 @@ export default function BoksClient() {
                 <h2 className="font-score text-7xl uppercase drop-shadow-[0_4px_24px_rgba(0,0,0,0.85)]" style={{ color: matchOver.color }}>{matchOver.text}</h2>
                 <p className="font-mono text-sm uppercase tracking-[0.2em] text-wk-soft">{matchOver.sub}</p>
                 <div className="flex gap-3 pt-2">
-                  <button onClick={startMatch} className="rounded-xl border border-wk-gold/60 bg-wk-gold/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-gold hover:bg-wk-gold/25">Rematch</button>
-                  <button onClick={() => setStage('menu')} className="rounded-xl border border-white/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Menu</button>
+                  {!netRole && <button onClick={startMatch} className="rounded-xl border border-wk-gold/60 bg-wk-gold/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-gold hover:bg-wk-gold/25">Rematch</button>}
+                  <button onClick={() => { leaveNet(); setStage('menu') }} className="rounded-xl border border-white/15 px-6 py-3 font-mono text-sm uppercase tracking-[0.14em] text-wk-soft hover:border-white/35">Menu</button>
                 </div>
               </div>
             </div>
@@ -406,6 +593,40 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
       ctx.arc(20 + i * 29 + (row % 2) * 14, 52 + row * 34 + bob, 9, 0, Math.PI * 2)
       ctx.fillStyle = `hsl(${(hx * 3.6) | 0} 32% ${26 + row * 4}%)`
       ctx.fill()
+    }
+  }
+  // Vooraan op de tribune: de overige collega's kijken toe (geclipte koppen, bobben mee).
+  // En af en toe kukelt er eentje van z'n bankje (g.crowdFall per POOL_ALPHA-index).
+  const fighters = new Set([g.match.f[0].face, g.match.f[1].face])
+  const fans = POOL_ALPHA.map((p, idx) => ({ p, idx })).filter((f) => !fighters.has(f.p.face))
+  if (fans.length) {
+    const gap = (W - 80) / fans.length
+    for (let i = 0; i < fans.length; i++) {
+      const cx = 40 + gap * (i + 0.5)
+      const baseY = 176 + Math.sin(now * 0.004 + i * 1.9) * 4 // juichen/bobben
+      const fall = g.crowdFall[fans[i].idx] ?? 0
+      const s = fall > 0 ? Math.sin((1 - fall / 1.5) * Math.PI) : 0 // 0 → 1 → 0
+      const cy = baseY + s * 40 // valt naar voren/omlaag en krabbelt weer overeind
+      const rot = s * 1.5 * (i % 2 ? 1 : -1) // tuimelt opzij
+      const r = 15
+      ctx.save()
+      ctx.translate(cx, cy)
+      ctx.rotate(rot)
+      // schoudertje
+      ctx.fillStyle = `hsl(${(i * 47) % 360} 34% 34%)`
+      ctx.beginPath()
+      ctx.ellipse(0, r + 4, r * 0.95, r * 0.7, 0, 0, Math.PI * 2)
+      ctx.fill()
+      const img = faces[fans[i].p.face]
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.save()
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip()
+        ctx.drawImage(img, -r, -r, r * 2, r * 2)
+        ctx.restore()
+      }
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2; ctx.stroke()
+      ctx.restore()
     }
   }
   // spotlight op de ring
@@ -671,6 +892,12 @@ function drawFighter(ctx: CanvasRenderingContext2D, f: Fighter, faces: Record<st
     ctx.fill()
     glove(gx, shoulderY - 10, 17)
     glove(f.x - d * 6, hy + 14)
+  } else if (f.state === 'grab') {
+    // Clinch: beide handschoenen vooruit gestoten (een duw/greep).
+    const p = f.t < GRAB_WINDUP ? f.t / GRAB_WINDUP : 1
+    const reach = d * (16 + p * 40)
+    glove(shoulderX + reach, shoulderY - 2, 13)
+    glove(shoulderX + reach, shoulderY + 16, 13)
   } else if (f.state === 'dodge') {
     // Wegwippen: handschoenen dicht bij de kop, hoofd al mee naar achteren geleund.
     glove(hx + d * 14, hy + 4, 13)

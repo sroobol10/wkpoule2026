@@ -1,4 +1,4 @@
-import { PITCH_LENGTH, PITCH_WIDTH, PLAYERS_PER_TEAM, STREAKER_MIN_GAP } from './constants'
+import { PITCH_LENGTH, PITCH_WIDTH, PLAYERS_PER_TEAM, STREAKER_MIN_GAP, ZAMBONI_MIN_GAP, CRITTER_MIN_GAP, PUCKBOMB_MIN_GAP, BOOST_SPAWN_EVERY } from './constants'
 import type { GameState, PlayerState, PlayerTraits, Role, TeamId, TeamMeta } from './types'
 import type { Vec2 } from './vec'
 
@@ -232,6 +232,7 @@ function makeTeam(team: TeamId, attackDir: 1 | -1, meta: TeamMeta): PlayerState[
       yellow: false,
       sentOff: false,
       penaltyTimer: 0,
+      boost: null,
     }
   })
 }
@@ -258,6 +259,16 @@ export function createInitialState(humanTeam: TeamId, halfLengthSec: number, tea
     extraStreakers: [],
     streakerCooldown: STREAKER_MIN_GAP,
     security: null,
+    zamboni: null,
+    zamboniCooldown: ZAMBONI_MIN_GAP,
+    critter: null,
+    critterCooldown: CRITTER_MIN_GAP,
+    boosts: [],
+    boostCooldown: BOOST_SPAWN_EVERY,
+    boostPickupCount: 0,
+    puckBomb: 0,
+    puckBombCooldown: PUCKBOMB_MIN_GAP,
+    puckExplodeCount: 0,
     wind: { x: 0, y: 0 },
     weather: 'clear',
     windTarget: { x: 0, y: 0 },

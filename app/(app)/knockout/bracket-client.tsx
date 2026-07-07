@@ -34,7 +34,6 @@ type Props = {
   actualWinners?: Record<number, string>
   advancedFromStage?: Record<string, string[]>
   reachedStage?: Record<string, string[]>
-  wonAnyKo?: string[]
   eliminatedTeams?: string[]
   slotDist?: Record<number, SlotDist>
 }
@@ -123,9 +122,8 @@ function getDownstreamSlots(changedSlot: number): number[] {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, reachedStage = {}, wonAnyKo = [], eliminatedTeams = [], slotDist = {} }: Props) {
+export default function BracketClient({ teams, advancement, bracketPicks, locked, actualWinners = {}, advancedFromStage = {}, reachedStage = {}, eliminatedTeams = [], slotDist = {} }: Props) {
   const eliminatedSet = new Set(eliminatedTeams)
-  const wonKoSet = new Set(wonAnyKo)
   const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]))
 
   // Build advancement map: group -> pos -> teamId
@@ -166,6 +164,29 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
       .map((p) => [p.slot, p.points_awarded!])
   )
   const [isPending, startTransition] = useTransition()
+
+  // Alle wedstrijden chronologisch, gegroepeerd per ronde (fase) — aangrenzend want de
+  // fasen spelen in blokken achter elkaar (R32 → R16 → … → finale).
+  const ordered = [...BRACKET].sort((a, b) =>
+    (KO_KICKOFFS[a.slot] ?? '').localeCompare(KO_KICKOFFS[b.slot] ?? '') || a.slot - b.slot
+  )
+  const stageGroups: { stage: string; matches: typeof ordered }[] = []
+  for (const md of ordered) {
+    const last = stageGroups[stageGroups.length - 1]
+    if (last && last.stage === md.stage) last.matches.push(md)
+    else stageGroups.push({ stage: md.stage, matches: [md] })
+  }
+  // Een hele ronde klapt automatisch in vanaf 36u ná de aftrap van de láátste wedstrijd van die
+  // ronde — zo hoef je niet steeds langs afgeronde rondes te scrollen naar de eerstvolgende.
+  const [openStages, setOpenStages] = useState<Record<string, boolean>>(() => {
+    const o: Record<string, boolean> = {}
+    for (const g of stageGroups) {
+      const lastKo = g.matches.reduce((mx, md) => { const k = KO_KICKOFFS[md.slot] ?? ''; return k > mx ? k : mx }, '')
+      const collapsed = !!lastKo && Date.now() > new Date(lastKo).getTime() + 36 * 60 * 60 * 1000
+      o[g.stage] = !collapsed
+    }
+    return o
+  })
 
   const bracket = computeBracket(advMap, thirdAssignment, picks)
 
@@ -219,38 +240,42 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
     )
   }
 
-  // Alle wedstrijden onder elkaar in chronologische volgorde
-  const ordered = [...BRACKET].sort((a, b) =>
-    (KO_KICKOFFS[a.slot] ?? '').localeCompare(KO_KICKOFFS[b.slot] ?? '') || a.slot - b.slot
-  )
-
   return (
     <div className="space-y-3">
-      {ordered.map((matchDef, idx) => {
-        const m = bracket[matchDef.slot]
-        // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
-        const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
-        const reachedSet = new Set(reachedStage[matchDef.stage] ?? [])
-        // Banner boven elke nieuwe ronde, met extra witruimte ertussen
-        const newStage = matchDef.stage !== (ordered[idx - 1]?.stage ?? null)
+      {stageGroups.map((g, gi) => {
+        const open = openStages[g.stage] ?? true
         return (
-          <Fragment key={matchDef.slot}>
-            {newStage && <RoundBanner stage={matchDef.stage} first={idx === 0} />}
-            <BracketMatchCard
-              match={m}
-              teamMap={teamMap}
-              locked={locked}
-              isPending={isPending}
-              onPick={(teamId) => pickWinner(m.slot, teamId)}
-              actualWinnerId={actualWinners[matchDef.slot] ?? null}
-              kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
-              advancedTeams={advancedSet}
-              reachedTeams={reachedSet}
-              wonKoTeams={wonKoSet}
-              eliminatedTeams={eliminatedSet}
-              pts={ptsPerSlot[matchDef.slot] ?? null}
-              dist={slotDist[matchDef.slot] ?? null}
+          <Fragment key={g.stage}>
+            <RoundBanner
+              stage={g.stage}
+              first={gi === 0}
+              count={g.matches.length}
+              open={open}
+              onToggle={() => setOpenStages((s) => ({ ...s, [g.stage]: !open }))}
             />
+            {open && g.matches.map((matchDef) => {
+              const m = bracket[matchDef.slot]
+              // Teams die deze ronde zijn doorgegaan (o.b.v. doorstroommodel, niet match-winnaar)
+              const advancedSet = new Set(advancedFromStage[matchDef.stage] ?? [])
+              const reachedSet = new Set(reachedStage[matchDef.stage] ?? [])
+              return (
+                <BracketMatchCard
+                  key={matchDef.slot}
+                  match={m}
+                  teamMap={teamMap}
+                  locked={locked}
+                  isPending={isPending}
+                  onPick={(teamId) => pickWinner(m.slot, teamId)}
+                  actualWinnerId={actualWinners[matchDef.slot] ?? null}
+                  kickoffAt={KO_KICKOFFS[matchDef.slot] ?? null}
+                  advancedTeams={advancedSet}
+                  reachedTeams={reachedSet}
+                  eliminatedTeams={eliminatedSet}
+                  pts={ptsPerSlot[matchDef.slot] ?? null}
+                  dist={slotDist[matchDef.slot] ?? null}
+                />
+              )
+            })}
           </Fragment>
         )
       })}
@@ -259,18 +284,30 @@ export default function BracketClient({ teams, advancement, bracketPicks, locked
 }
 
 // ─── Ronde-banner ───────────────────────────────────────────────────────────
-// Markeert het begin van een nieuwe knockout-ronde zodat de fasering van het
-// toernooi visueel naar voren komt.
-function RoundBanner({ stage, first }: { stage: string; first: boolean }) {
+// Markeert het begin van een knockout-ronde én dient als in-/uitklap-knop voor de
+// hele ronde (klapt automatisch in 36u na de laatste wedstrijd van die ronde).
+function RoundBanner({ stage, first, count, open, onToggle }: {
+  stage: string; first: boolean; count: number; open: boolean; onToggle: () => void
+}) {
   return (
     <div className={first ? '' : 'pt-6'}>
-      <div className="flex items-center gap-3 rounded-xl border border-wk-gold/25 bg-wk-gold/[0.06] px-4 py-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 rounded-xl border border-wk-gold/25 bg-wk-gold/[0.06] px-4 py-3 hover:bg-wk-gold/[0.1] transition-colors cursor-pointer"
+      >
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-wk-gold shrink-0" />
         <span className="font-mono text-xs sm:text-sm font-bold text-wk-gold uppercase tracking-[0.2em] leading-none">
           {STAGE_LABELS[stage] ?? stage}
         </span>
         <span className="flex-1 h-px bg-gradient-to-r from-wk-gold/30 to-transparent" />
-      </div>
+        {!open && (
+          <span className="font-mono text-[9px] text-wk-muted tracking-[0.12em] uppercase shrink-0">
+            {count} wd. · ingeklapt
+          </span>
+        )}
+        <span className={`text-[10px] text-wk-gold/70 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
     </div>
   )
 }
@@ -287,7 +324,6 @@ function BracketMatchCard({
   kickoffAt,
   advancedTeams,
   reachedTeams,
-  wonKoTeams,
   eliminatedTeams,
   pts,
   dist,
@@ -301,7 +337,6 @@ function BracketMatchCard({
   kickoffAt: string | null
   advancedTeams: Set<string>
   reachedTeams: Set<string>
-  wonKoTeams: Set<string>
   eliminatedTeams: Set<string>
   pts: number | null
   dist: SlotDist | null
@@ -313,8 +348,7 @@ function BracketMatchCard({
   const userPick = match.winner
 
   // "Wie koos wat" standaard open; klapt 48u na de aftrap automatisch in
-  const collapsedByTime = !!kickoffAt && Date.now() > new Date(kickoffAt).getTime() + 48 * 60 * 60 * 1000
-  const [distOpen, setDistOpen] = useState(!collapsedByTime)
+  const [distOpen, setDistOpen] = useState(() => !(!!kickoffAt && Date.now() > new Date(kickoffAt).getTime() + 48 * 60 * 60 * 1000))
   // Correct = jouw pick won dit exacte duel (uitslag); Fout = jouw pick is uitgeschakeld en
   // won dit duel niet. Sturen op de uitslag (actualWinnerId/eliminated), niet op `advanced`
   // (= aanwezig in de volgende ronde) — dat loopt achter op een net gewonnen/verloren duel.
@@ -381,7 +415,6 @@ function BracketMatchCard({
               selected={match.winner === homeTeam.id}
               isActualWinner={actualWinnerId === homeTeam.id}
               advanced={advancedTeams.has(homeTeam.id)}
-              hasWonKo={wonKoTeams.has(homeTeam.id)}
               eliminated={eliminatedTeams.has(homeTeam.id)}
               disabled={locked || !bothKnown}
               isPending={isPending}
@@ -395,7 +428,6 @@ function BracketMatchCard({
               selected={match.winner === awayTeam.id}
               isActualWinner={actualWinnerId === awayTeam.id}
               advanced={advancedTeams.has(awayTeam.id)}
-              hasWonKo={wonKoTeams.has(awayTeam.id)}
               eliminated={eliminatedTeams.has(awayTeam.id)}
               disabled={locked || !bothKnown}
               isPending={isPending}
@@ -508,7 +540,6 @@ function TeamBtn({
   selected,
   isActualWinner,
   advanced,
-  hasWonKo,
   eliminated,
   disabled,
   isPending,
@@ -518,7 +549,6 @@ function TeamBtn({
   selected: boolean
   isActualWinner: boolean   // won dit exacte slot (uitslag)
   advanced: boolean         // door naar de volgende ronde (in werkelijkheid)
-  hasWonKo: boolean         // heeft al minstens één KO-wedstrijd gewonnen
   eliminated: boolean       // uit het toernooi
   disabled: boolean
   isPending: boolean
@@ -552,9 +582,8 @@ function TeamBtn({
   if (selected) {
     if (wonHere) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusLabel = 'Winnaar'; statusClass = 'text-wk-green' }
     else if (out) { colorClass = 'border-wk-red/45 bg-wk-red/10 text-wk-muted'; statusLabel = 'Uitgeschakeld'; statusClass = 'text-wk-red' }
-    // Pick is al minstens één ronde door (won een eerdere KO-wedstrijd) → groen i.p.v. goud,
-    // ook als deze wedstrijd nog niet gespeeld is.
-    else if (hasWonKo) { colorClass = 'border-wk-green/60 bg-wk-green/10 text-wk-green'; statusClass = 'text-wk-green' }
+    // Nog geen uitslag voor DEZE wedstrijd → goud/geel, ook als je pick een eerdere ronde won.
+    // (Groen is uitsluitend voor een gewonnen duel; toekomstige/actieve keuzes blijven geel.)
     else colorClass = 'border-wk-gold/50 bg-wk-gold/10 text-wk-gold'
   } else if (wonHere) {
     colorClass = 'border-wk-gold/55 bg-wk-gold/20 text-wk-soft'; statusLabel = 'Winnaar'

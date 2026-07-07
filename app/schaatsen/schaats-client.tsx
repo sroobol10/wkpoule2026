@@ -15,7 +15,9 @@ import {
 } from '@/lib/schaats/race'
 import ImmersiveToggle from './immersive-toggle'
 import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile, isCoarsePointer } from '@/components/playground/mobile-play'
+import { createSfx, type Sfx } from '@/components/playground/sfx'
 import { TouchGamepad } from '@/components/playground/touch-gamepad'
+import { FacePicker, POOL_ALPHA } from '@/components/playground/face-picker'
 
 const FIXED_DT = 1 / 120
 const RACERS = 6
@@ -45,10 +47,12 @@ export default function SchaatsClient() {
   const [stage, setStage] = useState<'menu' | 'playing'>('menu')
   const { isTouch, portrait } = useLandscapeGate()
   const [difficulty, setDifficulty] = useState(0.55)
+  const [youPick, setYouPick] = useState(-1)
   const [popup, setPopup] = useState<{ text: string; color: string; n: number } | null>(null)
   const [standings, setStandings] = useState<{ rows: { name: string; time: number | null }[] } | null>(null)
   const popupN = useRef(0)
   const tuTuRef = useRef<HTMLAudioElement | null>(null) // boost-geluid
+  const sfxRef = useRef<Sfx | null>(null)
 
   useEffect(() => {
     for (const p of PLAYER_POOL) {
@@ -60,10 +64,14 @@ export default function SchaatsClient() {
     const a = new window.Audio('/sfx/tu-tu.mp3')
     a.preload = 'auto'
     tuTuRef.current = a
+    sfxRef.current = createSfx(['crack', 'fall', 'finish'])
   }, [])
 
   const startMatch = useCallback(() => {
-    const pool = [...PLAYER_POOL].sort(() => Math.random() - 0.5).slice(0, RACERS)
+    // Jouw schaatser (index 0) = de gekozen collega; de rest willekeurig eromheen.
+    const you = youPick >= 0 ? POOL_ALPHA[youPick] : null
+    const others = [...PLAYER_POOL].filter((p) => !you || p.face !== you.face).sort(() => Math.random() - 0.5)
+    const pool = (you ? [you, ...others] : others).slice(0, RACERS)
     const track = generateTrack()
     const racers: Racer[] = pool.map((p, i) => {
       // Startgrid: net achter de start, in 2 rijtjes, lateraal verspreid over de baan.
@@ -81,7 +89,7 @@ export default function SchaatsClient() {
     setStandings(null)
     enterImmersiveIfMobile()
     setStage('playing')
-  }, [difficulty])
+  }, [difficulty, youPick])
 
   useEffect(() => {
     if (stage !== 'playing') return
@@ -125,13 +133,14 @@ export default function SchaatsClient() {
         for (const ev of events) {
           if (!r.isHuman && ev.type !== 'finish') continue
           if (ev.type === 'city') show(`📍 ${ev.name}! (${ev.n}/11)`, '#7db8e8')
-          else if (ev.type === 'stumble') show('😬 Scheur in het ijs!', '#ff5a4d')
+          else if (ev.type === 'stumble') { if (r.isHuman) { sfxRef.current?.play('crack'); sfxRef.current?.play('fall') } show('😬 Scheur in het ijs!', '#ff5a4d') }
           else if (ev.type === 'zopie' && r.isHuman) {
             const a = tuTuRef.current
             if (a) { try { a.currentTime = 0; void a.play() } catch { /* autoplay geweigerd → stil */ } }
             show('☕ Koek-en-zopie! Warme chocomel → BOOST!', '#e8a34d')
           }
           else if (ev.type === 'finish' && r.isHuman) {
+            sfxRef.current?.play('finish')
             const pos = g.racers.filter((q) => q.finishT !== null).length
             show(pos === 1 ? '🏆 Het kruisje — als eerste binnen!' : `🏁 Binnen! (${pos}e)`, '#F4B92E')
           }
@@ -197,10 +206,11 @@ export default function SchaatsClient() {
             <Image src="/games/elfstedentocht.png" alt="De Elfkoppentocht" width={1024} height={1024} priority className="h-24 w-auto" />
           </div>
 
-          <div className="w-full max-w-md space-y-4 rounded-2xl border border-white/10 bg-wk-surface/70 p-6 backdrop-blur-sm">
+          <div className="w-full max-w-3xl space-y-4 rounded-2xl border border-white/10 bg-wk-surface/70 p-6 backdrop-blur-sm">
             <MenuRow label="Moeilijkheid">
               <Seg options={DIFFICULTY.map((d) => d.label)} value={DIFFICULTY.findIndex((d) => d.val === difficulty)} onChange={(i) => setDifficulty(DIFFICULTY[i].val)} />
             </MenuRow>
+            <FacePicker label="Jouw schaatser" pick={youPick} onPick={setYouPick} color="#9FC4E8" />
             <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">
               Een random gegenereerde tocht langs 11 steden, tegen vijf collega&apos;s. Slipstream, scheuren en twee kluunzones onderweg.
             </p>

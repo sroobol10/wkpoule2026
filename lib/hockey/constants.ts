@@ -158,6 +158,49 @@ export const SECURITY_CATCH_RADIUS = 24 // binnen deze straal grijpt hij de stre
 export const FUN_TUMBLE_TIME = 0.95
 export const FUN_KNOCK = 320
 
+// ── Zamboni-invasie (fun) ────────────────────────────────────────────────────
+export const ZAMBONI_W = 104 // lengte van de dweilmachine (world-units)
+export const ZAMBONI_H = 58 // breedte
+export const ZAMBONI_SPEED = 158 // rijdt rustig maar onverbiddelijk recht over het ijs
+export const ZAMBONI_MIN_GAP = 24 // seconden tussen twee invasies (zeldzamer dan een streaker)
+export const ZAMBONI_SPAWN_CHANCE = 0.06 // kans/seconde ná de cooldown (alleen tijdens 'playing')
+export const ZAMBONI_KNOCK = 470 // wie geraakt wordt vliegt hard opzij
+
+// ── IJs-beest: octopus / pinguïn-mascotte (fun) ──────────────────────────────
+export const CRITTER_RADIUS = 15
+export const CRITTER_SPEED = 152 // glibbert/waddelt over het ijs
+export const CRITTER_MIN_GAP = 18 // seconden tussen twee beesten
+export const CRITTER_SPAWN_CHANCE = 0.1 // kans/seconde ná de cooldown (alleen tijdens 'playing')
+export const CRITTER_MAX_LIFE = 12 // veiligheids-timeout (s)
+export const CRITTER_BALL_KICK = 300 // snelheid waarmee-ie de puck wegketst
+export const DINO_RADIUS = 34 // stampende T-rex: grotere botsradius dan een gewoon beest
+export const DINO_KNOCK = 440 // spelers die de dino tegenkomt vliegen tuimelend weg
+
+// ── Power-up boosts (fun) ──────────────────────────────────────────────────────
+// Zwevende tokens op het ijs; schaats erover → tijdelijk supersnel, reuzegroot, minigroot of magneet.
+export const BOOST_DURATION = 7.5 // hoe lang een opgepakte boost werkt (s)
+export const BOOST_TOKEN_LIFE = 16 // hoe lang een token op het ijs blijft liggen (s)
+export const BOOST_SPAWN_EVERY = 8 // basis-interval tussen nieuwe tokens (s, + wat random)
+export const BOOST_MAX_ON_ICE = 2 // max aantal tokens tegelijk op het ijs
+export const BOOST_PICKUP_R = 16 // oppak-straal van een token
+export const BOOST_SPEED_MULT = 1.8 // ⚡ supersnelheid
+export const BOOST_GIANT_SCALE = 2.0 // 🐘 render-schaal reus
+export const BOOST_TINY_SCALE = 0.5 // 🐜 render-schaal dwerg
+export const BOOST_GIANT_SPEED = 0.9 // reus schaatst iets trager
+export const BOOST_TINY_SPEED = 1.35 // dwerg is juist kwiek
+export const BOOST_GIANT_REACH = 12 // reus heeft langere stick-reach (puckcontrole)
+export const BOOST_TINY_REACH = -4 // dwerg heeft kortere reach
+export const BOOST_GIANT_SHOT = 1.4 // reus knalt harder
+export const BOOST_MAGNET_RANGE = 78 // 🧲 puck wordt aangetrokken binnen deze straal
+export const BOOST_MAGNET_PULL = 900 // versnelling waarmee de puck naar de magneet-speler zuigt
+
+// ── Explosieve TNT-puck (fun) ────────────────────────────────────────────────
+export const PUCKBOMB_MIN_GAP = 22 // seconden tussen twee bom-pucks
+export const PUCKBOMB_SPAWN_CHANCE = 0.05 // kans/seconde ná de cooldown (alleen tijdens 'playing')
+export const PUCKBOMB_FUSE = 3.2 // seconden lont vóór de knal — tik 'm snel weg!
+export const PUCKBOMB_RADIUS = 155 // straal waarbinnen spelers wegvliegen bij de explosie
+export const PUCKBOMB_KNOCK = 640 // terugstoot van de explosie
+
 // ── Camera ──────────────────────────────────────────────────────────────────
 export const CAMERA_LERP = 5 // hoe soepel de camera de bal volgt (hoger = strakker)
 export const VIEW_WORLD_H_FALLBACK = 740 // (renderer heeft eigen constante; hier als referentie)

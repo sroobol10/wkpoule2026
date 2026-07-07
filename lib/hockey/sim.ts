@@ -83,6 +83,38 @@ import {
   STREAKER_RADIUS,
   STREAKER_SPAWN_CHANCE,
   STREAKER_SPEED,
+  ZAMBONI_W,
+  ZAMBONI_H,
+  ZAMBONI_SPEED,
+  ZAMBONI_MIN_GAP,
+  ZAMBONI_SPAWN_CHANCE,
+  ZAMBONI_KNOCK,
+  CRITTER_RADIUS,
+  CRITTER_SPEED,
+  CRITTER_MIN_GAP,
+  CRITTER_SPAWN_CHANCE,
+  CRITTER_MAX_LIFE,
+  CRITTER_BALL_KICK,
+  DINO_RADIUS,
+  DINO_KNOCK,
+  BOOST_DURATION,
+  BOOST_TOKEN_LIFE,
+  BOOST_SPAWN_EVERY,
+  BOOST_MAX_ON_ICE,
+  BOOST_PICKUP_R,
+  BOOST_SPEED_MULT,
+  BOOST_GIANT_SPEED,
+  BOOST_TINY_SPEED,
+  BOOST_GIANT_REACH,
+  BOOST_TINY_REACH,
+  BOOST_GIANT_SHOT,
+  BOOST_MAGNET_RANGE,
+  BOOST_MAGNET_PULL,
+  PUCKBOMB_MIN_GAP,
+  PUCKBOMB_SPAWN_CHANCE,
+  PUCKBOMB_FUSE,
+  PUCKBOMB_RADIUS,
+  PUCKBOMB_KNOCK,
   TAKE_OVER_SPEED,
   TRAP_DAMPEN,
   TRAP_MAX_SPEED,
@@ -91,7 +123,7 @@ import {
   traitMul,
 } from './constants'
 import { anchorToWorld, teamDir } from './teams'
-import type { BallState, GameState, InputCommand, PlayerState, RestartKind, StreakerState, TeamId } from './types'
+import type { BallState, BoostKind, CritterState, GameState, InputCommand, PlayerState, RestartKind, StreakerState, TeamId, ZamboniState } from './types'
 import {
   add,
   clamp,
@@ -230,6 +262,10 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
 
   moveRef(state, dt)
   updateStreaker(state, dt)
+  updateZamboni(state, dt) // fun: dweilmachine rijdt het ijs op
+  updateCritter(state, dt) // fun: octopus / pinguïn-mascotte
+  updatePuckBomb(state, dt) // fun: tikkende TNT-puck
+  updateBoosts(state, dt) // fun: power-up tokens (supersnel / reus / dwerg / magneet)
   if (state.foulCooldown > 0) state.foulCooldown = Math.max(0, state.foulCooldown - dt)
   if (state.foulStreakTimer > 0) { state.foulStreakTimer = Math.max(0, state.foulStreakTimer - dt); if (state.foulStreakTimer === 0) state.foulStreak = 0 }
 
@@ -291,6 +327,9 @@ export function step(state: GameState, inputs: InputCommand[], dt: number): Game
     maxSpeed *= traitMul(p.traits.pace) // snelle collega's lopen iets harder
     if (sprinting) maxSpeed *= SPRINT_MULT
     if (p.tackleCooldown > 0) maxSpeed *= RECOVER_SPEED_MULT
+    if (p.boost?.kind === 'speed') maxSpeed *= BOOST_SPEED_MULT // ⚡ supersnelheid
+    else if (p.boost?.kind === 'giant') maxSpeed *= BOOST_GIANT_SPEED
+    else if (p.boost?.kind === 'tiny') maxSpeed *= BOOST_TINY_SPEED
     movePlayer(p, cmd.move, dt, maxSpeed, state.slippery ? 0.22 : 1)
 
     // Tijdens een aftrap/vrije trap mag de tegenpartij (niet de nemer) de bal niet aanvallen
@@ -451,11 +490,12 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
   // Dichtstbijzijnde speler binnen controle-straal. Een net-getrapte speler (kickCooldown)
   // telt niet mee, zodat je je eigen uitgaande bal niet meteen weer "opzuigt".
   let best: PlayerState | null = null
-  let bestD = CONTROL_RADIUS + PLAYER_RADIUS
+  let bestD = Infinity
   for (const p of state.players) {
     if (p.kickCooldown > 0 || p.sentOff || p.tumbleTimer > 0) continue // getuimelde speler heeft even geen controle
+    const reach = CONTROL_RADIUS + PLAYER_RADIUS + boostReach(p) // reus heeft langere stick-reach, dwerg korter
     const d = dist(p.pos, ball.pos)
-    if (d < bestD) {
+    if (d < reach && d < bestD) {
       bestD = d
       best = p
     }
@@ -484,7 +524,7 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     const spray = (Math.random() * 2 - 1) * SLAP_SPRAY * (0.35 + 0.65 * ct)
     const cs = Math.cos(spray), sn = Math.sin(spray)
     dir = { x: dir.x * cs - dir.y * sn, y: dir.x * sn + dir.y * cs }
-    const power = (SLAP_MIN_POWER + (SLAP_MAX_POWER - SLAP_MIN_POWER) * ct) * traitMul(best.traits.shot)
+    const power = (SLAP_MIN_POWER + (SLAP_MAX_POWER - SLAP_MIN_POWER) * ct) * traitMul(best.traits.shot) * boostShot(best)
     ball.vel = scale(dir, Math.min(power, BALL_MAX_SPEED))
     ball.pos = add(ball.pos, scale(dir, PLAYER_RADIUS + BALL_RADIUS))
     ball.z = 0
@@ -512,7 +552,7 @@ function handleBallContact(state: GameState, inputs: InputCommand[]) {
     // (passes blijven onaangeroerd zodat de pass-assist accuraat blijft).
     if (best.charge >= PASS_CHARGE_MAX) {
       state.stats.shots[best.team] += 1
-      power *= traitMul(best.traits.shot) // schutter-trait → hardere knal (keeper minder tijd)
+      power *= traitMul(best.traits.shot) * boostShot(best) // schutter-trait + reuzen-boost → hardere knal
     }
 
     // Pass-assist: bij een korte tik richten we naar de best passende medespeler — en
@@ -927,6 +967,223 @@ function updateSecurity(state: GameState, dt: number): void {
     for (let i = 1; i < 4; i++) if (dd[i] < dd[mi]) mi = i
     s.target = mi === 0 ? { x: -60, y: s.pos.y } : mi === 1 ? { x: PITCH_LENGTH + 60, y: s.pos.y } : mi === 2 ? { x: s.pos.x, y: -60 } : { x: s.pos.x, y: PITCH_WIDTH + 60 }
   }
+}
+
+// ── Zamboni-invasie (fun) ─────────────────────────────────────────────────────
+// Dweilmachine rijdt recht over het ijs (langs de x-as, op de hoogte van de puck → in beeld).
+// Wie in het pad staat tuimelt weg, de puck wordt opzij geschept, en achter 'm blijft een
+// spiegelgladde schone baan liggen (`trail`, puur render). Van het ijs af → weg + cooldown.
+function makeZamboni(state: GameState): ZamboniState {
+  const fromLeft = Math.random() < 0.5
+  const y = clamp(state.ball.pos.y, ZAMBONI_H, PITCH_WIDTH - ZAMBONI_H)
+  const x = fromLeft ? -ZAMBONI_W : PITCH_LENGTH + ZAMBONI_W
+  const dir = fromLeft ? 1 : -1
+  return { pos: { x, y }, vel: { x: dir * ZAMBONI_SPEED, y: 0 }, angle: fromLeft ? 0 : Math.PI, trail: [] }
+}
+
+function updateZamboni(state: GameState, dt: number): void {
+  const z = state.zamboni
+  if (!z) {
+    if (state.zamboniCooldown > 0) state.zamboniCooldown -= dt
+    else if (state.phase === 'playing' && Math.random() < ZAMBONI_SPAWN_CHANCE * dt) state.zamboni = makeZamboni(state)
+    return
+  }
+  z.pos.x += z.vel.x * dt
+  z.pos.y += z.vel.y * dt
+  // Gladgestreken spoor achterlaten (afstand-gesampled, gecapt).
+  const last = z.trail[z.trail.length - 1]
+  if (!last || Math.hypot(z.pos.x - last.x, z.pos.y - last.y) > 24) {
+    z.trail.push({ x: z.pos.x, y: z.pos.y })
+    if (z.trail.length > 64) z.trail.shift()
+  }
+  // Van het ijs af → invasie voorbij.
+  if (z.pos.x < -ZAMBONI_W * 1.6 || z.pos.x > PITCH_LENGTH + ZAMBONI_W * 1.6) {
+    state.zamboni = null
+    state.zamboniCooldown = ZAMBONI_MIN_GAP
+    return
+  }
+  const hw = ZAMBONI_W / 2, hh = ZAMBONI_H / 2
+  const dir = Math.sign(z.vel.x)
+  // Puck opzij scheppen.
+  const ball = state.ball
+  if (ball.z < 26 && Math.abs(ball.pos.x - z.pos.x) < hw + BALL_RADIUS && Math.abs(ball.pos.y - z.pos.y) < hh + BALL_RADIUS) {
+    ball.pos.x = z.pos.x + dir * (hw + BALL_RADIUS + 1)
+    ball.vel.x = z.vel.x * 1.5
+    ball.vel.y += (Math.random() - 0.5) * 220
+  }
+  // Spelers in het pad tuimelen hard weg.
+  for (const p of state.players) {
+    if (p.sentOff || p.tumbleTimer > 0) continue
+    if (Math.abs(p.pos.x - z.pos.x) < hw + PLAYER_RADIUS && Math.abs(p.pos.y - z.pos.y) < hh + PLAYER_RADIUS) {
+      p.tumbleTimer = FUN_TUMBLE_TIME
+      p.slideTimer = 0
+      p.feintTimer = 0
+      const dy = p.pos.y - z.pos.y
+      p.vel = { x: dir * ZAMBONI_KNOCK * 0.55, y: (dy >= 0 ? 1 : -1) * ZAMBONI_KNOCK }
+    }
+  }
+}
+
+// ── IJs-beest: octopus / pinguïn-mascotte (fun) ───────────────────────────────
+// Glibbert/waddelt van de ene rand naar de andere, dwars over de baan. De octopus ketst de puck
+// willekeurig weg; de pinguïn grist 'm mee en doet af en toe een buikschuiver.
+function makeCritter(state: GameState): CritterState {
+  const b = state.ball.pos
+  const ang = Math.random() * Math.PI * 2
+  const pt = (a: number) => ({ x: clamp(b.x + Math.cos(a) * 340, 30, PITCH_LENGTH - 30), y: clamp(b.y + Math.sin(a) * 340, 30, PITCH_WIDTH - 30) })
+  const r = Math.random()
+  const kind: CritterState['kind'] = r < 0.25 ? 'dino' : r < 0.62 ? 'octopus' : 'penguin'
+  return { kind, pos: pt(ang), vel: { x: 0, y: 0 }, target: pt(ang + Math.PI), timer: CRITTER_MAX_LIFE, phase: 0, slide: 0 }
+}
+
+// Extra stick-reach door een boost (reus = langer, dwerg = korter).
+function boostReach(p: PlayerState): number {
+  if (p.boost?.kind === 'giant') return BOOST_GIANT_REACH
+  if (p.boost?.kind === 'tiny') return BOOST_TINY_REACH
+  return 0
+}
+// Schotkracht-multiplier door een boost (reus knalt harder).
+function boostShot(p: PlayerState): number {
+  return p.boost?.kind === 'giant' ? BOOST_GIANT_SHOT : 1
+}
+
+// Power-up tokens (fun): spawnen op het ijs, tikken af, en worden opgepakt door de dichtstbijzijnde
+// speler die eroverheen schaatst. De magneet-boost trekt bovendien de losse puck naar de speler toe.
+function updateBoosts(state: GameState, dt: number): void {
+  // Actieve boosts per speler aftellen.
+  for (const p of state.players) {
+    if (p.boost) { p.boost.t -= dt; if (p.boost.t <= 0) p.boost = null }
+  }
+  // Tokens laten leven / verlopen.
+  if (state.boostCooldown > 0) state.boostCooldown -= dt
+  for (const tok of state.boosts) tok.life -= dt
+  state.boosts = state.boosts.filter((t) => t.life > 0)
+  // Nieuw token spawnen (alleen tijdens het spelen).
+  if (state.phase === 'playing' && state.boostCooldown <= 0 && state.boosts.length < BOOST_MAX_ON_ICE) {
+    state.boostCooldown = BOOST_SPAWN_EVERY + Math.random() * 5
+    const kinds: BoostKind[] = ['speed', 'giant', 'tiny', 'magnet']
+    const kind = kinds[Math.floor(Math.random() * kinds.length)]
+    const pos = { x: PITCH_LENGTH * (0.22 + Math.random() * 0.56), y: PITCH_WIDTH * (0.18 + Math.random() * 0.64) }
+    state.boosts.push({ kind, pos, life: BOOST_TOKEN_LIFE })
+  }
+  // Oppakken: schaats erover → boost + token weg.
+  for (const p of state.players) {
+    if (p.sentOff || p.penaltyTimer > 0) continue
+    for (const tok of state.boosts) {
+      if (tok.life <= 0) continue
+      if (dist(p.pos, tok.pos) < BOOST_PICKUP_R + PLAYER_RADIUS) {
+        p.boost = { kind: tok.kind, t: BOOST_DURATION }
+        tok.life = 0
+        state.boostPickupCount += 1
+      }
+    }
+  }
+  state.boosts = state.boosts.filter((t) => t.life > 0)
+  // Magneet: trek de losse puck naar een speler met de magneet-boost.
+  const ball = state.ball
+  if (ball.z < 24) {
+    for (const p of state.players) {
+      if (p.boost?.kind !== 'magnet' || p.sentOff) continue
+      const dx = p.pos.x - ball.pos.x, dy = p.pos.y - ball.pos.y
+      const d = Math.hypot(dx, dy)
+      if (d > PLAYER_RADIUS && d < BOOST_MAGNET_RANGE) {
+        const pull = BOOST_MAGNET_PULL * (1 - d / BOOST_MAGNET_RANGE) * dt
+        ball.vel.x += (dx / d) * pull
+        ball.vel.y += (dy / d) * pull
+      }
+    }
+  }
+}
+
+function updateCritter(state: GameState, dt: number): void {
+  const c = state.critter
+  if (!c) {
+    if (state.critterCooldown > 0) state.critterCooldown -= dt
+    else if (state.phase === 'playing' && Math.random() < CRITTER_SPAWN_CHANCE * dt) state.critter = makeCritter(state)
+    return
+  }
+  c.timer -= dt
+  c.phase += dt * (c.kind === 'penguin' ? 7 : 11)
+  if (c.slide > 0) c.slide = Math.max(0, c.slide - dt)
+  let dx = c.target.x - c.pos.x, dy = c.target.y - c.pos.y
+  let d = Math.hypot(dx, dy)
+  if (d < 12) {
+    // Nieuw doel rond de puck; pinguïn zet af en toe een buikschuiver in.
+    const ang = Math.random() * Math.PI * 2
+    c.target = { x: clamp(state.ball.pos.x + Math.cos(ang) * 300, 30, PITCH_LENGTH - 30), y: clamp(state.ball.pos.y + Math.sin(ang) * 300, 30, PITCH_WIDTH - 30) }
+    if (c.kind === 'penguin' && Math.random() < 0.5) c.slide = 0.9
+    dx = c.target.x - c.pos.x; dy = c.target.y - c.pos.y; d = Math.hypot(dx, dy) || 1
+  }
+  const dino = c.kind === 'dino'
+  const spd = CRITTER_SPEED * (c.slide > 0 ? 1.8 : dino ? 0.82 : 1) // buikschuiver = kort sneller; dino stampt wat trager
+  c.vel = { x: (dx / d) * spd, y: (dy / d) * spd }
+  c.pos.x += c.vel.x * dt
+  c.pos.y += c.vel.y * dt
+  const rr = dino ? DINO_RADIUS : CRITTER_RADIUS
+  // Puck verstoren.
+  const ball = state.ball
+  const bd = Math.hypot(ball.pos.x - c.pos.x, ball.pos.y - c.pos.y)
+  const minB = rr + BALL_RADIUS
+  if (ball.z < 20 && bd < minB && bd > 1e-3) {
+    const bx = (ball.pos.x - c.pos.x) / bd, by = (ball.pos.y - c.pos.y) / bd
+    ball.pos.x = c.pos.x + bx * minB
+    ball.pos.y = c.pos.y + by * minB
+    if (c.kind === 'penguin') { // pinguïn grist 'm mee in z'n loeprichting
+      ball.vel.x = c.vel.x * 1.3
+      ball.vel.y = c.vel.y * 1.3
+    } else { // octopus/dino: willekeurig (dino = harder) wegmeppen
+      const a = Math.random() * Math.PI * 2
+      const kick = dino ? CRITTER_BALL_KICK * 1.8 : CRITTER_BALL_KICK
+      ball.vel.x = Math.cos(a) * kick
+      ball.vel.y = Math.sin(a) * kick
+    }
+  }
+  // Dino stampt: spelers in z'n pad vliegen tuimelend weg.
+  if (dino) {
+    for (const p of state.players) {
+      if (p.sentOff || p.tumbleTimer > 0) continue
+      const pd = Math.hypot(p.pos.x - c.pos.x, p.pos.y - c.pos.y)
+      if (pd < DINO_RADIUS + PLAYER_RADIUS && pd > 1e-3) {
+        p.tumbleTimer = FUN_TUMBLE_TIME
+        p.slideTimer = 0; p.feintTimer = 0
+        p.vel = { x: ((p.pos.x - c.pos.x) / pd) * DINO_KNOCK, y: ((p.pos.y - c.pos.y) / pd) * DINO_KNOCK }
+      }
+    }
+  }
+  if (c.timer <= 0) { state.critter = null; state.critterCooldown = CRITTER_MIN_GAP }
+}
+
+// ── Explosieve TNT-puck (fun) ─────────────────────────────────────────────────
+// Af en toe wordt de puck een tikkende bom. Als de lont afloopt: iedereen in de buurt vliegt
+// tuimelend weg, de puck-teller tikt op (client: BOEM-toast + sfx) en de puck knalt naar het midden.
+function updatePuckBomb(state: GameState, dt: number): void {
+  if (state.puckBomb > 0) {
+    state.puckBomb -= dt
+    if (state.puckBomb <= 0) {
+      state.puckBomb = 0
+      state.puckExplodeCount++
+      const bx = state.ball.pos.x, by = state.ball.pos.y
+      for (const p of state.players) {
+        if (p.sentOff) continue
+        const dx = p.pos.x - bx, dy = p.pos.y - by, d = Math.hypot(dx, dy)
+        if (d < PUCKBOMB_RADIUS && p.tumbleTimer <= 0) {
+          const nx = d > 1e-3 ? dx / d : 1, ny = d > 1e-3 ? dy / d : 0
+          const f = (1 - d / PUCKBOMB_RADIUS)
+          p.tumbleTimer = FUN_TUMBLE_TIME
+          p.slideTimer = 0; p.feintTimer = 0
+          p.vel = { x: nx * PUCKBOMB_KNOCK * f, y: ny * PUCKBOMB_KNOCK * f }
+        }
+      }
+      // Puck terug naar het midden (uitgeput lontje).
+      state.ball.pos = { x: PITCH_LENGTH / 2, y: PITCH_WIDTH / 2 }
+      state.ball.vel = { x: 0, y: 0 }
+      state.ball.z = 0; state.ball.vz = 0; state.ball.spin = 0
+      state.puckBombCooldown = PUCKBOMB_MIN_GAP
+    }
+    return
+  }
+  if (state.puckBombCooldown > 0) { state.puckBombCooldown -= dt; return }
+  if (state.phase === 'playing' && Math.random() < PUCKBOMB_SPAWN_CHANCE * dt) state.puckBomb = PUCKBOMB_FUSE
 }
 
 // Herstart: houd de tegenstander (niet het herstart-team) buiten een straal rond de bal,

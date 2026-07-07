@@ -24,6 +24,13 @@ import {
   PLAYERS_PER_TEAM,
   TUMBLE_TIME,
   FEINT_TIME,
+  ZAMBONI_W,
+  ZAMBONI_H,
+  CRITTER_RADIUS,
+  PUCKBOMB_FUSE,
+  BOOST_GIANT_SCALE,
+  BOOST_TINY_SCALE,
+  BOOST_PICKUP_R,
 } from './constants'
 import type { GameState, MatchPhase, PlayerState, TeamMeta } from './types'
 
@@ -72,6 +79,13 @@ export class PixiSoccerRenderer {
   private streakerNodes: any[] = [] // tot 3 bestormers (1 primair + 2 extra)
   private securityNode: any = null
   private securityPhase = 0
+  private zamboniNode: any = null // dweilmachine (fun)
+  private zamboniTrail: any = null // spiegelgladde schone baan achter de zamboni
+  private boostLayer: any = null // power-up tokens op het ijs + aura's rond geboostte spelers
+  private critterNode: any = null // octopus / pinguïn-mascotte (fun)
+  private puckBombNode: any = null // tikkende-bom-overlay op de puck
+  private puckExplodePrev = 0 // rising-edge teller voor de puck-explosie-boom
+  private funT = 0 // vrije animatieklok voor gimmicks (pulsen etc.)
   private celebrateTeam: number | null = null // team dat juicht (armen omhoog) tijdens de goal-fase
   private teams: [TeamMeta, TeamMeta] | null = null
   private particles: Particle[] = []
@@ -81,6 +95,7 @@ export class PixiSoccerRenderer {
   private trail: Particle[] = [] // bal-spoor bij snelle ballen
   private kickRings: { g: any; life: number; max: number; col: number; shot: boolean }[] = [] // schokgolf bij trappen
   private prevBallSpeed = 0 // voor kick-detectie (plotselinge snelheidssprong)
+  private prevSpeed: Record<number, number> = {} // per speler: snelheid vorige frame (ijsspray bij harde stop)
   private netL: any = null // doelnet links
   private netR: any = null // doelnet rechts
   private netRipple: { dir: number; t: number } | null = null // trillend net na een goal
@@ -177,6 +192,8 @@ export class PixiSoccerRenderer {
     this.buildRef()
     this.buildStreaker()
     this.buildSecurity()
+    this.buildZamboni()
+    this.buildCritter()
     this.buildBall()
     this.buildVignette()
     this.buildWeather()
@@ -406,6 +423,12 @@ export class PixiSoccerRenderer {
     this.world.addChild(this.netL, this.netR)
     this.drawNet(this.netL, -1, 0)
     this.drawNet(this.netR, 1, 0)
+    // Spiegelgladde baan die de zamboni achterlaat (onder de skaters, boven het ijs).
+    this.zamboniTrail = new PIXI.Graphics()
+    this.world.addChild(this.zamboniTrail)
+    // Power-up tokens + aura's rond geboostte spelers (boven het ijs).
+    this.boostLayer = new PIXI.Graphics()
+    this.world.addChild(this.boostLayer)
   }
 
   // Teken het net-raster in een doel; `amp` duwt de achterwand naar buiten (bolling na een goal).
@@ -761,6 +784,79 @@ export class PixiSoccerRenderer {
     this.securityNode = { c, legL, legR, armL, armR }
   }
 
+  // Zamboni (fun): een cartoon-dweilmachine met cabine, oranje tank en wieltjes.
+  private buildZamboni() {
+    const PIXI = this.PIXI
+    const W = ZAMBONI_W, H = ZAMBONI_H
+    const c = new PIXI.Container()
+    const sh = new PIXI.Graphics(); sh.ellipse(0, H * 0.52, W * 0.52, H * 0.34).fill({ color: 0x000000, alpha: 0.22 })
+    const w1 = new PIXI.Graphics(); w1.circle(-W * 0.3, H * 0.46, 10).fill(0x14181f)
+    const w2 = new PIXI.Graphics(); w2.circle(W * 0.3, H * 0.46, 10).fill(0x14181f)
+    const body = new PIXI.Graphics()
+    body.roundRect(-W / 2, -H / 2, W, H, 12).fill(0x2d6be5).stroke({ width: 3, color: 0x14336e })
+    body.roundRect(W / 2 - 34, -H / 2 - 16, 28, 20, 5).fill(0xe8641c) // oranje tank bovenop
+    body.roundRect(-W / 2 + 8, -H / 2 + 7, W * 0.4, H - 14, 8).fill(0xbfe0ff).stroke({ width: 2, color: 0x14336e, alpha: 0.6 }) // cabine-raam (voorkant = rijrichting)
+    body.rect(W / 2, -H * 0.28, 12, H * 0.56).fill(0xd8b23a) // dweilborstel voor
+    body.roundRect(-W / 2 - 6, H * 0.06, 10, H * 0.36, 3).fill(0x111418) // achterrol
+    c.addChild(sh, w1, w2, body)
+    c.visible = false
+    this.entityLayer.addChild(c)
+    this.zamboniNode = { c }
+  }
+
+  // IJs-beest (fun): één container met een octopus én een pinguïn; per frame tonen we er één.
+  private buildCritter() {
+    const PIXI = this.PIXI
+    const R = CRITTER_RADIUS
+    const c = new PIXI.Container()
+    const sh = new PIXI.Graphics(); sh.ellipse(0, R * 0.95, R * 0.9, R * 0.4).fill({ color: 0x000000, alpha: 0.22 })
+    // Octopus: paarse kop met ogen + acht kronkelende tentakels (per frame hertekend).
+    const oct = new PIXI.Container()
+    const octLegs = new PIXI.Graphics()
+    const octHead = new PIXI.Graphics()
+    octHead.ellipse(0, -R * 0.3, R * 0.95, R * 0.82).fill(0x9b3fd4).stroke({ width: 2, color: 0x5e1f8a })
+    octHead.circle(-R * 0.32, -R * 0.42, R * 0.22).fill(0xffffff); octHead.circle(-R * 0.3, -R * 0.4, R * 0.1).fill(0x111418)
+    octHead.circle(R * 0.32, -R * 0.42, R * 0.22).fill(0xffffff); octHead.circle(R * 0.3, -R * 0.4, R * 0.1).fill(0x111418)
+    oct.addChild(octLegs, octHead)
+    // Pinguïn-mascotte: zwart-witte body, oranje snavel + pootjes, rode sjaal.
+    const pen = new PIXI.Container()
+    const penBody = new PIXI.Graphics()
+    penBody.ellipse(0, 0, R * 0.82, R * 1.08).fill(0x1a1d24) // zwarte rug
+    penBody.ellipse(0, R * 0.12, R * 0.52, R * 0.86).fill(0xf4f7fb) // witte buik
+    penBody.ellipse(-R * 0.4, R, R * 0.24, R * 0.14).fill(0xf59e0b); penBody.ellipse(R * 0.4, R, R * 0.24, R * 0.14).fill(0xf59e0b) // pootjes
+    penBody.circle(0, -R * 0.72, R * 0.56).fill(0x1a1d24) // kop
+    penBody.circle(-R * 0.2, -R * 0.78, R * 0.15).fill(0xffffff); penBody.circle(R * 0.2, -R * 0.78, R * 0.15).fill(0xffffff)
+    penBody.circle(-R * 0.2, -R * 0.78, R * 0.07).fill(0x111418); penBody.circle(R * 0.2, -R * 0.78, R * 0.07).fill(0x111418)
+    penBody.poly([0, -R * 0.66, R * 0.3, -R * 0.56, 0, -R * 0.46]).fill(0xf59e0b) // snavel
+    penBody.roundRect(-R * 0.52, -R * 0.44, R * 1.04, R * 0.22, 3).fill(0xe8524a) // rode sjaal
+    const penFlipL = new PIXI.Graphics(); penFlipL.ellipse(0, R * 0.4, R * 0.2, R * 0.5).fill(0x1a1d24); penFlipL.position.set(-R * 0.78, -R * 0.3)
+    const penFlipR = new PIXI.Graphics(); penFlipR.ellipse(0, R * 0.4, R * 0.2, R * 0.5).fill(0x1a1d24); penFlipR.position.set(R * 0.78, -R * 0.3)
+    pen.addChild(penFlipL, penFlipR, penBody)
+    // Stampende T-rex (fun): groen, dikke staart, grote kop met tanden, mini-armpjes, waggelpoten.
+    const dino = new PIXI.Container()
+    dino.scale.set(1.7) // flink groter dan de andere beesten
+    const green = 0x5fae4e, dark = 0x3f7a33
+    const dLegL = new PIXI.Graphics(); dLegL.roundRect(-R * 0.22, 0, R * 0.44, R * 1.1, R * 0.16).fill(0x4c8f3f); dLegL.position.set(-R * 0.34, R * 0.45)
+    const dLegR = new PIXI.Graphics(); dLegR.roundRect(-R * 0.22, 0, R * 0.44, R * 1.1, R * 0.16).fill(0x4c8f3f); dLegR.position.set(R * 0.34, R * 0.45)
+    const dBody = new PIXI.Graphics()
+    dBody.moveTo(-R * 0.4, R * 0.2).quadraticCurveTo(-R * 2.1, -R * 0.1, -R * 1.9, R * 0.95).quadraticCurveTo(-R * 1.0, R * 0.45, -R * 0.35, R * 0.6).fill(green) // staart
+    dBody.ellipse(0, 0, R * 1.02, R * 1.16).fill(green) // romp
+    dBody.ellipse(R * 0.18, R * 0.4, R * 0.55, R * 0.72).fill(0xbfe0a0) // lichte buik
+    for (const t of [-0.55, -0.12, 0.32]) { dBody.moveTo(t * R - 6, -R * 0.68).lineTo(t * R, -R * 1.06).lineTo(t * R + 6, -R * 0.68).fill(dark) } // rugplaten
+    dBody.ellipse(R * 0.85, -R * 0.78, R * 0.72, R * 0.56).fill(green) // kop
+    dBody.roundRect(R * 1.02, -R * 0.72, R * 0.78, R * 0.36, 5).fill(green) // snuit
+    dBody.rect(R * 1.04, -R * 0.5, R * 0.76, R * 0.12).fill(0x7a1f16) // mond
+    for (let i = 0; i < 4; i++) { dBody.moveTo(R * 1.08 + i * R * 0.18, -R * 0.5).lineTo(R * 1.13 + i * R * 0.18, -R * 0.36).lineTo(R * 1.18 + i * R * 0.18, -R * 0.5).fill(0xffffff) } // tanden
+    dBody.circle(R * 0.78, -R * 0.98, R * 0.17).fill(0xffffff); dBody.circle(R * 0.82, -R * 0.98, R * 0.08).fill(0x111418) // oog
+    dBody.roundRect(R * 0.5, -R * 0.15, R * 0.34, R * 0.14, 3).fill(0x4c8f3f) // mini-armpje
+    dino.addChild(dLegL, dLegR, dBody)
+    c.addChild(sh, oct, pen, dino)
+    c.visible = false
+    c.scale.set(1.5)
+    this.entityLayer.addChild(c)
+    this.critterNode = { c, oct, octLegs, pen, penFlipL, penFlipR, dino, dLegL, dLegR }
+  }
+
   private buildBall() {
     const PIXI = this.PIXI
     const sh = new PIXI.Graphics()
@@ -778,6 +874,18 @@ export class PixiSoccerRenderer {
     c.addChild(g)
     this.entityLayer.addChild(c)
     this.ballNode = c
+
+    // Tikkende-bom-overlay (fun): rode gloed + lont-vonk boven de puck; alleen zichtbaar als
+    // de puck een bom is. Los in de fxLayer zodat de gloed altijd bovenop de puck ligt.
+    const bomb = new PIXI.Container()
+    const glow = new PIXI.Graphics(); glow.circle(0, 0, BALL_RADIUS * 2.4).fill({ color: 0xff2a1a, alpha: 0.4 })
+    const fuse = new PIXI.Graphics()
+    fuse.moveTo(0, -BALL_RADIUS * 1.4).lineTo(BALL_RADIUS * 0.9, -BALL_RADIUS * 3.2).stroke({ width: 2, color: 0x3a2410 }) // lontje
+    fuse.star(BALL_RADIUS * 0.9, -BALL_RADIUS * 3.2, 5, 4, 2).fill(0xffd000) // vonk
+    bomb.addChild(glow, fuse)
+    bomb.visible = false
+    this.fxLayer.addChild(bomb)
+    this.puckBombNode = { c: bomb, glow, fuse }
   }
 
   private buildVignette() {
@@ -950,8 +1058,13 @@ export class PixiSoccerRenderer {
       n.ring.visible = p.id === controlled
       // stofwolk op het moment dat iemand omvergelopen wordt
       const tumbling = p.tumbleTimer > 0
-      if (tumbling && !this.tumbleWas[p.id]) this.spawnTumbleDust(p.pos.x, p.pos.y)
+      if (tumbling && !this.tumbleWas[p.id]) { this.spawnTumbleDust(p.pos.x, p.pos.y); this.spawnGloves(p.pos.x, p.pos.y) } // check → stof + handschoenen vliegen
       this.tumbleWas[p.id] = tumbling
+      // IJsspray bij een harde hockey-stop (snel schaatsen → plotseling sterk afremmen).
+      const psp = Math.hypot(p.vel.x, p.vel.y)
+      const prevSp = this.prevSpeed[p.id] ?? psp
+      if (dt > 0 && prevSp > 150 && prevSp - psp > 60 && p.tumbleTimer <= 0) this.spawnIceSpray(p.pos.x, p.pos.y, p.facing)
+      this.prevSpeed[p.id] = psp
       // sparkles op het moment dat de omhaal-salto begint
       const bicycling = (p.bicycleTimer ?? 0) > 0
       if (bicycling && !this.bicycleWas[p.id]) this.spawnSparkles(p.pos.x, p.pos.y)
@@ -962,6 +1075,9 @@ export class PixiSoccerRenderer {
         this.spawnSlideDust(p.pos.x + (Math.random() - 0.5) * 26, p.pos.y + (Math.random() - 0.5) * 18, p.facing)
       }
       this.animatePlayer(p, n, dt)
+      // Boost-schaal: reus wordt groot, dwerg klein (bovenop de pose-schaal die animatePlayer zette).
+      const bScale = p.boost?.kind === 'giant' ? BOOST_GIANT_SCALE : p.boost?.kind === 'tiny' ? BOOST_TINY_SCALE : 1
+      if (bScale !== 1) { n.c.scale.x *= bScale; n.c.scale.y *= bScale }
       if (sh) sh.position.set(p.pos.x, p.pos.y + PLAYER_RADIUS * 1.15)
     }
     // scheidsrechter (kan getackeld worden → tuimelt spinnend weg, puur fun).
@@ -1021,6 +1137,88 @@ export class PixiSoccerRenderer {
       se.c.visible = false
     }
 
+    this.funT += dt
+
+    // Power-up boosts (fun): zwevende tokens op het ijs + een pulserende aura rond geboostte spelers.
+    if (this.boostLayer) {
+      const bl = this.boostLayer as any
+      bl.clear()
+      const colOf = (k: string) => (k === 'speed' ? 0xffd43b : k === 'giant' ? 0xc026d3 : k === 'tiny' ? 0x22d3ee : 0xff5a4d)
+      // Aura's rond spelers met een actieve boost.
+      for (const p of state.players) {
+        if (!p.boost || p.sentOff) continue
+        const col = colOf(p.boost.kind)
+        const pulse = 1 + Math.sin(this.funT * 8 + p.id) * 0.12
+        const ar = PLAYER_RADIUS * (p.boost.kind === 'giant' ? 2.4 : p.boost.kind === 'tiny' ? 1.1 : 1.7) * pulse
+        bl.circle(p.pos.x, p.pos.y + PLAYER_RADIUS * 0.4, ar).stroke({ width: 3, color: col, alpha: 0.7 })
+        bl.circle(p.pos.x, p.pos.y + PLAYER_RADIUS * 0.4, ar + 4).stroke({ width: 2, color: col, alpha: 0.28 })
+      }
+      // Tokens: bobbend gekleurd muntje met een simpel symbool + pulserende ring.
+      for (const tok of state.boosts) {
+        const bob = Math.sin(this.funT * 3 + tok.pos.x * 0.05) * 4
+        const x = tok.pos.x, y = tok.pos.y + bob
+        const col = colOf(tok.kind)
+        const R = BOOST_PICKUP_R
+        bl.circle(x, y, R + 4 + Math.sin(this.funT * 5) * 2).stroke({ width: 2, color: col, alpha: 0.4 }) // halo
+        bl.circle(x, y, R).fill({ color: col, alpha: 0.9 }).stroke({ width: 2, color: 0xffffff, alpha: 0.9 })
+        // Symbool (wit) per soort.
+        if (tok.kind === 'speed') { bl.moveTo(x + 3, y - 8).lineTo(x - 4, y + 1).lineTo(x + 1, y + 1).lineTo(x - 3, y + 8).lineTo(x + 5, y - 2).lineTo(x, y - 2).stroke({ width: 2.5, color: 0xffffff }) } // bliksem
+        else if (tok.kind === 'giant') { bl.moveTo(x - 6, y + 4).lineTo(x, y - 7).lineTo(x + 6, y + 4).stroke({ width: 2.5, color: 0xffffff }); bl.moveTo(x - 6, y + 7).lineTo(x + 6, y + 7).stroke({ width: 2.5, color: 0xffffff }) } // pijl omhoog
+        else if (tok.kind === 'tiny') { bl.moveTo(x - 6, y - 4).lineTo(x, y + 7).lineTo(x + 6, y - 4).stroke({ width: 2.5, color: 0xffffff }); bl.moveTo(x - 6, y - 7).lineTo(x + 6, y - 7).stroke({ width: 2.5, color: 0xffffff }) } // pijl omlaag
+        else { bl.moveTo(x - 5, y - 7).lineTo(x - 5, y + 2).arc(x, y + 2, 5, Math.PI, 0, true).lineTo(x + 5, y - 7).stroke({ width: 2.5, color: 0xffffff }); bl.rect(x - 6, y - 8, 3, 3).fill(0xffffff); bl.rect(x + 3, y - 8, 3, 3).fill(0xffffff) } // magneet (hoefijzer)
+      }
+    }
+
+    // Zamboni-invasie (fun): dweilmachine + spiegelgladde baan erachter.
+    const zn = this.zamboniNode
+    if (state.zamboni) {
+      const z = state.zamboni
+      zn.c.visible = true
+      zn.c.position.set(z.pos.x, z.pos.y)
+      zn.c.zIndex = z.pos.y + 500 // groot ding → bovenop de skaters bij overlap
+      zn.c.scale.x = z.vel.x < 0 ? -1 : 1
+      if (this.zamboniTrail) {
+        this.zamboniTrail.clear()
+        for (const t of z.trail) this.zamboniTrail.ellipse(t.x, t.y, ZAMBONI_H * 0.56, ZAMBONI_H * 0.42).fill({ color: 0xffffff, alpha: 0.16 })
+      }
+    } else {
+      if (zn.c.visible) zn.c.visible = false
+      if (this.zamboniTrail) this.zamboniTrail.clear()
+    }
+
+    // IJs-beest (fun): octopus (kronkelende tentakels) of pinguïn (waggelt / buikschuiver).
+    const cn = this.critterNode
+    if (state.critter) {
+      const cr = state.critter
+      cn.c.visible = true
+      cn.oct.visible = cr.kind === 'octopus'
+      cn.pen.visible = cr.kind === 'penguin'
+      cn.dino.visible = cr.kind === 'dino'
+      cn.c.position.set(cr.pos.x, cr.pos.y)
+      cn.c.zIndex = cr.pos.y
+      cn.c.scale.x = cr.kind === 'dino' && cr.vel.x < 0 ? -1.5 : 1.5 // dino kijkt in z'n rijrichting
+      if (cr.kind === 'dino') {
+        cn.dLegL.rotation = Math.sin(cr.phase) * 0.6 // stampende poten
+        cn.dLegR.rotation = -Math.sin(cr.phase) * 0.6
+        cn.c.rotation = Math.sin(cr.phase * 0.5) * 0.05 // logge waggel
+      } else if (cr.kind === 'octopus') {
+        const g = cn.octLegs; g.clear()
+        const R = CRITTER_RADIUS
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2
+          const wob = Math.sin(cr.phase + i * 0.9) * 0.5
+          const x1 = Math.cos(a) * R * 0.55, y1 = R * 0.2
+          const x2 = Math.cos(a + wob) * R * 1.5, y2 = R * 1.15 + Math.sin(cr.phase + i) * 3
+          g.moveTo(x1, y1).quadraticCurveTo(Math.cos(a) * R * 1.2, R * 0.9, x2, y2).stroke({ width: 4, color: 0x7a2bb0, alpha: 0.95 })
+        }
+        cn.c.rotation = 0
+      } else {
+        cn.c.rotation = cr.slide > 0 ? 1.3 : Math.sin(cr.phase) * 0.16 // buikschuiver = plat op het ijs
+        cn.penFlipL.rotation = Math.sin(cr.phase) * 0.6
+        cn.penFlipR.rotation = -Math.sin(cr.phase) * 0.6
+      }
+    } else if (cn.c.visible) cn.c.visible = false
+
     // bal: hoogte (z) tilt 'm op het scherm omhoog + iets groter; schaduw blijft op de grond
     const b = state.ball
     this.ballNode.position.set(b.pos.x, b.pos.y - b.z)
@@ -1035,6 +1233,25 @@ export class PixiSoccerRenderer {
     this.ballShadow.position.set(b.pos.x + 1 + b.z * 0.15, b.pos.y + 2)
     const shScale = Math.max(0.45, 1 - b.z / 120) * this.ballScale
     this.ballShadow.scale.set(shScale)
+
+    // Explosieve TNT-puck (fun): rode gloed die sneller pulseert naarmate de lont afloopt + lont-vonk.
+    const pb = this.puckBombNode
+    if (state.puckBomb > 0) {
+      pb.c.visible = true
+      pb.c.position.set(b.pos.x, b.pos.y - b.z)
+      const urgency = 1 - Math.min(1, state.puckBomb / PUCKBOMB_FUSE) // 0 → 1 richting de knal
+      const pulse = 0.5 + 0.5 * Math.sin(this.funT * (8 + urgency * 26))
+      pb.glow.alpha = 0.25 + pulse * (0.35 + urgency * 0.4)
+      pb.c.scale.set(0.9 + pulse * (0.2 + urgency * 0.35))
+      pb.fuse.rotation = Math.sin(this.funT * 20) * 0.2
+    } else if (pb.c.visible) pb.c.visible = false
+    // Explosie zojuist afgegaan → boom + shake.
+    if (state.puckExplodeCount > this.puckExplodePrev) {
+      this.spawnPuckBoom(b.pos.x, b.pos.y)
+      this.shakeMag = 26
+      this.zoomPunch = 0.14
+    }
+    this.puckExplodePrev = state.puckExplodeCount
 
     // bal-trail bij snelle ballen (over de grond)
     this.updateTrail(dt, b.pos.x, b.pos.y - b.z, speed, b.z)
@@ -1270,6 +1487,59 @@ export class PixiSoccerRenderer {
       const spd = 30 + Math.random() * 60
       this.fxLayer.addChild(g)
       this.particles.push({ g, vx: -facing.x * spd + (Math.random() - 0.5) * 40, vy: -30 - Math.random() * 30, life: 0, max: 0.3 + Math.random() * 0.3 })
+    }
+  }
+
+  // IJsspray bij een harde hockey-stop: een waaier witte sneeuwkorrels tegen de rijrichting in.
+  private spawnIceSpray(x: number, y: number, facing: { x: number; y: number }) {
+    const PIXI = this.PIXI
+    const fl = Math.hypot(facing.x, facing.y) || 1
+    const bx = -facing.x / fl, by = -facing.y / fl // richting achter de skater
+    const base = Math.atan2(by, bx)
+    for (let i = 0; i < 12; i++) {
+      const g = new PIXI.Graphics()
+      g.circle(0, 0, 1.4 + Math.random() * 2.2).fill({ color: 0xffffff, alpha: 0.9 })
+      g.position.set(x, y + PLAYER_RADIUS * 0.5)
+      const ang = base + (Math.random() - 0.5) * 1.1
+      const spd = 120 + Math.random() * 200
+      this.fxLayer.addChild(g)
+      this.particles.push({ g, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 40, life: 0, max: 0.3 + Math.random() * 0.3 })
+    }
+  }
+
+  // Handschoenen (en een helm) die wegvliegen als iemand omver wordt gebeukt.
+  private spawnGloves(x: number, y: number) {
+    const PIXI = this.PIXI
+    for (let i = 0; i < 3; i++) {
+      const g = new PIXI.Graphics()
+      if (i === 2) g.circle(0, 0, PLAYER_RADIUS * 0.5).fill(0x2b2f38).stroke({ width: 2, color: 0x11141a }) // helm
+      else g.roundRect(-4, -3, 8, 6, 2).fill(i === 0 ? 0xe63946 : 0x2d6be5) // handschoen (kitkleurtje)
+      g.position.set(x, y - PLAYER_RADIUS)
+      const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.6
+      const spd = 150 + Math.random() * 160
+      this.fxLayer.addChild(g)
+      this.particles.push({ g, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, life: 0, max: 0.7 + Math.random() * 0.4 })
+    }
+  }
+
+  // Explosie van de TNT-puck: vuur/rook + een dikke schokgolf-ring.
+  private spawnPuckBoom(x: number, y: number) {
+    const PIXI = this.PIXI
+    const ring = new PIXI.Graphics()
+    ring.position.set(x, y)
+    this.fxLayer.addChild(ring)
+    this.kickRings.push({ g: ring, life: 0, max: 0.5, col: 0xffa500, shot: true })
+    const cols = [0xff6a00, 0xffd000, 0xff2200, 0x555555]
+    for (let i = 0; i < 40; i++) {
+      const g = new PIXI.Graphics()
+      const smoke = i % 4 === 3
+      if (smoke) g.circle(0, 0, 2.5 + Math.random() * 3.5).fill({ color: 0x666666, alpha: 0.8 })
+      else g.star(0, 0, 5, 3 + Math.random() * 2, 1.6).fill(cols[i % 3])
+      g.position.set(x, y)
+      const ang = Math.random() * Math.PI * 2
+      const spd = 140 + Math.random() * 360
+      this.fxLayer.addChild(g)
+      this.particles.push({ g, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 60, life: 0, max: 0.5 + Math.random() * 0.5 })
     }
   }
 
