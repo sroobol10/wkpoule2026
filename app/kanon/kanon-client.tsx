@@ -55,7 +55,7 @@ export default function KanonClient() {
   const doneRef = useRef(false) // voorkomt dubbele level-overgang/game-over
   const lastHudRef = useRef('')
   const sfxRef = useRef<Sfx | null>(null)
-  useEffect(() => { sfxRef.current = createSfx(['catapult', 'wood-crash', 'kanon-pop', 'anime-wow', 'boom', 'whoosh', 'slam', 'glass', 'meteor', 'boing']) }, [])
+  useEffect(() => { sfxRef.current = createSfx(['catapult', 'catapult-bak', 'wood-crash', 'kanon-pop', 'anime-wow', 'boom', 'whoosh', 'slam', 'glass', 'meteor', 'boing', 'powerup', 'dino-roar', 'bruh', 'finish', 'splat', 'rain']) }, [])
   // Online 1v1
   const netRef = useRef<KanonNet | null>(null)
   const guestInputRef = useRef<KanonInput>(IDLE_INPUT) // host: laatste gast-input
@@ -223,8 +223,9 @@ export default function KanonClient() {
       const { dx, dy, len } = pullFrom(wx, wy)
       if (len < 12) return // te klein → niet vuren
       const k = (len / PULL_MAX) * LAUNCH_MAX / len
-      launch(g.st, -dx * k, -dy * k)
-      sfxRef.current?.play('catapult')
+      const evs = launch(g.st, -dx * k, -dy * k) // bevat het 'launch'-event (katapult-geluid)
+      applyEvents(g, evs)
+      if (g.net === 'host') for (const e of evs) hostEvents.push(e) // → gast hoort 'm ook via de snapshot
     }
     // Tijdens de vlucht: de power van de kop activeren (host/offline; gast stuurt een commando).
     const doPower = () => {
@@ -299,18 +300,19 @@ export default function KanonClient() {
     // Alle sim-events → deeltjes, geluid, shake, slow-mo (gedeeld door de loop én power-activatie).
     const applyEvents = (g: Game, events: ReturnType<typeof step>) => {
       for (const e of events) {
-        if (e.type === 'pop') { spawnPop(e.x, e.y, e.bonus); g.shakeT = Math.max(g.shakeT, 0.25); sfxRef.current?.play('kanon-pop') }
+        if (e.type === 'launch') { sfxRef.current?.play(Math.random() < 0.5 ? 'catapult' : 'catapult-bak') } // wisselend katapult-geluid
+        else if (e.type === 'pop') { spawnPop(e.x, e.y, e.bonus); g.shakeT = Math.max(g.shakeT, 0.25); sfxRef.current?.play(e.bonus ? 'powerup' : isDino(e.face) ? 'dino-roar' : 'kanon-pop', e.bonus ? 0.9 : isDino(e.face) ? 0.7 : 1) } // dino-kop brult, gouden kop = powerup
         else if (e.type === 'boom') { spawnBoom(e.x, e.y); g.shakeT = Math.max(g.shakeT, 0.5); g.slowmoT = Math.max(g.slowmoT, 0.35); sfxRef.current?.play('boom') }
         else if (e.type === 'shatter') { spawnShatter(e.x, e.y); g.shakeT = Math.max(g.shakeT, 0.15); sfxRef.current?.play('glass') }
         else if (e.type === 'bounce') { g.shakeT = Math.max(g.shakeT, 0.08); sfxRef.current?.play('boing', 0.55) }
-        else if (e.type === 'thud' && e.power > 320) { g.shakeT = Math.max(g.shakeT, Math.min(0.3, e.power / 2200)); sfxRef.current?.play('wood-crash', Math.min(1, e.power / 900)) }
-        else if (e.type === 'power') { sfxRef.current?.play(e.kind === 'bomb' ? 'boom' : e.kind === 'slam' ? 'slam' : 'whoosh'); if (e.kind !== 'bomb' && e.kind !== 'magnet') spawnBoom(e.x, e.y) }
+        else if (e.type === 'thud' && e.power > 320) { g.shakeT = Math.max(g.shakeT, Math.min(0.3, e.power / 2200)); sfxRef.current?.play(e.power > 1400 ? 'splat' : 'wood-crash', Math.min(1, e.power / 900)) } // keiharde klap = splat
+        else if (e.type === 'power') { sfxRef.current?.play(e.kind === 'bomb' ? 'boom' : e.kind === 'slam' ? 'slam' : e.kind === 'giant' ? 'dino-roar' : e.kind === 'magnet' ? 'whoosh' : 'powerup'); if (e.kind !== 'bomb' && e.kind !== 'magnet') spawnBoom(e.x, e.y) }
         else if (e.type === 'meteor') { show('☄️ METEORENREGEN!'); g.shakeT = Math.max(g.shakeT, 0.4); sfxRef.current?.play('meteor') }
         else if (e.type === 'gust') { show('🌬️ WINDVLAAG!'); sfxRef.current?.play('whoosh', 0.6) }
-        else if (e.type === 'decoy') { show('❌ NEP-KOP! −200'); spawnPop(e.x, e.y); g.shakeT = Math.max(g.shakeT, 0.15); sfxRef.current?.play('wood-crash', 0.7) }
-        else if (e.type === 'coin') { show('🪙 MUNT! +schot'); spawnPop(e.x, e.y, true); sfxRef.current?.play('boing', 0.7) }
+        else if (e.type === 'decoy') { show('❌ NEP-KOP! −200'); spawnPop(e.x, e.y); g.shakeT = Math.max(g.shakeT, 0.15); sfxRef.current?.play('bruh') } // grappig faal-geluid
+        else if (e.type === 'coin') { show('🪙 MUNT! +schot'); spawnPop(e.x, e.y, true); sfxRef.current?.play('powerup', 0.85) }
         else if (e.type === 'combo') { show(`🔥 COMBO ×${e.n}!`); g.slowmoT = Math.max(g.slowmoT, 0.5); sfxRef.current?.play('anime-wow') }
-        else if (e.type === 'cleared' || e.type === 'won') sfxRef.current?.play('anime-wow')
+        else if (e.type === 'cleared' || e.type === 'won') sfxRef.current?.play('finish') // level uit / match beslist = fanfare
       }
     }
 
@@ -318,7 +320,13 @@ export default function KanonClient() {
     // Effectief richtpunt voor de renderer: mijn eigen aim als ik de schutter ben, anders de remote.
     const renderAim = () => (isMyTurn() ? { wx: aimRef.current.wx, wy: aimRef.current.wy } : { wx: remoteAimRef.current.wx, wy: remoteAimRef.current.wy })
 
-    let raf = 0, last = performance.now(), acc = 0, aimedFor = -1
+    let raf = 0, last = performance.now(), acc = 0, aimedFor = -1, rainOn = false
+    // Regen-sfeergeluid aan/uit houden op basis van het weer van de scène (zacht loopje).
+    const syncRain = (g: Game) => {
+      const wantRain = g.st.weather === 'rain'
+      if (wantRain && !rainOn) { sfxRef.current?.loop('rain', 0.22); rainOn = true }
+      else if (!wantRain && rainOn) { sfxRef.current?.stop('rain'); rainOn = false }
+    }
     // Zet bij een nieuwe beurt een nette default-terugtrek voor de LOKALE schutter.
     const runDefaultAim = (g: Game) => {
       if (g.st.phase === 'aim' && !aimRef.current.aiming && aimedFor !== g.st.turn && isMyTurn()) {
@@ -364,6 +372,7 @@ export default function KanonClient() {
       const g = gameRef.current
       if (!g) return
       const rdt = Math.min(0.05, (now - last) / 1000); last = now
+      syncRain(g)
 
       // ── Gast: geen sim — pas host-snapshots toe, stuur eigen input (speler 1), render. ──
       if (g.net === 'guest') {
@@ -435,6 +444,7 @@ export default function KanonClient() {
 
     return () => {
       cancelAnimationFrame(raf)
+      sfxRef.current?.stop('rain')
       canvas.removeEventListener('pointerdown', onDown)
       window.removeEventListener('pointermove', onMoveP)
       window.removeEventListener('pointerup', onUp)

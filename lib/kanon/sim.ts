@@ -78,6 +78,7 @@ const massFactor = (b: Body) => (b.kind === 'stone' ? 0.32 : b.kind === 'ice' ? 
 export type Ball = { x: number; y: number; vx: number; vy: number; angle: number; va: number; r: number; face: string; owner: 0 | 1; arena: 0 | 1; power: PowerKind; powerUsed: boolean; live: boolean; sleep: number; hits: number; homing?: number; curve?: number; ghost?: number }
 
 export type KanonEvent =
+  | { type: 'launch'; x: number; y: number } // kop afgeschoten (katapult-geluid; ook voor de gast)
   | { type: 'pop'; x: number; y: number; face: string; bonus?: boolean }
   | { type: 'thud'; x: number; y: number; power: number }
   | { type: 'boom'; x: number; y: number } // TNT-explosie
@@ -266,11 +267,12 @@ export function targetsLeft(s: KanonState, arena?: 0 | 1): number {
   return s.bodies.filter((b) => b.kind === 'target' && !b.popped && (arena === undefined || b.arena === arena)).length
 }
 
-// Vuur de bovenste voorraad-kop van de speler-aan-beurt af.
-export function launch(s: KanonState, vx: number, vy: number): void {
-  if (s.phase !== 'aim') return
+// Vuur de bovenste voorraad-kop van de speler-aan-beurt af. Geeft de sim-events terug (o.a. 'launch',
+// zodat het katapult-geluid ook via de netwerk-snapshot bij de gast belandt).
+export function launch(s: KanonState, vx: number, vy: number): KanonEvent[] {
+  if (s.phase !== 'aim') return []
   const t = s.turn
-  if (s.ammo[t].length === 0) return
+  if (s.ammo[t].length === 0) return []
   const face = s.ammo[t].shift()!
   const sp = slingPos(s.mode, t)
   const jit = 1 + (Math.random() - 0.5) * 0.03 // minieme afwijking per schot (voelt levendiger)
@@ -282,6 +284,7 @@ export function launch(s: KanonState, vx: number, vy: number): void {
   s.wind = (Math.random() * 2 - 1) * WIND_MAX * (s.modifier === 'windy' ? 1.6 : 1) // nieuwe windvlaag per schot
   s.gustT = 0.8 + Math.random() * 1.2
   s.phase = 'fly'
+  return [{ type: 'launch', x: sp.x, y: sp.y }]
 }
 
 // Mid-vlucht de power van de kogel-kop activeren (spatie/klik). Eén keer per schot.
