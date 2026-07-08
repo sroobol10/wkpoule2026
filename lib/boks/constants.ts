@@ -8,7 +8,7 @@ export const RING_MAX_X = 850 // rechter touw
 export const FIGHTER_GAP = 58 // minimale afstand tussen de twee (geen clippen)
 
 // ── Vechter ──────────────────────────────────────────────────────────────────
-export const MOVE_SPEED = 265 // voetenwerk (× pace-trait) — snel op de benen
+export const MOVE_SPEED = 300 // voetenwerk (× pace-trait) — kwiek op de benen (dynamischer)
 export const BLOCK_MOVE_MULT = 0.4 // al blokkend schuifel je maar langzaam
 export const MAX_HP = 100
 export const MAX_STAM = 100
@@ -40,14 +40,14 @@ export const JAB_RANGE = 96
 export const JAB_DMG = 6
 export const JAB_STAM = 7
 // Hoek: snel, maar nog leesbaar genoeg om te counteren.
-export const HOOK_WINDUP = 0.19
-export const HOOK_TOTAL = 0.34
+export const HOOK_WINDUP = 0.16
+export const HOOK_TOTAL = 0.3
 export const HOOK_RANGE = 106
 export const HOOK_DMG = 15
 export const HOOK_STAM = 16
 // Uppercut (Q): explosief snel — ramt door de dekking en vloert bijna zeker vol aan.
-export const UPPERCUT_WINDUP = 0.14
-export const UPPERCUT_TOTAL = 0.3
+export const UPPERCUT_WINDUP = 0.12
+export const UPPERCUT_TOTAL = 0.27
 export const UPPERCUT_RANGE = 92
 export const UPPERCUT_DMG = 32
 export const UPPERCUT_STAM = 22
@@ -55,8 +55,8 @@ export const UPPERCUT_BLOCK_REDUCE = 0.5 // helft komt er dóór het blok (i.p.v
 export const UPPERCUT_KD = 0.8 // grote kans op een directe knock-down bij een volle raker
 // Ultimate (R): de haymaker. Alleen bij een volle meter; een RUSH naar voren met een enorme uithaal,
 // vloert gegarandeerd als-ie schoon aankomt (te blokken/ontwijken). Kost geen stamina.
-export const ULT_WINDUP = 0.3
-export const ULT_TOTAL = 0.6
+export const ULT_WINDUP = 0.26
+export const ULT_TOTAL = 0.54
 export const ULT_RANGE = 108
 export const ULT_DMG = 70
 export const ULT_BLOCK_REDUCE = 0.6

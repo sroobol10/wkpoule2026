@@ -42,6 +42,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const insideRect = (r: Rect, x: number, y: number, m: number) =>
   x >= r.x + m && x <= r.x + r.w - m && y >= r.y + m && y <= r.y + r.h - m
 
+// Positie van de rollende reuzenkop op tijdstip t (ping-pong tussen a en b).
+export function boulderPos(bd: NonNullable<Hole['boulder']>, t: number): { x: number; y: number } {
+  const tri = Math.abs(((t * bd.speed) % 2) - 1) // 0→1→0
+  return { x: bd.ax + (bd.bx - bd.ax) * tri, y: bd.ay + (bd.by - bd.ay) * tri }
+}
+
 export const insideHole = (h: Hole, x: number, y: number, m = BALL_R) =>
   h.rects.some((r) => insideRect(r, x, y, m))
 
@@ -93,15 +99,16 @@ export function generateHole(holeIndex: number, faces: string[]): Hole {
   }
 
   const bumpers: Hole['bumpers'] = []
-  const nBump = Math.random() < chaos ? 1 + Math.floor(Math.random() * 2) : 0
+  const nBump = 1 + Math.floor(Math.random() * (chaos > 0.5 ? 3 : 2)) // altijd minstens één kop → altijd wat te ketsen
   for (let i = 0; i < nBump; i++) {
     const s = spotIn(40)
     if (s) bumpers.push({ ...s, r: 17 + Math.random() * 7, face: faces[Math.floor(Math.random() * faces.length)] })
   }
   const sand: Hole['sand'] = []
-  if (Math.random() < 0.7) {
+  const nSand = Math.random() < 0.7 ? (Math.random() < 0.35 ? 2 : 1) : 0
+  for (let i = 0; i < nSand; i++) {
     const s = spotIn(46)
-    if (s) sand.push({ ...s, r: 34 + Math.random() * 16 })
+    if (s) sand.push({ ...s, r: 32 + Math.random() * 16 })
   }
   const water: Hole['water'] = []
   if (holeIndex >= 2 && Math.random() < chaos * 0.8) {
@@ -109,20 +116,38 @@ export function generateHole(holeIndex: number, faces: string[]): Hole {
     if (s) water.push({ ...s, r: 28 + Math.random() * 12 })
   }
   let mill: Hole['mill'] = null
-  if (holeIndex >= 1 && Math.random() < 0.4) {
+  if (holeIndex >= 1 && Math.random() < 0.52) {
     const s = spotIn(70)
     if (s) mill = { x: s.x, y: s.y, len: 52 + Math.random() * 18, speed: (0.9 + Math.random() * 0.9) * (Math.random() < 0.5 ? -1 : 1) }
   }
   // Boost-tegels: pijl-vloertjes die de bal een zetje geven (fun + shortcuts).
   const boost: Hole['boost'] = []
-  if (Math.random() < 0.5) {
+  if (Math.random() < 0.62) {
     const s = spotIn(40)
     if (s) boost.push({ ...s, r: 24, ang: Math.atan2(cup.y - s.y, cup.x - s.x) + (Math.random() - 0.5) * 0.7 })
+  }
+  // Wormgaten (paar): erin op de ene plek → eruit op de andere. Alleen als ze ver genoeg uit elkaar liggen.
+  const portals: Hole['portals'] = []
+  if (holeIndex >= 2 && Math.random() < 0.5) {
+    const a = spotIn(46)
+    const b2 = spotIn(46)
+    if (a && b2 && Math.hypot(a.x - b2.x, a.y - b2.y) > 200) portals.push({ ...a, r: 21 }, { ...b2, r: 21 })
+  }
+  // Trampolines: katapulteren de bal keihard door in z'n rolrichting.
+  const tramps: Hole['tramps'] = []
+  const nTramp = Math.random() < 0.55 ? (Math.random() < 0.3 ? 2 : 1) : 0
+  for (let i = 0; i < nTramp; i++) { const s = spotIn(40); if (s) tramps.push({ ...s, r: 22 }) }
+  // Rollende reuzenkop (Indiana Jones): dendert heen en weer over een lijn, beukt de bal weg.
+  let boulder: Hole['boulder'] = null
+  if (holeIndex >= 2 && Math.random() < 0.4) {
+    const a = spotIn(60)
+    const b2 = spotIn(60)
+    if (a && b2 && Math.hypot(a.x - b2.x, a.y - b2.y) > 150) boulder = { ax: a.x, ay: a.y, bx: b2.x, by: b2.y, r: 26, speed: 0.28 + Math.random() * 0.22, face: faces[Math.floor(Math.random() * faces.length)] }
   }
 
   const theme = GOLF_THEMES[holeIndex % GOLF_THEMES.length]
   const par = clamp(2 + bends + (bumpers.length + water.length + (mill ? 1 : 0) > 1 ? 1 : 0), 2, 5)
-  return { rects, tee, cup, par, theme, bumpers, sand, water, mill, boost }
+  return { rects, tee, cup, par, theme, bumpers, sand, water, mill, boost, portals, tramps, boulder }
 }
 
 // ── Fysica-tick ──────────────────────────────────────────────────────────────
@@ -137,6 +162,9 @@ export function stepBall(h: Hole, b: GolfBall, t: number, dt: number): StepEvent
     b.vy = 0
     return b.sinking <= 0 ? 'cup' : null
   }
+
+  if (b.portalCd && b.portalCd > 0) b.portalCd = Math.max(0, b.portalCd - dt)
+  if (b.trampCd && b.trampCd > 0) b.trampCd = Math.max(0, b.trampCd - dt)
 
   const speed = Math.hypot(b.vx, b.vy)
   if (speed < 4) {
@@ -225,6 +253,56 @@ export function stepBall(h: Hole, b: GolfBall, t: number, dt: number): StepEvent
       b.vy += Math.cos(a) * tangential * 0.4
       b.x = h.mill.x + qx + nxx * (MILL_R + BALL_R + 1)
       b.y = h.mill.y + qy + nyy * (MILL_R + BALL_R + 1)
+    }
+  }
+
+  // Wormgaten: het ene gat in → uit het andere gat, met behoud van (iets gedempte) snelheid.
+  if (!b.portalCd) {
+    for (let i = 0; i + 1 < h.portals.length; i += 2) {
+      const pa = h.portals[i], pb = h.portals[i + 1]
+      const inA = Math.hypot(b.x - pa.x, b.y - pa.y) < pa.r
+      const inB = Math.hypot(b.x - pb.x, b.y - pb.y) < pb.r
+      if (inA || inB) {
+        const to = inA ? pb : pa
+        b.x = to.x
+        b.y = to.y
+        b.vx *= 0.92
+        b.vy *= 0.92
+        b.portalCd = 0.35
+        break
+      }
+    }
+  }
+
+  // Trampolines: rol je eroverheen met vaart, dan word je keihard doorgekatapulteerd (met cap).
+  if (!b.trampCd) {
+    for (const tr of h.tramps) {
+      if (Math.hypot(b.x - tr.x, b.y - tr.y) < tr.r) {
+        const cur = Math.hypot(b.vx, b.vy)
+        if (cur > 30) {
+          const boosted = Math.min(POWER_MAX, cur * 1.95 + 120)
+          b.vx = (b.vx / cur) * boosted
+          b.vy = (b.vy / cur) * boosted
+        }
+        b.trampCd = 0.4
+        break
+      }
+    }
+  }
+
+  // Rollende reuzenkop: beukt de bal weg als-ie erin loopt (impuls, geen harde teleport → veilig).
+  if (h.boulder) {
+    const bp = boulderPos(h.boulder, t)
+    const dx = b.x - bp.x, dy = b.y - bp.y
+    const d = Math.hypot(dx, dy)
+    const minD = h.boulder.r + BALL_R
+    if (d < minD && d > 1e-4) {
+      const nxx = dx / d, nyy = dy / d
+      const kick = 520
+      b.vx = nxx * kick
+      b.vy = nyy * kick
+      b.x = bp.x + nxx * (minD + 1)
+      b.y = bp.y + nyy * (minD + 1)
     }
   }
 

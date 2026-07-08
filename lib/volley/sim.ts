@@ -12,8 +12,9 @@ export const GRAVITY = 880
 export const BALL_R = 11
 export const PLAYER_SPEED = 255
 export const JUMP_V = 580 // afzetsnelheid omhoog
-export const REACH = 74 // slag-bereik rond de borst (ruim genoeg om lekker te raken)
+export const REACH = 88 // slag-bereik rond de borst (ruim genoeg om lekker te raken)
 export const DIVE_REACH = 48 // extra bereik tijdens een duik
+export const SWING_BUFFER = 0.14 // input-buffer (s): net-te-vroeg drukken telt nog zodra de bal in bereik komt
 export const DIVE_TIME = 0.5
 export const DIVE_SPEED = 360 // horizontale lunge-snelheid van de duik
 export const BLOCK_TIME = 0.5
@@ -50,6 +51,8 @@ export type VState = {
   prevHit: boolean[]
   prevDink: boolean[]
   prevDive: boolean[]
+  hitBuf: number[] // resterende input-buffer per speler (slaan)
+  dinkBuf: number[] // resterende input-buffer per speler (dinken)
 }
 
 export function makeVState(faces: { face: string; name: string }[]): VState {
@@ -66,6 +69,8 @@ export function makeVState(faces: { face: string; name: string }[]): VState {
     prevHit: [false, false],
     prevDink: [false, false],
     prevDive: [false, false],
+    hitBuf: [0, 0],
+    dinkBuf: [0, 0],
   }
 }
 
@@ -153,16 +158,24 @@ export function step(s: VState, inputs: VInput[], dt: number): VEvent {
     p.y = Math.min(FLOOR, p.y + p.vy * dt)
     if (p.y >= FLOOR) p.vy = 0
 
-    // ── Slaan / dinken (edge) ───────────────────────────────────────────────
+    // ── Slaan / dinken (edge, met korte input-buffer) ───────────────────────
+    if (s.hitBuf[p.id] > 0) s.hitBuf[p.id] = Math.max(0, s.hitBuf[p.id] - dt)
+    if (s.dinkBuf[p.id] > 0) s.dinkBuf[p.id] = Math.max(0, s.dinkBuf[p.id] - dt)
     const hitEdge = input.hit && !s.prevHit[p.id]
     const dinkEdge = input.dink && !s.prevDink[p.id]
     s.prevHit[p.id] = input.hit
     s.prevDink[p.id] = input.dink
-    if (!hitEdge && !dinkEdge) continue
+    // Nieuwe druk → onthoud de intentie kort, zodat net-te-vroeg drukken toch telt zodra de bal in bereik komt.
+    if (hitEdge) s.hitBuf[p.id] = SWING_BUFFER
+    if (dinkEdge) s.dinkBuf[p.id] = SWING_BUFFER
+    const wantHit = s.hitBuf[p.id] > 0
+    const wantDink = s.dinkBuf[p.id] > 0
+    if (!wantHit && !wantDink) continue
     const cx = p.x
     const cy = p.y - 46 // borsthoogte
     const reach = REACH + (p.diveT > 0 ? DIVE_REACH : 0)
-    if (Math.hypot(b.x - cx, b.y - cy) > reach + BALL_R) { p.swingT = 0.22; continue } // lucht
+    if (Math.hypot(b.x - cx, b.y - cy) > reach + BALL_R) { if (hitEdge || dinkEdge) p.swingT = 0.22; continue } // nog niet in bereik → buffer blijft lopen
+    s.hitBuf[p.id] = 0; s.dinkBuf[p.id] = 0 // raak → buffer leeg
 
     const touches = s.lastTeam === p.team ? s.touches + 1 : 1
     if (touches > MAX_TOUCHES) return { to: (1 - p.team) as VSide, reason: `${MAX_TOUCHES}× is het maximum` }
@@ -173,7 +186,7 @@ export function step(s: VState, inputs: VInput[], dt: number): VEvent {
     const dir = p.team === 0 ? 1 : -1
     const airborne = p.y < FLOOR - 30
     const atNet = Math.abs(p.x - NET_X) < 150
-    if (dinkEdge && !hitEdge) {
+    if (wantDink && !wantHit) {
       // DINK: zacht net over het net plaatsen (kort achter het net).
       const target = NET_X + dir * (70 + Math.random() * 60)
       const a = arcTo(b.x, b.y, target)

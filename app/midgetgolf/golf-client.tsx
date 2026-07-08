@@ -10,9 +10,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { PLAYER_POOL } from '@/lib/soccer/teams'
 import {
   BALL_R, CHARGE_TIME, CUP_R, MAX_STROKES, MILL_R, POWER_MAX, POWER_MIN, SINK_TIME, WORLD_H, WORLD_W,
-  generateHole, stepBall,
+  generateHole, stepBall, boulderPos, insideHole,
 } from '@/lib/golf/sim'
-import type { GolfPlayer, Hole } from '@/lib/golf/types'
+import type { GolfPlayer, GolfTheme, Hole } from '@/lib/golf/types'
 import ImmersiveToggle from './immersive-toggle'
 import { useLandscapeGate, RotateNotice, enterImmersiveIfMobile } from '@/components/playground/mobile-play'
 import { TouchGamepad } from '@/components/playground/touch-gamepad'
@@ -21,6 +21,8 @@ import { FacePicker, POOL_ALPHA } from '@/components/playground/face-picker'
 const PLAYER_COLORS = ['#E63946', '#F4B92E', '#4FA8E0', '#5fbf6e'] as const
 const HOLES = 9
 const FIXED_DT = 1 / 120
+
+type Particle = { x: number; y: number; vx: number; vy: number; life: number; max: number; r: number; c: string; grav: number }
 
 type Game = {
   holes: Hole[]
@@ -35,6 +37,28 @@ type Game = {
   simT: number // globale tijd (voor de molenwiek)
   mole: { x: number; y: number; pop: number } | null // molshoop-gimmick (whack-a-mole)
   moleArmed: boolean // mag de mol deze slag nog toeslaan?
+  particles: Particle[] // stof/confetti/plons-deeltjes (juice)
+  trailT: number // afteller voor de stofsliert achter de rollende bal
+  cupGlow: number // >0 = net gescoord → glinstering + confetti-nagloed bij de cup
+  shake: number // >0 = schermschud (bumper/molen/inhole)
+  flash: number // >0 = witte flits (inhole-feest)
+  bumpHitCd: number // korte cooldown zodat één bumper-tik één keer schud/vonkt
+  lastBX: number // vorige bal-positie (teleport-detectie: grote sprong = wormgat)
+  lastBY: number
+  // UFO-ontvoering (client-only, tijdens 'aim'): scheert binnen, straalt de bal op en dropt 'm elders.
+  ufo: { x: number; y: number; hx: number; hy: number; dropX: number; dropY: number; phase: 'in' | 'beam' | 'out'; t: number } | null
+  ufoCd: number // seconden tot een volgende ontvoering mag
+}
+
+// Deeltjes bijspawnen (stof, confetti, plons, aarde).
+function emit(g: Game, x: number, y: number, n: number, colors: string[], opts: { spd?: number; life?: number; r?: number; grav?: number; up?: number } = {}) {
+  const { spd = 120, life = 0.5, r = 3, grav = 0, up = 0 } = opts
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2
+    const s = spd * (0.3 + Math.random() * 0.7)
+    const lf = life * (0.6 + Math.random() * 0.6)
+    g.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - up, life: lf, max: lf, r: r * (0.6 + Math.random() * 0.7), c: colors[Math.floor(Math.random() * colors.length)], grav })
+  }
 }
 
 // Kies een molshoop-plek op de green (weg van tee/cup); ~45% van de holes heeft er één.
@@ -120,6 +144,9 @@ export default function GolfClient() {
       angle: Math.atan2(holes[0].cup.y - holes[0].tee.y, holes[0].cup.x - holes[0].tee.x),
       chargeT: 0, curve: 0, mulliganLeft: true, simT: 0,
       mole: pickMole(holes[0]), moleArmed: true,
+      particles: [], trailT: 0, cupGlow: 0,
+      shake: 0, flash: 0, bumpHitCd: 0, lastBX: holes[0].tee.x, lastBY: holes[0].tee.y,
+      ufo: null, ufoCd: 8 + Math.random() * 8,
     }
     setPopup(null)
     setScorecard(null)
@@ -144,6 +171,17 @@ export default function GolfClient() {
     const show = (text: string, color: string) => {
       popupN.current++
       setPopup({ text, color, n: popupN.current })
+    }
+
+    // Geldige drop-plek voor de UFO: ergens op de baan, weg van de cup.
+    const pickDrop = (hole: Hole): { x: number; y: number } => {
+      for (let i = 0; i < 30; i++) {
+        const r = hole.rects[Math.floor(Math.random() * hole.rects.length)]
+        const x = r.x + 30 + Math.random() * Math.max(1, r.w - 60)
+        const y = r.y + 30 + Math.random() * Math.max(1, r.h - 60)
+        if (insideHole(hole, x, y, 12) && Math.hypot(x - hole.cup.x, y - hole.cup.y) > 80) return { x, y }
+      }
+      return { x: hole.tee.x, y: hole.tee.y }
     }
 
     // Huidige speler klaar (in de cup of max slagen) → volgende speler of hole-einde.
@@ -191,9 +229,22 @@ export default function GolfClient() {
           g.mulliganLeft = true
           g.mole = pickMole(nh)
           g.moleArmed = true
+          g.particles = []
+          g.cupGlow = 0
+          g.ufo = null
+          g.ufoCd = 8 + Math.random() * 8
+          g.lastBX = nh.tee.x
+          g.lastBY = nh.tee.y
         }
       }
       g.simT += dt
+      if (g.cupGlow > 0) g.cupGlow = Math.max(0, g.cupGlow - dt)
+      if (g.shake > 0) g.shake = Math.max(0, g.shake - dt * 2.4)
+      if (g.flash > 0) g.flash = Math.max(0, g.flash - dt * 1.8)
+      if (g.bumpHitCd > 0) g.bumpHitCd = Math.max(0, g.bumpHitCd - dt)
+      // Deeltjes updaten (stof/confetti/plons).
+      for (const pt of g.particles) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vy += pt.grav * dt; pt.vx *= 0.97; pt.life -= dt }
+      if (g.particles.length) g.particles = g.particles.filter((pt) => pt.life > 0)
       // Mol zakt langzaam terug na een pop.
       if (g.mole && g.mole.pop > 0) g.mole.pop = Math.max(0, g.mole.pop - dt * 1.6)
       const h = g.holes[g.holeIdx]
@@ -211,6 +262,54 @@ export default function GolfClient() {
         g.chargeT = Math.min(CHARGE_TIME, g.chargeT + dt)
       } else if (g.phase === 'roll') {
         const ev = stepBall(h, p.ball, g.simT, dt)
+        // Wormgat-teleport gedetecteerd (grote sprong in één tick) → swirl-deeltjes op beide plekken.
+        const jump = Math.hypot(p.ball.x - g.lastBX, p.ball.y - g.lastBY)
+        if (jump > 120 && ev === null) {
+          const rainbow = ['#E63946', '#F4B92E', '#5fbf6e', '#4FA8E0', '#b06ae0', '#ff7ac0']
+          emit(g, g.lastBX, g.lastBY, 16, rainbow, { spd: 200, life: 0.6, r: 3, up: 20 })
+          emit(g, p.ball.x, p.ball.y, 16, rainbow, { spd: 200, life: 0.6, r: 3, up: 20 })
+          g.shake = Math.max(g.shake, 0.5)
+        }
+        g.lastBX = p.ball.x; g.lastBY = p.ball.y
+        // Regenboog-stofsliert achter de rollende bal (juice).
+        const rollSp = Math.hypot(p.ball.vx, p.ball.vy)
+        g.trailT -= dt
+        if (rollSp > 60 && g.trailT <= 0) {
+          g.trailT = 0.024
+          const hue = `hsl(${Math.round((g.simT * 200) % 360)},90%,65%)`
+          emit(g, p.ball.x, p.ball.y, 1, [hue], { spd: 26, life: 0.4, r: 2.6, grav: -20 })
+        }
+        // Bumper-tik: schermschud + vonken (client-side gedetecteerd, één keer per tik).
+        if (g.bumpHitCd <= 0 && rollSp > 90) {
+          for (const bp of h.bumpers) {
+            if (Math.hypot(p.ball.x - bp.x, p.ball.y - bp.y) < bp.r + BALL_R + 3) {
+              g.shake = Math.max(g.shake, 0.6)
+              g.bumpHitCd = 0.12
+              emit(g, p.ball.x, p.ball.y, 10, ['#F4B92E', '#fff3c4', '#ffd24a'], { spd: 220, life: 0.4, r: 2.6, grav: 200 })
+              break
+            }
+          }
+        }
+        // Trampoline-fling: groene boing-vonken wanneer je eroverheen schiet.
+        if (g.bumpHitCd <= 0 && rollSp > 40) {
+          for (const tr of h.tramps) {
+            if (Math.hypot(p.ball.x - tr.x, p.ball.y - tr.y) < tr.r) {
+              g.shake = Math.max(g.shake, 0.5)
+              g.bumpHitCd = 0.16
+              emit(g, tr.x, tr.y, 14, ['#5fbf6e', '#b6f0c4', '#eafff0'], { spd: 250, up: 40, life: 0.5, r: 3, grav: 140 })
+              break
+            }
+          }
+        }
+        // Reuzenkop denderde de bal weg → stofwolk + flinke schud.
+        if (g.bumpHitCd <= 0 && h.boulder && rollSp > 120) {
+          const bp = boulderPos(h.boulder, g.simT)
+          if (Math.hypot(p.ball.x - bp.x, p.ball.y - bp.y) < h.boulder.r + BALL_R + 8) {
+            g.shake = Math.max(g.shake, 0.95)
+            g.bumpHitCd = 0.16
+            emit(g, p.ball.x, p.ball.y, 16, ['#8a6a4a', '#b5936a', '#d9c07a'], { spd: 270, up: 40, life: 0.55, r: 3.2, grav: 320 })
+          }
+        }
         // Whack-a-mole: rolt de bal langs de molshoop, dan popt de mol en mept 'm weg.
         if (g.mole && g.moleArmed) {
           const b = p.ball
@@ -221,14 +320,20 @@ export default function GolfClient() {
             b.vy = Math.sin(a) * sp * 0.95
             g.mole.pop = 1
             g.moleArmed = false
+            emit(g, g.mole.x, g.mole.y, 12, ['#6b4a2a', '#8a5a34', '#4e3620'], { spd: 150, up: 70, grav: 520, r: 3, life: 0.6 })
             show('🐹 MOL! Die tikt \'m lekker weg.', '#a06a3a')
           }
         }
         if (ev === 'cup') {
           const s = strokesNow
+          g.cupGlow = 1.5
+          g.flash = 0.5
+          g.shake = Math.max(g.shake, 0.7)
+          emit(g, h.cup.x, h.cup.y, 40, ['#F4B92E', '#E63946', '#4FA8E0', '#5fbf6e', '#ffffff'], { spd: 260, up: 150, grav: 440, r: 4, life: 1.1 })
           show(`🕳️ In! ${p.name}: ${s} ${s === 1 ? 'slag' : 'slagen'} — ${parTerm(s, h.par)}`, PLAYER_COLORS[g.turn])
           finishRun(g, s)
         } else if (ev === 'water') {
+          emit(g, p.ball.x, p.ball.y, 16, ['#4FA8E0', '#7db8e8', '#eafcff'], { spd: 170, up: 90, grav: 560, r: 3, life: 0.6 })
           p.strokes[g.holeIdx] = strokesNow + 1 // strafslag
           p.ball = { x: p.preShot.x, y: p.preShot.y, vx: 0, vy: 0, spin: 0, sinking: 0 }
           const a = emoRef.current
@@ -244,6 +349,38 @@ export default function GolfClient() {
             g.angle = Math.atan2(h.cup.y - p.ball.y, h.cup.x - p.ball.x)
           }
         }
+      }
+
+      // ── UFO-ontvoering (bizar): tijdens het richten scheert soms een schotel binnen, straalt de
+      //    bal op en dropt 'm ergens anders op de baan. Puur client-side; blokkeert even het slaan. ──
+      if (g.ufoCd > 0 && !g.ufo) g.ufoCd = Math.max(0, g.ufoCd - dt)
+      if (g.ufo) {
+        const u = g.ufo
+        u.t += dt
+        if (u.phase === 'in') {
+          u.x += (u.hx - u.x) * Math.min(1, 3 * dt)
+          u.y += (u.hy - u.y) * Math.min(1, 3 * dt)
+          if (Math.hypot(u.x - u.hx, u.y - u.hy) < 8) { u.phase = 'beam'; u.t = 0 }
+        } else if (u.phase === 'beam') {
+          if (u.t > 0.9) {
+            emit(g, p.ball.x, p.ball.y, 16, ['#9be8ff', '#d8f6ff', '#7ad0ff'], { spd: 180, life: 0.5, r: 3, up: 30 })
+            p.ball.x = u.dropX; p.ball.y = u.dropY; p.ball.vx = 0; p.ball.vy = 0
+            p.preShot = { x: u.dropX, y: u.dropY }
+            g.lastBX = u.dropX; g.lastBY = u.dropY
+            g.angle = Math.atan2(h.cup.y - u.dropY, h.cup.x - u.dropX)
+            emit(g, u.dropX, u.dropY, 18, ['#9be8ff', '#d8f6ff', '#7ad0ff'], { spd: 190, life: 0.55, r: 3, up: 40 })
+            g.shake = Math.max(g.shake, 0.55)
+            show('🛸 ONTVOERD! Ergens anders gedropt…', '#9be8ff')
+            u.phase = 'out'; u.t = 0; u.hy = -180
+          }
+        } else { // out: wegscheren naar boven
+          u.x += (u.hx - u.x) * Math.min(1, 2 * dt) + 30 * dt
+          u.y += (u.hy - u.y) * Math.min(1, 2.6 * dt)
+          if (u.y < -140) { g.ufo = null; g.ufoCd = 12 + Math.random() * 10 }
+        }
+      } else if (g.phase === 'aim' && g.ufoCd <= 0 && Math.hypot(p.ball.x - h.cup.x, p.ball.y - h.cup.y) > 150 && Math.random() < dt * 0.25) {
+        const drop = pickDrop(h)
+        g.ufo = { x: Math.random() < 0.5 ? -120 : WORLD_W + 120, y: 40, hx: p.ball.x, hy: Math.max(60, p.ball.y - 130), dropX: drop.x, dropY: drop.y, phase: 'in', t: 0 }
       }
     }
 
@@ -270,7 +407,7 @@ export default function GolfClient() {
       if (e.code === 'Escape') { setStage('menu'); return }
       const g = gameRef.current
       if (!g || e.repeat) return
-      if (g.phase === 'aim' && e.code === 'Space') {
+      if (g.phase === 'aim' && e.code === 'Space' && !g.ufo) {
         g.phase = 'charge'
         g.chargeT = 0
       }
@@ -298,6 +435,7 @@ export default function GolfClient() {
         p.ball.spin = g.curve // curve-bal → zijwaartse drift tijdens het rollen
         p.strokes[g.holeIdx] = (p.strokes[g.holeIdx] ?? 0) + 1
         g.moleArmed = true // de mol mag deze slag weer één keer toeslaan
+        g.lastBX = p.ball.x; g.lastBY = p.ball.y // baseline voor de teleport-detectie
         g.phase = 'roll'
       }
     }
@@ -436,14 +574,15 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     canvas.height = ch * dpr
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.fillStyle = '#0c1420'
-  ctx.fillRect(0, 0, cw, ch)
+  drawBackdrop(ctx, cw, ch, g.holes[g.holeIdx].theme, g.simT)
 
   const sc = Math.min(cw / (WORLD_W + 60), (ch - 80) / (WORLD_H + 40))
   const ox = (cw - WORLD_W * sc) / 2
   const oy = 58 + ((ch - 80) - WORLD_H * sc) / 2
+  const shx = g.shake > 0 ? (Math.random() - 0.5) * 24 * g.shake : 0
+  const shy = g.shake > 0 ? (Math.random() - 0.5) * 24 * g.shake : 0
   ctx.save()
-  ctx.translate(ox, oy)
+  ctx.translate(ox + shx, oy + shy)
   ctx.scale(sc, sc)
 
   const h = g.holes[g.holeIdx]
@@ -509,9 +648,49 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     ctx.restore()
   }
 
-  // Tee + cup (met vlag).
+  // Trampolines: veerkrachtige groene matten (pulserend).
+  for (const tr of h.tramps) {
+    ctx.save()
+    ctx.translate(tr.x, tr.y)
+    const pulse = 1 + 0.06 * Math.sin(g.simT * 6 + tr.x)
+    ctx.scale(pulse, pulse)
+    ctx.fillStyle = '#2f9e54'
+    ctx.beginPath(); ctx.arc(0, 0, tr.r, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = '#7ff0a0'; ctx.lineWidth = 3; ctx.stroke()
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2
+    ctx.beginPath(); ctx.arc(0, 0, tr.r * 0.62, 0, Math.PI * 2); ctx.stroke()
+    ctx.beginPath(); ctx.arc(0, 0, tr.r * 0.3, 0, Math.PI * 2); ctx.stroke()
+    ctx.restore()
+  }
+
+  // Wormgaten: draaikolken (paar A cyaan ↔ B magenta).
+  for (let i = 0; i < h.portals.length; i++) {
+    const pt = h.portals[i]
+    const col = i % 2 === 0 ? '#3fe0e0' : '#e05ac0'
+    ctx.save()
+    ctx.translate(pt.x, pt.y)
+    const pg = ctx.createRadialGradient(0, 0, 2, 0, 0, pt.r)
+    pg.addColorStop(0, '#000'); pg.addColorStop(0.7, col + '55'); pg.addColorStop(1, col + '00')
+    ctx.fillStyle = pg
+    ctx.beginPath(); ctx.arc(0, 0, pt.r, 0, Math.PI * 2); ctx.fill()
+    ctx.rotate(g.simT * (i % 2 === 0 ? 3 : -3))
+    ctx.strokeStyle = col; ctx.lineWidth = 3
+    for (let a = 0; a < 3; a++) { ctx.beginPath(); ctx.arc(0, 0, pt.r - 4, a * 2.1, a * 2.1 + 1.3); ctx.stroke() }
+    ctx.restore()
+  }
+
+  // Tee + cup (met wapperende vlag).
   ctx.fillStyle = 'rgba(255,255,255,0.25)'
   ctx.fillRect(h.tee.x - 13, h.tee.y - 13, 26, 26)
+  // Glinsterring bij een net gemaakte hole.
+  if (g.cupGlow > 0) {
+    const k = g.cupGlow / 1.5
+    ctx.beginPath()
+    ctx.arc(h.cup.x, h.cup.y, CUP_R + 6 + (1 - k) * 30, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(244,185,46,${0.65 * k})`
+    ctx.lineWidth = 3.5
+    ctx.stroke()
+  }
   ctx.beginPath()
   ctx.arc(h.cup.x, h.cup.y, CUP_R, 0, Math.PI * 2)
   ctx.fillStyle = '#10321c'
@@ -519,18 +698,21 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
   ctx.strokeStyle = 'rgba(0,0,0,0.5)'
   ctx.lineWidth = 2
   ctx.stroke()
+  // vlaggenstok
   ctx.strokeStyle = '#e8e2d0'
   ctx.lineWidth = 3
   ctx.beginPath()
   ctx.moveTo(h.cup.x, h.cup.y)
-  ctx.lineTo(h.cup.x, h.cup.y - 46)
+  ctx.lineTo(h.cup.x, h.cup.y - 48)
   ctx.stroke()
-  ctx.beginPath()
-  ctx.moveTo(h.cup.x, h.cup.y - 46)
-  ctx.lineTo(h.cup.x + 26, h.cup.y - 38)
-  ctx.lineTo(h.cup.x, h.cup.y - 30)
-  ctx.closePath()
+  // wapperende pennant (sinus-golf)
+  const wv = Math.sin(g.simT * 4 + h.cup.x * 0.05)
   ctx.fillStyle = '#E63946'
+  ctx.beginPath()
+  ctx.moveTo(h.cup.x, h.cup.y - 48)
+  ctx.quadraticCurveTo(h.cup.x + 15, h.cup.y - 45 + wv * 3, h.cup.x + 30, h.cup.y - 41 + wv * 6)
+  ctx.quadraticCurveTo(h.cup.x + 16, h.cup.y - 39 - wv * 2, h.cup.x, h.cup.y - 33)
+  ctx.closePath()
   ctx.fill()
 
   // Bumpers: de koppen.
@@ -644,12 +826,74 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
   ctx.lineWidth = 2.5
   ctx.stroke()
 
+  // Rollende reuzenkop (Indiana Jones): grote tuimelende collega-kop, dendert over de baan.
+  if (h.boulder) {
+    const bp = boulderPos(h.boulder, g.simT)
+    const r = h.boulder.r
+    ctx.save()
+    ctx.translate(bp.x, bp.y + 5)
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'
+    ctx.beginPath(); ctx.ellipse(3, 4, r, r * 0.8, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+    ctx.save()
+    ctx.translate(bp.x, bp.y)
+    ctx.rotate(g.simT * h.boulder.speed * 6)
+    const bimg = faces[h.boulder.face]
+    if (bimg && bimg.complete && bimg.naturalWidth > 0) {
+      ctx.save(); ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip()
+      ctx.drawImage(bimg, -r, -r, r * 2, r * 2); ctx.restore()
+    } else {
+      ctx.fillStyle = '#8b8f96'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 4; ctx.stroke()
+    ctx.restore()
+  }
+
+  // UFO-ontvoering: schotel + tractorstraal.
+  if (g.ufo) {
+    const u = g.ufo
+    if (u.phase !== 'out') {
+      const beamA = u.phase === 'beam' ? 0.35 + 0.2 * Math.sin(g.simT * 20) : 0.16
+      ctx.fillStyle = `rgba(150,235,255,${beamA})`
+      ctx.beginPath()
+      ctx.moveTo(u.x - 12, u.y + 8)
+      ctx.lineTo(u.x + 12, u.y + 8)
+      ctx.lineTo(u.hx + 48, u.hy + 150)
+      ctx.lineTo(u.hx - 48, u.hy + 150)
+      ctx.closePath(); ctx.fill()
+    }
+    ctx.save()
+    ctx.translate(u.x, u.y)
+    ctx.fillStyle = '#9aa6b5'; ctx.beginPath(); ctx.ellipse(0, 0, 52, 20, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#c7d2df'; ctx.beginPath(); ctx.ellipse(0, -4, 24, 15, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = 'rgba(180,240,255,0.85)'; ctx.beginPath(); ctx.arc(0, -8, 15, Math.PI, 0); ctx.fill()
+    for (let i = 0; i < 5; i++) { ctx.fillStyle = Math.sin(g.simT * 10 + i) > 0 ? '#ffd24a' : '#e0517a'; ctx.beginPath(); ctx.arc(-40 + i * 20, 7, 3.2, 0, Math.PI * 2); ctx.fill() }
+    ctx.restore()
+  }
+
+  // Deeltjes (stof/confetti/plons) — in wereldcoördinaten, bovenop de baan.
+  for (const pt of g.particles) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, pt.life / pt.max))
+    ctx.fillStyle = pt.c
+    ctx.beginPath()
+    ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+
   ctx.restore()
 
   // ── HUD ───────────────────────────────────────────────────────────────────
+  const hudW = 320, hudX = cw / 2 - hudW / 2
+  roundRect(ctx, hudX, 8, hudW, 46, 14)
+  ctx.fillStyle = 'rgba(10,16,26,0.72)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+  ctx.lineWidth = 1
+  ctx.stroke()
   ctx.textAlign = 'center'
   ctx.font = 'bold 17px monospace'
-  ctx.fillStyle = 'rgba(255,255,255,0.9)'
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'
   ctx.fillText(`HOLE ${g.holeIdx + 1}/${HOLES} · PAR ${h.par}`, cw / 2, 28)
   const strokes = p.strokes[g.holeIdx] ?? 0
   ctx.font = '13px monospace'
@@ -671,6 +915,77 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     ctx.fillStyle = f > 0.85 ? '#E63946' : '#F4B92E'
     ctx.fillRect(cw / 2 - 90, 56, 180 * f, 10)
   }
+
+  // Inhole-flits (feest).
+  if (g.flash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${g.flash * 0.6})`
+    ctx.fillRect(0, 0, cw, ch)
+  }
+}
+
+// Wolkje (drie bollen) voor de gras/strand-lucht.
+function cloud(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.arc(x + r, y + 6, r * 0.8, 0, Math.PI * 2)
+  ctx.arc(x - r, y + 6, r * 0.8, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+// Levendige, geanimeerde achtergrond per hole-thema (zon+wolken, disco-bundels, sneeuw, lava-vonken…).
+function drawBackdrop(ctx: CanvasRenderingContext2D, cw: number, ch: number, theme: GolfTheme, t: number) {
+  const name = theme.name
+  const sky: Record<string, [string, string]> = {
+    Gras: ['#7ec8f0', '#cdeafe'], Woestijn: ['#f2c766', '#f7e2a8'], Nachtclub: ['#140a2e', '#2a1550'],
+    Winter: ['#a9c8e0', '#e8f3fb'], Strand: ['#ff9e5e', '#ffd89b'], Lava: ['#2a0a06', '#5a140a'],
+    Neon: ['#05060f', '#0a1430'], Herfst: ['#e08a3a', '#f6d59a'], Klei: ['#c97a5a', '#f0c8b0'],
+  }
+  const [c0, c1] = sky[name] ?? ['#0c1420', '#1a2740']
+  const grd = ctx.createLinearGradient(0, 0, 0, ch)
+  grd.addColorStop(0, c0); grd.addColorStop(1, c1)
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, cw, ch)
+
+  if (name === 'Gras' || name === 'Strand' || name === 'Woestijn') { // draaiende zon + drijvende wolken
+    const sx = cw * 0.82, sy = ch * 0.2
+    ctx.strokeStyle = 'rgba(255,240,150,0.4)'; ctx.lineWidth = 3
+    for (let i = 0; i < 12; i++) { const a = t * 0.3 + i * Math.PI / 6; ctx.beginPath(); ctx.moveTo(sx + Math.cos(a) * 54, sy + Math.sin(a) * 54); ctx.lineTo(sx + Math.cos(a) * 72, sy + Math.sin(a) * 72); ctx.stroke() }
+    ctx.fillStyle = 'rgba(255,240,150,0.95)'; ctx.beginPath(); ctx.arc(sx, sy, 46, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    for (let i = 0; i < 3; i++) cloud(ctx, ((t * 20 + i * cw / 3) % (cw + 160)) - 80, ch * (0.14 + 0.12 * i), 34)
+  } else if (name === 'Nachtclub' || name === 'Neon') { // strobende lichtbundels + fonkelende sterren
+    for (let i = 0; i < 5; i++) {
+      const a = Math.sin(t * 1.4 + i) * 0.5
+      ctx.save(); ctx.translate(cw * (0.14 + 0.18 * i), 0); ctx.rotate(a)
+      const hue = (t * 80 + i * 70) % 360
+      const b = ctx.createLinearGradient(0, 0, 0, ch)
+      b.addColorStop(0, `hsla(${hue},90%,60%,0.3)`); b.addColorStop(1, `hsla(${hue},90%,60%,0)`)
+      ctx.fillStyle = b; ctx.fillRect(-32, 0, 64, ch); ctx.restore()
+    }
+    for (let i = 0; i < 40; i++) { ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t * 3 + i)); ctx.fillStyle = '#fff'; ctx.fillRect((i * 97.3) % cw, ((i * 53.7) % ch) * 0.6, 2, 2) }
+    ctx.globalAlpha = 1
+  } else if (name === 'Winter') { // sneeuwval
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    for (let i = 0; i < 60; i++) { const x = (i * 89.7 + Math.sin(t + i) * 20) % cw; const y = (i * 63.1 + t * 40) % ch; ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill() }
+  } else if (name === 'Lava') { // gloed-puls + opstijgende vonken
+    ctx.fillStyle = `rgba(255,90,20,${0.15 + 0.1 * Math.sin(t * 2)})`; ctx.fillRect(0, ch * 0.6, cw, ch * 0.4)
+    ctx.fillStyle = 'rgba(255,150,40,0.9)'
+    for (let i = 0; i < 30; i++) { const y = ch - ((i * 40 + t * 90) % ch); ctx.globalAlpha = Math.max(0, 1 - y / ch); ctx.beginPath(); ctx.arc((i * 77.7) % cw, y, 2, 0, Math.PI * 2); ctx.fill() }
+    ctx.globalAlpha = 1
+  } else if (name === 'Herfst') { // dwarrelende blaadjes
+    const cols = ['#e8842a', '#c94a2a', '#f0b429', '#8a5a2a']
+    for (let i = 0; i < 24; i++) { const x = (i * 91.3 + Math.sin(t * 1.3 + i) * 40) % cw; const y = (i * 70 + t * 55) % ch; ctx.save(); ctx.translate(x, y); ctx.rotate(t * 2 + i); ctx.fillStyle = cols[i % 4]; ctx.fillRect(-4, -3, 8, 6); ctx.restore() }
+  }
+}
+
+// Afgeronde-rechthoek pad (voor de HUD-balk).
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
 }
 
 // ── Menu-hulpjes ──────────────────────────────────────────────────────────────

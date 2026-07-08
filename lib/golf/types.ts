@@ -23,6 +23,9 @@ export type Hole = {
   water: { x: number; y: number; r: number }[] // water: strafslag + terugleggen
   mill: { x: number; y: number; len: number; speed: number } | null // draaiende molenwiek
   boost: { x: number; y: number; r: number; ang: number }[] // pijl-tegels: geven de bal een zetje
+  portals: { x: number; y: number; r: number }[] // wormgaten in paren (2i ↔ 2i+1): erin = uit het andere
+  tramps: { x: number; y: number; r: number }[] // trampolines: katapulteren de bal keihard door
+  boulder: { ax: number; ay: number; bx: number; by: number; r: number; speed: number; face: string } | null // rollende reuzenkop (heen en weer) die de bal wegbeukt
 }
 
 export type GolfBall = {
@@ -32,6 +35,8 @@ export type GolfBall = {
   vy: number
   spin: number // curve: zijwaartse versnelling die uitdooft (van de curve-bal)
   sinking: number // >0 = valt in de cup (render: krimpt); telt af, dán pas 'cup'
+  portalCd?: number // >0 = net door een wormgat → even geen nieuwe teleport (anti-pingpong)
+  trampCd?: number // >0 = net van een trampoline gestuiterd → even geen nieuwe fling
 }
 
 export type GolfPlayer = {

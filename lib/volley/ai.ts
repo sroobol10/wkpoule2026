@@ -13,7 +13,7 @@ export function aiInput(s: VState, id: number, difficulty: number): VInput {
   const idle: VInput = { moveX: 0, jump: false, hit: false, dink: false, dive: false, block: false }
   if (!s.live) return idle
   const b = s.ball
-  const speedF = 0.42 + 0.5 * diff // op makkelijk loopt-ie duidelijk trager → je speelt 'm voorbij
+  const speedF = 0.34 + 0.52 * diff // op makkelijk loopt-ie duidelijk trager → je speelt 'm voorbij
   const home = me.team === 0 ? W * 0.28 : W * 0.72
 
   const moveTo = (tx: number): VInput => {
@@ -31,7 +31,7 @@ export function aiInput(s: VState, id: number, difficulty: number): VInput {
   // Positie-doel = voorspelde landing, met een moeilijkheids-afhankelijke mikfout (op makkelijk
   // staat-ie er vaak nét naast → punt voor jou). Stabiel-ish, geen per-frame getril.
   const land = predictLandingX(b)
-  const err = (1 - diff) * 95 * (((id * 37 + Math.round(b.x)) % 7) / 3 - 1)
+  const err = (1 - diff) * 155 * (((id * 37 + Math.round(b.x)) % 7) / 3 - 1)
   const target = land + err
   const m = moveTo(target)
 
@@ -52,7 +52,7 @@ export function aiInput(s: VState, id: number, difficulty: number): VInput {
   // Bumpen: sla pas als de bal echt binnen bereik is en daalt — met een trefkans die met de
   // moeilijkheid meeschaalt (op makkelijk mist-ie 'm regelmatig → punt voor jou).
   if (inReach && b.vy > 20) {
-    if (Math.random() < 0.12 + 0.7 * diff) return { ...m, hit: true }
+    if (Math.random() < 0.06 + 0.6 * diff) return { ...m, hit: true }
   }
   return m
 }
