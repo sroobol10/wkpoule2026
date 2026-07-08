@@ -144,10 +144,16 @@ export function generateHole(holeIndex: number, faces: string[]): Hole {
     const b2 = spotIn(60)
     if (a && b2 && Math.hypot(a.x - b2.x, a.y - b2.y) > 150) boulder = { ax: a.x, ay: a.y, bx: b2.x, by: b2.y, r: 26, speed: 0.28 + Math.random() * 0.22, face: faces[Math.floor(Math.random() * faces.length)] }
   }
+  // Zwart gat: zuigt de bal aan binnen z'n straal; in de kern → gespuugd op een willekeurige plek.
+  let blackhole: Hole['blackhole'] = null
+  if (holeIndex >= 3 && Math.random() < 0.32) {
+    const s = spotIn(70)
+    if (s && Math.hypot(s.x - cup.x, s.y - cup.y) > 110) blackhole = { ...s, r: 88 }
+  }
 
   const theme = GOLF_THEMES[holeIndex % GOLF_THEMES.length]
   const par = clamp(2 + bends + (bumpers.length + water.length + (mill ? 1 : 0) > 1 ? 1 : 0), 2, 5)
-  return { rects, tee, cup, par, theme, bumpers, sand, water, mill, boost, portals, tramps, boulder }
+  return { rects, tee, cup, par, theme, bumpers, sand, water, mill, boost, portals, tramps, boulder, blackhole }
 }
 
 // ── Fysica-tick ──────────────────────────────────────────────────────────────
@@ -165,6 +171,24 @@ export function stepBall(h: Hole, b: GolfBall, t: number, dt: number): StepEvent
 
   if (b.portalCd && b.portalCd > 0) b.portalCd = Math.max(0, b.portalCd - dt)
   if (b.trampCd && b.trampCd > 0) b.trampCd = Math.max(0, b.trampCd - dt)
+  if (b.bhCd && b.bhCd > 0) b.bhCd = Math.max(0, b.bhCd - dt)
+
+  // Zwart gat: trekt de bal continu naar de kern; in de kern → keihard willekeurig uitgespuugd.
+  if (h.blackhole && !b.bhCd) {
+    const bh = h.blackhole
+    const dx = bh.x - b.x, dy = bh.y - b.y
+    const d = Math.hypot(dx, dy)
+    if (d < 15) {
+      const a = Math.random() * Math.PI * 2
+      b.vx = Math.cos(a) * 480; b.vy = Math.sin(a) * 480
+      b.x = bh.x + Math.cos(a) * 22; b.y = bh.y + Math.sin(a) * 22
+      b.bhCd = 0.6
+    } else if (d < bh.r) {
+      const pull = (1 - d / bh.r) * 1050
+      b.vx += (dx / d) * pull * dt
+      b.vy += (dy / d) * pull * dt
+    }
+  }
 
   const speed = Math.hypot(b.vx, b.vy)
   if (speed < 4) {

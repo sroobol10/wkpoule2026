@@ -21,7 +21,7 @@ import { createSfx, type Sfx } from '@/components/playground/sfx'
 
 const FIXED_DT = 1 / 120
 type Mode = 'ai' | 'online'
-const IDLE_PINPUT: PongInput = { aimX: 0, aimDepth: 0.55, charge: false, dink: false, lob: false, smash: false }
+const IDLE_PINPUT: PongInput = { aimX: 0, aimDepth: 0.55 }
 type PPick = { face: string; name: string }
 type PongStart = { picks: [PPick, PPick]; target: number }
 type PongSnap = { m: PongMatch; ev: PongEvent[] }
@@ -65,7 +65,6 @@ export default function PongClient() {
   const keysRef = useRef<Set<string>>(new Set())
   const aimXRef = useRef(0) // -1..1 mikrichting uit de muis (of pijltjes)
   const aimDepthRef = useRef(0.55) // 0..1 mikdiepte uit de muis-y
-  const mouseChargeRef = useRef(false) // muisknop ingedrukt = kracht laden (loslaten = slaan)
   const sixSevenRef = useRef<HTMLAudioElement | null>(null)
   const wowRef = useRef<HTMLAudioElement | null>(null)
   const sfxRef = useRef<Sfx | null>(null)
@@ -214,27 +213,19 @@ export default function PongClient() {
     }
     canvas.addEventListener('pointerdown', onTouchDrag)
     canvas.addEventListener('pointermove', onTouchDrag)
-    // Slag met de muis: linkerknop ingedrukt = kracht laden, loslaten = slaan.
-    const onMouseDown = (e: MouseEvent) => { if (e.button === 0) mouseChargeRef.current = true }
-    const onMouseUp = (e: MouseEvent) => { if (e.button === 0) mouseChargeRef.current = false }
-    canvas.addEventListener('mousedown', onMouseDown)
-    window.addEventListener('mouseup', onMouseUp)
 
-    // Lokale mikinput (muis/toetsen) → PongInput. `g` alleen voor de aim-lerp met toetsen.
+    // Lokale richting-input (toetsen/joystick, of muis-sleep) → PongInput. Links/rechts = plaatsen,
+    // omhoog = harde diepe klap, omlaag = kort dinkje. Auto-terugslaan doet de sim.
     const localInput = (g: Game, dt: number): PongInput => {
       const kl = keys.has('KeyA') || keys.has('ArrowLeft')
       const kr = keys.has('KeyD') || keys.has('ArrowRight')
-      const kf = keys.has('KeyW') || keys.has('ArrowUp') // dieper mikken
-      const kb = keys.has('KeyS') || keys.has('ArrowDown') // korter mikken
-      if (kl || kr) g.aimX = Math.max(-1, Math.min(1, g.aimX + ((kr ? 1 : 0) - (kl ? 1 : 0)) * 1.6 * dt))
+      const kf = keys.has('KeyW') || keys.has('ArrowUp') // omhoog = dieper/harder
+      const kb = keys.has('KeyS') || keys.has('ArrowDown') // omlaag = korter/zachter
+      if (kl || kr) g.aimX = Math.max(-1, Math.min(1, g.aimX + ((kr ? 1 : 0) - (kl ? 1 : 0)) * 1.9 * dt))
       else g.aimX = aimXRef.current
-      if (kf || kb) g.aimDepth = Math.max(0, Math.min(1, g.aimDepth + ((kf ? 1 : 0) - (kb ? 1 : 0)) * 1.2 * dt))
+      if (kf || kb) g.aimDepth = Math.max(0, Math.min(1, g.aimDepth + ((kf ? 1 : 0) - (kb ? 1 : 0)) * 1.6 * dt))
       else g.aimDepth = aimDepthRef.current
-      return {
-        aimX: g.aimX, aimDepth: g.aimDepth,
-        charge: keys.has('Space') || mouseChargeRef.current,
-        dink: keys.has('KeyQ'), lob: keys.has('KeyE'), smash: keys.has('KeyR'),
-      }
+      return { aimX: g.aimX, aimDepth: g.aimDepth }
     }
 
     // Events → geluid/popups/shake, vanuit het perspectief van de lokale speler (0 = host/offline, 1 = gast).
@@ -260,6 +251,18 @@ export default function PongClient() {
             const w = wowRef.current
             if (w) { try { w.currentTime = 0; void w.play() } catch { /* autoplay geweigerd → stil */ } }
           }
+        } else if (ev.type === 'cat') {
+          g.shakeT = Math.max(g.shakeT, 0.25)
+          show('🐱 KAT! Bal weggemept!', '#f4b92e')
+        } else if (ev.type === 'banana') {
+          g.shakeT = Math.max(g.shakeT, 0.15)
+          show('🍌 Uitgegleden!', '#f0d040')
+        } else if (ev.type === 'serve') {
+          const gm = g.match
+          if (gm.ballScale > 1.4) show('🎈 REUZENBAL!', '#5fbf6e')
+          else if (gm.ballScale < 0.8) show('🐜 MINI-BAL!', '#e0517a')
+          else if (Math.abs(gm.wind) > 40) show(`🌬️ ZIJWIND ${gm.wind < 0 ? '←' : '→'}`, '#7db8e8')
+          else if (gm.banana) show('🍌 Bananenschil op tafel!', '#f0d040')
         } else if (ev.type === 'over') {
           setMatchOver({ name: g.match.players[ev.winner].name, score: [g.match.score[0], g.match.score[1]] })
         }
@@ -329,8 +332,6 @@ export default function PongClient() {
       canvas.removeEventListener('mousemove', onMove)
       canvas.removeEventListener('pointerdown', onTouchDrag)
       canvas.removeEventListener('pointermove', onTouchDrag)
-      canvas.removeEventListener('mousedown', onMouseDown)
-      window.removeEventListener('mouseup', onMouseUp)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       keys.clear()
@@ -422,8 +423,8 @@ export default function PongClient() {
           </div>
 
           <div className="max-w-xl text-center font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-wk-muted">
-            je bat volgt de bal AUTOMATISCH — met de MUIS (of WASD/pijltjes) MIK je: links/rechts + omhoog=diep, omlaag=kort (zie het blauwe kruis)<br />
-            SPATIE/muisknop vasthouden = kracht laden, loslaten = slaan · Q = dinkje · E = lob · R = smash · Esc = menu
+            je bat volgt de bal automatisch en slaat &apos;m ook automatisch terug — jij STUURT alleen<br />
+            ← / → (of A/D · muis) = links/rechts mikken · ↑ = harde diepe klap · ↓ = kort dinkje · Esc = menu
           </div>
         </div>
       ) : (
@@ -431,12 +432,7 @@ export default function PongClient() {
           <canvas ref={canvasRef} className="block h-full w-full cursor-none" style={{ touchAction: 'none' }} />
           <div className="absolute right-4 top-4"><ImmersiveToggle /></div>
           {isTouch && !portrait && (
-            <TouchGamepad dir="none" buttons={[
-              { code: 'KeyQ', label: 'Dink', color: 'border-cyan-300/40 bg-cyan-500/25' },
-              { code: 'KeyE', label: 'Lob', color: 'border-emerald-300/40 bg-emerald-500/25' },
-              { code: 'KeyR', label: 'Smash', color: 'border-rose-300/40 bg-rose-500/25' },
-              { code: 'Space', label: 'Slaan', color: 'border-amber-300/50 bg-amber-500/30', big: true },
-            ]} />
+            <TouchGamepad dir="full" buttons={[]} />
           )}
           {isTouch && portrait && <RotateNotice game="Tafelkoppen" />}
           <button onClick={() => { leaveNet(); setStage('menu') }}
@@ -570,22 +566,73 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
   // Tegenstander: lijf + kop + arm die het bat vasthoudt, áchter de verre tafelrand.
   drawOpponent(ctx, faces, m.players[1], b.x)
 
+  // Bananenschil op de tafel (gimmick): gele boog met bruine uiteinden.
+  if (m.banana) {
+    const ba = project(m.banana.x, 0, m.banana.z)
+    ctx.save()
+    ctx.translate(ba.sx, ba.sy)
+    ctx.scale(ba.p, ba.p * 0.6)
+    ctx.strokeStyle = '#f2d040'; ctx.lineWidth = 7; ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.arc(0, 0, 11, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke()
+    ctx.strokeStyle = '#8a6a2a'; ctx.lineWidth = 3
+    ctx.beginPath(); ctx.arc(0, 0, 11, Math.PI * 0.15, Math.PI * 0.30); ctx.stroke()
+    ctx.restore()
+  }
+
   // Bal-schaduw op de tafel (projectie op y=0) — toont de hoogte.
   if (b.live || m.phase === 'serve') {
+    const scale = m.ballScale || 1
     const sh = project(b.x, 0, b.z)
     ctx.fillStyle = 'rgba(0,0,0,0.28)'
     ctx.beginPath()
-    ctx.ellipse(sh.sx, sh.sy, 7 * sh.p, 3.2 * sh.p, 0, 0, Math.PI * 2)
+    ctx.ellipse(sh.sx, sh.sy, 7 * sh.p * scale, 3.2 * sh.p * scale, 0, 0, Math.PI * 2)
     ctx.fill()
-    // de bal zelf
+    // de bal zelf (met vuurspoor als 'ie in brand staat na een smash)
     const bp = project(b.x, b.y, b.z)
+    const br = BALL_R * bp.p * scale
+    if (b.fire && b.fire > 0) {
+      const cols = ['rgba(255,120,20,0.55)', 'rgba(255,200,40,0.55)', 'rgba(255,60,20,0.4)']
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = cols[i]
+        ctx.beginPath(); ctx.arc(bp.sx - (i + 1) * 3, bp.sy + (i + 1) * 2, br * (1.7 - i * 0.4), 0, Math.PI * 2); ctx.fill()
+      }
+    }
     ctx.beginPath()
-    ctx.arc(bp.sx, bp.sy, BALL_R * bp.p, 0, Math.PI * 2)
-    ctx.fillStyle = '#f6e14a'
+    ctx.arc(bp.sx, bp.sy, br, 0, Math.PI * 2)
+    ctx.fillStyle = b.fire && b.fire > 0 ? '#ffcf3a' : '#f6e14a'
     ctx.fill()
     ctx.strokeStyle = 'rgba(120,100,20,0.5)'
     ctx.lineWidth = 1
     ctx.stroke()
+  }
+
+  // Kat (gimmick): pluizige poot die vanaf de zijkant naar de bal reikt en 'm wegmept.
+  if (m.cat) {
+    const reach = m.cat.phase === 'swipe' ? 1 : 0.25 + 0.4 * Math.min(1, m.cat.t / 0.55)
+    const fromLeft = m.cat.x < 0
+    const edgeX = fromLeft ? -HW - 10 : HW + 10
+    const cx = edgeX + (0 - edgeX) * 0.5 * reach
+    const paw = project(cx, 18, m.cat.z)
+    ctx.save()
+    ctx.translate(paw.sx, paw.sy)
+    ctx.fillStyle = '#c9c2b8'
+    ctx.beginPath(); ctx.ellipse(0, 0, 20 * paw.p, 15 * paw.p, 0, 0, Math.PI * 2); ctx.fill() // poot
+    ctx.fillStyle = '#e0dcd4'
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.ellipse((fromLeft ? 1 : -1) * (12 + i * 6) * paw.p, (-8 + i * 8) * paw.p, 5 * paw.p, 4 * paw.p, 0, 0, Math.PI * 2); ctx.fill() } // teentjes
+    if (m.cat.phase === 'warn') { ctx.fillStyle = '#f4b92e'; ctx.font = `bold ${Math.round(22 * paw.p)}px monospace`; ctx.textAlign = 'center'; ctx.fillText('!', 0, -22 * paw.p) }
+    ctx.restore()
+  }
+
+  // Windvlag (gimmick): pijltje bovenin als er zijwind op de bal staat.
+  if (Math.abs(m.wind) > 40) {
+    const dir = m.wind < 0 ? -1 : 1
+    const wx = RW / 2, wy = 30
+    const len = 24 + Math.min(50, Math.abs(m.wind) / 4)
+    ctx.strokeStyle = 'rgba(150,210,255,0.85)'; ctx.lineWidth = 3; ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.moveTo(wx - dir * len / 2, wy); ctx.lineTo(wx + dir * len / 2, wy); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(wx + dir * len / 2, wy); ctx.lineTo(wx + dir * (len / 2 - 10), wy - 6); ctx.moveTo(wx + dir * len / 2, wy); ctx.lineTo(wx + dir * (len / 2 - 10), wy + 6); ctx.stroke()
+    ctx.lineCap = 'butt'
+    ctx.fillStyle = 'rgba(150,210,255,0.85)'; ctx.font = '10px monospace'; ctx.textAlign = 'center'; ctx.fillText('WIND', wx, wy - 12)
   }
 
   // Speler (dichtbij): rode bat op z'n auto-positie, in forehand/backhand-stand met arm + krachtbalk.

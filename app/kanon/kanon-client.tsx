@@ -312,6 +312,7 @@ export default function KanonClient() {
         else if (e.type === 'decoy') { show('❌ NEP-KOP! −200'); spawnPop(e.x, e.y); g.shakeT = Math.max(g.shakeT, 0.15); sfxRef.current?.play('bruh') } // grappig faal-geluid
         else if (e.type === 'coin') { show('🪙 MUNT! +schot'); spawnPop(e.x, e.y, true); sfxRef.current?.play('powerup', 0.85) }
         else if (e.type === 'combo') { show(`🔥 COMBO ×${e.n}!`); g.slowmoT = Math.max(g.slowmoT, 0.5); sfxRef.current?.play('anime-wow') }
+        else if (e.type === 'demolish') { show(e.full ? `💥 PERFECTE SLOOP! +${e.bonus}` : `💥 SLOOPBONUS! +${e.bonus}`); g.shakeT = Math.max(g.shakeT, 0.5); sfxRef.current?.play('boom', 0.7) } // hele toren omver = bonus
         else if (e.type === 'cleared' || e.type === 'won') sfxRef.current?.play('finish') // level uit / match beslist = fanfare
       }
     }
@@ -695,7 +696,7 @@ function draw(
       const animal = isDino(b.face) && !gold
       const color = gold ? '#ffd700' : animal ? dinoOf(b.face) : shirtOf(b.face)
       drawCreatureBody(ctx, faces, b.face, R, color, animal)
-      drawAccessory(ctx, b.face, R) // random petje/bril/snor per gezicht
+      drawAccessory(ctx, b.acc, R) // random petje/bril/snor per spawn (niet aan het gezicht gekoppeld)
       if (gold) { ctx.fillStyle = '#ffd700'; ctx.font = '16px monospace'; ctx.textAlign = 'center'; ctx.fillText('★', 0, -R * 1.35) }
       if (helmet) { // helm-kop: gele bouwhelm (1 extra treffer)
         ctx.fillStyle = '#f2c200'; ctx.beginPath(); ctx.arc(0, -R * 0.55, R * 0.92, Math.PI, 0); ctx.fill()
@@ -821,11 +822,11 @@ function drawCreatureBody(ctx: CanvasRenderingContext2D, faces: Record<string, H
   } else { ctx.beginPath(); ctx.arc(0, -r * 0.12, r, 0, Math.PI * 2); ctx.fillStyle = '#e8b48c'; ctx.fill() }
 }
 
-// Random accessoire op een kop (deterministisch per gezicht → gelijk op elk scherm). Puur cosmetisch.
-function drawAccessory(ctx: CanvasRenderingContext2D, face: string | undefined, r: number) {
-  if (!face) return
-  const h = hashStr(face + 'acc')
-  const kind = h % 6
+// Random accessoire op een kop, gekozen uit `acc` (per spawn geworpen, NIET aan het gezicht
+// gekoppeld → dezelfde collega heeft niet altijd dezelfde bril/snor). Puur cosmetisch.
+function drawAccessory(ctx: CanvasRenderingContext2D, acc: number | undefined, r: number) {
+  if (acc === undefined) return
+  const kind = acc % 6
   if (kind >= 3) return // ~50% geen accessoire
   const cy = -r * 0.12
   if (kind === 0) { // zonnebril
@@ -835,7 +836,7 @@ function drawAccessory(ctx: CanvasRenderingContext2D, face: string | undefined, 
     ctx.fillRect(-r * 0.14, cy - r * 0.04, r * 0.28, r * 0.07) // brug
   } else if (kind === 1) { // petje
     const cols = ['#e0342e', '#2d6be5', '#2ea84b', '#e8641c']
-    ctx.fillStyle = cols[h % cols.length]
+    ctx.fillStyle = cols[Math.floor(acc / 6) % cols.length]
     ctx.beginPath(); ctx.arc(0, cy - r * 0.48, r * 0.9, Math.PI, 0); ctx.fill()
     ctx.fillRect(-r * 0.9, cy - r * 0.5, r * 1.5, r * 0.16) // klep
   } else { // snor

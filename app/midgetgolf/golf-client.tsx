@@ -48,6 +48,12 @@ type Game = {
   // UFO-ontvoering (client-only, tijdens 'aim'): scheert binnen, straalt de bal op en dropt 'm elders.
   ufo: { x: number; y: number; hx: number; hy: number; dropX: number; dropY: number; phase: 'in' | 'beam' | 'out'; t: number } | null
   ufoCd: number // seconden tot een volgende ontvoering mag
+  // Bliksem (client-only): getelegrafeerde inslag; bal in de buurt = weggeblazen.
+  bolt: { x: number; y: number; phase: 'warn' | 'strike'; t: number } | null
+  boltCd: number
+  // Reuzenhand (client-only, tijdens 'aim'): reikt in en flikt de bal een willekeurige kant op.
+  hand: { x: number; y: number; hx: number; hy: number; phase: 'in' | 'flick' | 'out'; t: number } | null
+  handCd: number
 }
 
 // Deeltjes bijspawnen (stof, confetti, plons, aarde).
@@ -147,6 +153,8 @@ export default function GolfClient() {
       particles: [], trailT: 0, cupGlow: 0,
       shake: 0, flash: 0, bumpHitCd: 0, lastBX: holes[0].tee.x, lastBY: holes[0].tee.y,
       ufo: null, ufoCd: 8 + Math.random() * 8,
+      bolt: null, boltCd: 10 + Math.random() * 10,
+      hand: null, handCd: 14 + Math.random() * 10,
     }
     setPopup(null)
     setScorecard(null)
@@ -233,6 +241,10 @@ export default function GolfClient() {
           g.cupGlow = 0
           g.ufo = null
           g.ufoCd = 8 + Math.random() * 8
+          g.bolt = null
+          g.boltCd = 10 + Math.random() * 10
+          g.hand = null
+          g.handCd = 14 + Math.random() * 10
           g.lastBX = nh.tee.x
           g.lastBY = nh.tee.y
         }
@@ -378,9 +390,61 @@ export default function GolfClient() {
           u.y += (u.hy - u.y) * Math.min(1, 2.6 * dt)
           if (u.y < -140) { g.ufo = null; g.ufoCd = 12 + Math.random() * 10 }
         }
-      } else if (g.phase === 'aim' && g.ufoCd <= 0 && Math.hypot(p.ball.x - h.cup.x, p.ball.y - h.cup.y) > 150 && Math.random() < dt * 0.25) {
+      } else if (g.phase === 'aim' && !g.hand && g.ufoCd <= 0 && Math.hypot(p.ball.x - h.cup.x, p.ball.y - h.cup.y) > 150 && Math.random() < dt * 0.25) {
         const drop = pickDrop(h)
         g.ufo = { x: Math.random() < 0.5 ? -120 : WORLD_W + 120, y: 40, hx: p.ball.x, hy: Math.max(60, p.ball.y - 130), dropX: drop.x, dropY: drop.y, phase: 'in', t: 0 }
+      }
+
+      // ── Bliksem (bizar): getelegrafeerde inslag. Sta je te dichtbij als-ie inslaat → weggeblazen. ──
+      if (g.boltCd > 0 && !g.bolt) g.boltCd = Math.max(0, g.boltCd - dt)
+      if (g.bolt) {
+        g.bolt.t += dt
+        if (g.bolt.phase === 'warn' && g.bolt.t > 0.9) {
+          g.bolt.phase = 'strike'; g.bolt.t = 0
+          g.flash = 0.6; g.shake = Math.max(g.shake, 0.9)
+          emit(g, g.bolt.x, g.bolt.y, 22, ['#fff7c4', '#9be8ff', '#ffffff'], { spd: 300, life: 0.5, r: 3, up: 60, grav: 300 })
+          if (Math.hypot(p.ball.x - g.bolt.x, p.ball.y - g.bolt.y) < 60) {
+            const a = Math.atan2(p.ball.y - g.bolt.y, p.ball.x - g.bolt.x) + (Math.random() - 0.5)
+            const pw = 420 + Math.random() * 160
+            p.ball.vx = Math.cos(a) * pw; p.ball.vy = Math.sin(a) * pw
+            if (g.phase === 'aim') { g.lastBX = p.ball.x; g.lastBY = p.ball.y; g.phase = 'roll' }
+            show('⚡ ZAP! Weggeblazen!', '#9be8ff')
+          }
+        } else if (g.bolt.phase === 'strike' && g.bolt.t > 0.22) {
+          g.bolt = null; g.boltCd = 11 + Math.random() * 10
+        }
+      } else if (g.boltCd <= 0 && Math.random() < dt * 0.3) {
+        const spot = Math.random() < 0.6 ? { x: p.ball.x + (Math.random() - 0.5) * 120, y: p.ball.y + (Math.random() - 0.5) * 120 } : pickDrop(h)
+        g.bolt = { x: spot.x, y: spot.y, phase: 'warn', t: 0 }
+      }
+
+      // ── Reuzenhand (bizar): reikt van onderen in en flikt de bal een willekeurige kant op. ──
+      if (g.handCd > 0 && !g.hand) g.handCd = Math.max(0, g.handCd - dt)
+      if (g.hand) {
+        const hd = g.hand
+        hd.t += dt
+        if (hd.phase === 'in') {
+          hd.x += (hd.hx - hd.x) * Math.min(1, 3.2 * dt)
+          hd.y += (hd.hy - hd.y) * Math.min(1, 3.2 * dt)
+          if (Math.hypot(hd.x - hd.hx, hd.y - hd.hy) < 10) { hd.phase = 'flick'; hd.t = 0 }
+        } else if (hd.phase === 'flick') {
+          if (hd.t > 0.18) {
+            const a = Math.random() * Math.PI * 2
+            const pw = 300 + Math.random() * 220
+            p.ball.vx = Math.cos(a) * pw; p.ball.vy = Math.sin(a) * pw
+            g.lastBX = p.ball.x; g.lastBY = p.ball.y
+            if (g.phase === 'aim') g.phase = 'roll'
+            g.shake = Math.max(g.shake, 0.5)
+            emit(g, p.ball.x, p.ball.y, 12, ['#ffd24a', '#fff3c4'], { spd: 200, life: 0.4, r: 3 })
+            show('✋ FLIP! De reuzenhand flikt \'m weg!', '#ffd24a')
+            hd.phase = 'out'; hd.t = 0
+          }
+        } else {
+          hd.y += 380 * dt
+          if (hd.y > WORLD_H + 220) { g.hand = null; g.handCd = 16 + Math.random() * 10 }
+        }
+      } else if (g.phase === 'aim' && !g.ufo && g.handCd <= 0 && Math.random() < dt * 0.18) {
+        g.hand = { x: p.ball.x, y: WORLD_H + 220, hx: p.ball.x, hy: p.ball.y + 4, phase: 'in', t: 0 }
       }
     }
 
@@ -407,7 +471,7 @@ export default function GolfClient() {
       if (e.code === 'Escape') { setStage('menu'); return }
       const g = gameRef.current
       if (!g || e.repeat) return
-      if (g.phase === 'aim' && e.code === 'Space' && !g.ufo) {
+      if (g.phase === 'aim' && e.code === 'Space' && !g.ufo && !g.hand) {
         g.phase = 'charge'
         g.chargeT = 0
       }
@@ -679,6 +743,22 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     ctx.restore()
   }
 
+  // Zwart gat: donkere draaikolk met paarse accretieschijf.
+  if (h.blackhole) {
+    const bh = h.blackhole
+    ctx.save()
+    ctx.translate(bh.x, bh.y)
+    const bg = ctx.createRadialGradient(0, 0, 2, 0, 0, bh.r)
+    bg.addColorStop(0, '#000'); bg.addColorStop(0.28, '#000'); bg.addColorStop(0.62, 'rgba(120,60,200,0.32)'); bg.addColorStop(1, 'rgba(120,60,200,0)')
+    ctx.fillStyle = bg
+    ctx.beginPath(); ctx.arc(0, 0, bh.r, 0, Math.PI * 2); ctx.fill()
+    ctx.rotate(g.simT * 2)
+    ctx.strokeStyle = 'rgba(200,150,255,0.85)'; ctx.lineWidth = 3
+    for (let a = 0; a < 4; a++) { ctx.beginPath(); ctx.arc(0, 0, 18 + a * 4, a * 1.6, a * 1.6 + 1.4); ctx.stroke() }
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+  }
+
   // Tee + cup (met wapperende vlag).
   ctx.fillStyle = 'rgba(255,255,255,0.25)'
   ctx.fillRect(h.tee.x - 13, h.tee.y - 13, 26, 26)
@@ -868,6 +948,43 @@ function draw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, g: Game,
     ctx.fillStyle = '#c7d2df'; ctx.beginPath(); ctx.ellipse(0, -4, 24, 15, 0, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = 'rgba(180,240,255,0.85)'; ctx.beginPath(); ctx.arc(0, -8, 15, Math.PI, 0); ctx.fill()
     for (let i = 0; i < 5; i++) { ctx.fillStyle = Math.sin(g.simT * 10 + i) > 0 ? '#ffd24a' : '#e0517a'; ctx.beginPath(); ctx.arc(-40 + i * 20, 7, 3.2, 0, Math.PI * 2); ctx.fill() }
+    ctx.restore()
+  }
+
+  // Bliksem: waarschuwingsring (warn) → gekartelde flits van bovenaf (strike).
+  if (g.bolt) {
+    const bo = g.bolt
+    if (bo.phase === 'warn') {
+      const k = 0.4 + 0.4 * Math.sin(g.simT * 18)
+      ctx.strokeStyle = `rgba(150,220,255,${k})`; ctx.lineWidth = 3
+      ctx.beginPath(); ctx.arc(bo.x, bo.y, 34, 0, Math.PI * 2); ctx.stroke()
+      ctx.beginPath(); ctx.arc(bo.x, bo.y, 20, 0, Math.PI * 2); ctx.stroke()
+      ctx.fillStyle = `rgba(150,220,255,${k})`; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center'
+      ctx.fillText('⚡', bo.x, bo.y + 8)
+    } else {
+      ctx.beginPath()
+      let ly = 0, lx = bo.x
+      ctx.moveTo(lx, ly)
+      while (ly < bo.y) { ly += 28; lx = bo.x + (Math.random() - 0.5) * 46; ctx.lineTo(lx, Math.min(ly, bo.y)) }
+      ctx.lineTo(bo.x, bo.y)
+      ctx.strokeStyle = 'rgba(180,230,255,0.6)'; ctx.lineWidth = 9; ctx.stroke()
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.stroke()
+    }
+  }
+
+  // Reuzenhand: reikt van onderen in en flikt de bal weg.
+  if (g.hand) {
+    const hd = g.hand
+    ctx.save()
+    ctx.translate(hd.x, hd.y)
+    ctx.fillStyle = '#e8b48c'
+    ctx.fillRect(-16, 0, 32, WORLD_H) // arm naar beneden uit beeld
+    ctx.beginPath(); ctx.ellipse(0, -6, 27, 31, 0, 0, Math.PI * 2); ctx.fill() // palm
+    ctx.fillStyle = '#f0c29c'
+    for (let i = 0; i < 4; i++) ctx.fillRect(-18 + i * 11 - 3, -48, 8, 28) // vingers
+    ctx.beginPath(); ctx.ellipse(-25, -10, 8, 15, 0.5, 0, Math.PI * 2); ctx.fill() // duim
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 2
+    ctx.beginPath(); ctx.ellipse(0, -6, 27, 31, 0, 0, Math.PI * 2); ctx.stroke()
     ctx.restore()
   }
 

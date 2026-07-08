@@ -26,6 +26,7 @@ export type Hole = {
   portals: { x: number; y: number; r: number }[] // wormgaten in paren (2i ↔ 2i+1): erin = uit het andere
   tramps: { x: number; y: number; r: number }[] // trampolines: katapulteren de bal keihard door
   boulder: { ax: number; ay: number; bx: number; by: number; r: number; speed: number; face: string } | null // rollende reuzenkop (heen en weer) die de bal wegbeukt
+  blackhole: { x: number; y: number; r: number } | null // zwart gat: zuigt de bal aan; kern → spuugt 'm ergens uit
 }
 
 export type GolfBall = {
@@ -37,6 +38,7 @@ export type GolfBall = {
   sinking: number // >0 = valt in de cup (render: krimpt); telt af, dán pas 'cup'
   portalCd?: number // >0 = net door een wormgat → even geen nieuwe teleport (anti-pingpong)
   trampCd?: number // >0 = net van een trampoline gestuiterd → even geen nieuwe fling
+  bhCd?: number // >0 = net uit een zwart gat gespuugd → even niet opnieuw opzuigen
 }
 
 export type GolfPlayer = {

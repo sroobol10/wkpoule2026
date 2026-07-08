@@ -69,6 +69,8 @@ export type Body = {
   patrol?: number // patrouilleert horizontaal (px/s); zweeft op een rail, geen zwaartekracht
   patX0?: number // midden van de patrouille-rail
   hp?: number // boss-kop: aantal treffers dat 'ie incasseert vóór 'ie sneuvelt (default 1)
+  x0?: number; y0?: number // startpositie van een structuurblok (voor de sloopbonus-meting)
+  acc?: number // random cosmetisch accessoire (bril/petje/snor); per spawn, niet aan het gezicht gekoppeld
   popped: boolean
   sleep: number
 }
@@ -92,6 +94,7 @@ export type KanonEvent =
   | { type: 'decoy'; x: number; y: number } // nep-kop geraakt (minpunten)
   | { type: 'coin'; x: number; y: number } // muntje gepakt (beloning)
   | { type: 'meteor' } // meteorenregen begint
+  | { type: 'demolish'; full: boolean; bonus: number } // solo: (bijna) hele toren gesloopt → bonus
   | { type: 'cleared' } // solo: level uit
   | { type: 'failed' } // solo: schoten op
   | { type: 'won'; winner: -1 | 0 | 1 } // 1v1: match beslist
@@ -135,11 +138,11 @@ export function slingPos(mode: KanonMode, player: 0 | 1): { x: number; y: number
 
 // ── Bouwstenen ──────────────────────────────────────────────────────────────────
 function crate(bodies: Body[], x: number, y: number, w: number, h: number, arena: 0 | 1 | undefined, kind: BodyKind = 'crate') {
-  bodies.push({ x, y, w, h, vx: 0, vy: 0, angle: 0, va: 0, kind, arena, popped: false, sleep: 1 })
+  bodies.push({ x, y, w, h, vx: 0, vy: 0, angle: 0, va: 0, kind, arena, x0: x, y0: y, popped: false, sleep: 1 })
 }
 function head(bodies: Body[], x: number, y: number, arena: 0 | 1 | undefined, face: string, bonus = false) {
   const helmet = !bonus && Math.random() < 0.18 // helm-kop: incasseert één extra treffer
-  bodies.push({ x, y, w: TARGET_R * 2, h: TARGET_R * 2, vx: 0, vy: 0, angle: 0, va: 0, kind: bonus ? 'bonus' : 'target', face, arena, hp: helmet ? 2 : undefined, popped: false, sleep: 1 })
+  bodies.push({ x, y, w: TARGET_R * 2, h: TARGET_R * 2, vx: 0, vy: 0, angle: 0, va: 0, kind: bonus ? 'bonus' : 'target', face, arena, hp: helmet ? 2 : undefined, acc: Math.floor(Math.random() * 1000), popped: false, sleep: 1 })
 }
 // Kies een bouwmateriaal: meestal hout, soms zwaar steen, broos ijs, veerkrachtig rubber of TNT.
 function material(level: number): BodyKind {
@@ -265,6 +268,20 @@ export function makeGame(mode: KanonMode, picks: [string, string], targetPool: s
 
 export function targetsLeft(s: KanonState, arena?: 0 | 1): number {
   return s.bodies.filter((b) => b.kind === 'target' && !b.popped && (arena === undefined || b.arena === arena)).length
+}
+
+// Fractie 'gesloopte' structuurblokken van de originele toren: kapot (popped) óf flink verplaatst/
+// gekanteld t.o.v. de startpositie. Sky-drops tellen niet mee (die hebben geen x0). 1 = alles plat.
+function demolition(s: KanonState): number {
+  const solid = s.bodies.filter((b) => b.x0 !== undefined && (b.kind === 'crate' || b.kind === 'stone' || b.kind === 'tnt' || b.kind === 'ice' || b.kind === 'rubber'))
+  if (solid.length === 0) return 1
+  let wrecked = 0
+  for (const b of solid) {
+    if (b.popped) { wrecked++; continue }
+    const moved = Math.hypot(b.x - (b.x0 ?? b.x), b.y - (b.y0 ?? b.y))
+    if (moved > 42 || Math.abs(b.angle) > 0.6) wrecked++
+  }
+  return wrecked / solid.length
 }
 
 // Vuur de bovenste voorraad-kop van de speler-aan-beurt af. Geeft de sim-events terug (o.a. 'launch',
@@ -584,7 +601,16 @@ export function step(s: KanonState, dt: number): KanonEvent[] {
 
   // ── Win/verlies bepalen ──────────────────────────────────────────────────────
   if (s.mode === 'solo') {
-    if (targetsLeft(s) === 0) { s.phase = 'cleared'; s.score[0] += (1000 + s.ammo[0].length * 250) * (s.modifier === 'double' ? 2 : 1); ev.push({ type: 'cleared' }); return ev }
+    if (targetsLeft(s) === 0) {
+      s.phase = 'cleared'
+      const dbl = s.modifier === 'double' ? 2 : 1
+      s.score[0] += (1000 + s.ammo[0].length * 250) * dbl
+      // Sloopbonus: heb je ook de tóren omgegooid, dan verdien je flink extra.
+      const frac = demolition(s)
+      if (frac >= 0.6) { const full = frac >= 0.85; const bonus = (full ? 2000 : 800) * dbl; s.score[0] += bonus; ev.push({ type: 'demolish', full, bonus }) }
+      ev.push({ type: 'cleared' })
+      return ev
+    }
   } else if (s.mode === 'tower') {
     if (targetsLeft(s) === 0) { s.phase = 'won'; s.winner = s.score[0] === s.score[1] ? -1 : s.score[0] > s.score[1] ? 0 : 1; ev.push({ type: 'won', winner: s.winner }); return ev }
   } else { // duel
