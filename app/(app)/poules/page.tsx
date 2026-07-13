@@ -54,6 +54,21 @@ export default async function PoulesPage() {
       {/* Dagoverzicht — compacte samenvatting van vandaag, per deelnemer */}
       <DagOverzicht userId={user.id} />
 
+      {/* Scenario — filter op de resterende uitslagen en zie je eindstand */}
+      <Link
+        href="/poules/scenario"
+        className="group flex items-center gap-3 rounded-xl border border-wk-blue/30 bg-gradient-to-r from-wk-blue/10 via-wk-gold/10 to-wk-green/10 px-5 py-3.5 transition-colors hover:border-wk-blue/60"
+      >
+        <span className="text-2xl">🔮</span>
+        <div className="flex-1 min-w-0">
+          <p className="font-display text-lg uppercase leading-none bg-gradient-to-r from-wk-blue via-wk-gold to-wk-green bg-clip-text text-transparent">
+            Wie wint de poule?
+          </p>
+          <p className="font-mono text-[10px] text-wk-muted tracking-[0.14em] uppercase mt-0.5">Speel de halve finales, finale, 3e plaats, MVP &amp; topscorer</p>
+        </div>
+        <span className="font-mono text-xs text-wk-blue tracking-[0.14em] uppercase group-hover:translate-x-0.5 transition-transform">→</span>
+      </Link>
+
       {leagues.length === 0 ? (
         <div className="bg-wk-surface border border-white/10 rounded-xl px-5 py-8 text-center">
           <p className="font-mono text-xs text-wk-muted tracking-[0.12em]">Je zit nog niet in een poule.</p>
