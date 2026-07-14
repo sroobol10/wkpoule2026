@@ -184,6 +184,17 @@ export default async function ScenarioPage() {
     }
   }
 
+  // Landen die nog meedoen = teams met een nog niet gespeelde wedstrijd (zelfde logica als de statspagina).
+  const { data: futureMatches } = await supabase
+    .from('matches')
+    .select('home_team:teams!matches_home_team_id_fkey(name), away_team:teams!matches_away_team_id_fkey(name)')
+    .eq('result_entered', false)
+  const activeTeamNames = new Set<string>()
+  for (const m of (futureMatches ?? []) as { home_team: { name: string } | null; away_team: { name: string } | null }[]) {
+    if (m.home_team?.name) activeTeamNames.add(m.home_team.name)
+    if (m.away_team?.name) activeTeamNames.add(m.away_team.name)
+  }
+
   const m103 = matchBySlot[103]
   const m104 = matchBySlot[104]
   const data: ScenarioData = {
@@ -196,6 +207,7 @@ export default async function ScenarioPage() {
     actualThirdWinner: m103?.result_entered ? koWinnerId(m103) : null,
     mvp: mvpQ ? { id: mvpQ.id, options: mvpQ.answer_options ?? [] } : null,
     topscorer: topQ ? { id: topQ.id, options: topQ.answer_options ?? [] } : null,
+    activeTeamNames: [...activeTeamNames],
   }
 
   return <ScenarioClient data={data} currentUserId={user.id} />

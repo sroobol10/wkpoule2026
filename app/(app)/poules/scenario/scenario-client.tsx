@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useMemo, useState } from 'react'
 import { AvatarCircle } from '@/components/avatar-circle'
 import { KO_POINTS } from '@/lib/constants'
+import { playerCountry } from '@/lib/player-countries'
 
 // ── Types (gedeeld met page.tsx) ─────────────────────────────────────────────
 export type ScenarioTeam = { id: string; name: string; flag: string }
@@ -27,6 +28,7 @@ export type ScenarioData = {
   actualThirdWinner: string | null
   mvp: { id: string; options: string[] } | null
   topscorer: { id: string; options: string[] } | null
+  activeTeamNames: string[] // landen die nog meedoen (voor het inkorten van MVP/topscorer)
 }
 
 const MVP_PTS = 15
@@ -37,20 +39,31 @@ export default function ScenarioClient({ data, currentUserId }: { data: Scenario
   const { leagues, members, teams, sf1, sf2 } = data
 
   const [leagueId, setLeagueId] = useState(leagues[0]?.id ?? '')
-  const [sf1w, setSf1w] = useState(sf1?.actualWinner ?? sf1?.home ?? '')
-  const [sf2w, setSf2w] = useState(sf2?.actualWinner ?? sf2?.home ?? '')
-  const sf1l = sf1 ? (sf1w === sf1.home ? sf1.away : sf1.home) : ''
-  const sf2l = sf2 ? (sf2w === sf2.home ? sf2.away : sf2.home) : ''
-  // Rauwe keuze; de effectieve winnaar wordt afgeleid (blijft geldig als de HF-winnaars wijzigen).
-  const [finalPick, setFinalPick] = useState(data.actualFinalWinner ?? '')
-  const [thirdPick, setThirdPick] = useState(data.actualThirdWinner ?? '')
+  // Een gespeelde ronde ligt vast op de echte winnaar (niet meer te wijzigen); anders de rauwe keuze.
+  const sf1Locked = !!sf1?.actualWinner
+  const sf2Locked = !!sf2?.actualWinner
+  const finalLocked = !!data.actualFinalWinner
+  const thirdLocked = !!data.actualThirdWinner
+  const [sf1State, setSf1State] = useState(sf1?.home ?? '')
+  const [sf2State, setSf2State] = useState(sf2?.home ?? '')
+  const [finalPick, setFinalPick] = useState('')
+  const [thirdPick, setThirdPick] = useState('')
   const [mvp, setMvp] = useState('')
   const [topscorer, setTopscorer] = useState('')
 
+  const sf1w = sf1?.actualWinner ?? sf1State
+  const sf2w = sf2?.actualWinner ?? sf2State
+  const sf1l = sf1 ? (sf1w === sf1.home ? sf1.away : sf1.home) : ''
+  const sf2l = sf2 ? (sf2w === sf2.home ? sf2.away : sf2.home) : ''
   const finalCands = [sf1w, sf2w].filter(Boolean)
   const thirdCands = [sf1l, sf2l].filter(Boolean)
-  const finalw = finalCands.includes(finalPick) ? finalPick : (finalCands[0] ?? '')
-  const thirdw = thirdCands.includes(thirdPick) ? thirdPick : (thirdCands[0] ?? '')
+  const finalw = data.actualFinalWinner ?? (finalCands.includes(finalPick) ? finalPick : (finalCands[0] ?? ''))
+  const thirdw = data.actualThirdWinner ?? (thirdCands.includes(thirdPick) ? thirdPick : (thirdCands[0] ?? ''))
+
+  // MVP/topscorer-lijst inkorten tot spelers van nog-actieve landen (zoals de niet-doorgestreepte op de statspagina).
+  const alive = new Set(data.activeTeamNames)
+  const trimAlive = (opts: string[]) =>
+    alive.size === 0 ? opts : opts.filter((o) => { const c = playerCountry(o); return !c || alive.has(c) })
 
   const league = leagues.find((l) => l.id === leagueId) ?? leagues[0]
 
@@ -115,19 +128,15 @@ export default function ScenarioClient({ data, currentUserId }: { data: Scenario
       <div className="bg-wk-surface border border-white/10 rounded-xl p-5 space-y-4">
         <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase">Stel de uitslagen in</p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <MatchPick label="Halve finale 1" a={sf1.home} b={sf1.away} value={sf1w} onPick={setSf1w} teams={teams} />
-          <MatchPick label="Halve finale 2" a={sf2.home} b={sf2.away} value={sf2w} onPick={setSf2w} teams={teams} />
-          <MatchPick label="Finale 🏆" a={finalCands[0]} b={finalCands[1]} value={finalw} onPick={setFinalPick} teams={teams} />
-          <MatchPick label="Troostfinale (3e plaats)" a={thirdCands[0]} b={thirdCands[1]} value={thirdw} onPick={setThirdPick} teams={teams} />
+          <MatchPick label="Halve finale 1" a={sf1.home} b={sf1.away} value={sf1w} onPick={setSf1State} teams={teams} locked={sf1Locked} />
+          <MatchPick label="Halve finale 2" a={sf2.home} b={sf2.away} value={sf2w} onPick={setSf2State} teams={teams} locked={sf2Locked} />
+          <MatchPick label="Finale 🏆" a={finalCands[0]} b={finalCands[1]} value={finalw} onPick={setFinalPick} teams={teams} locked={finalLocked} />
+          <MatchPick label="Troostfinale (3e plaats)" a={thirdCands[0]} b={thirdCands[1]} value={thirdw} onPick={setThirdPick} teams={teams} locked={thirdLocked} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2 pt-1">
-          {data.mvp && <OptionPick label="Beste speler (MVP) · 15 pt" value={mvp} onChange={setMvp} options={data.mvp.options} />}
-          {data.topscorer && <OptionPick label="Topscorer · 25 pt" value={topscorer} onChange={setTopscorer} options={data.topscorer.options} />}
+          {data.mvp && <OptionPick label="Beste speler (MVP) · 15 pt" value={mvp} onChange={setMvp} options={trimAlive(data.mvp.options)} />}
+          {data.topscorer && <OptionPick label="Topscorer · 25 pt" value={topscorer} onChange={setTopscorer} options={trimAlive(data.topscorer.options)} />}
         </div>
-        <p className="font-mono text-[9px] text-wk-muted/70 tracking-[0.1em] leading-relaxed">
-          Winnaars: HF 100 pt · finale 200 pt · 3e plaats 50 pt. MVP/topscorer laat je leeg tot je een keuze maakt.
-          De stand hieronder herberekent live — bestaande punten van deze rondes worden vervangen, niet dubbel geteld.
-        </p>
       </div>
 
       {/* Scenario-stand */}
@@ -182,7 +191,10 @@ export default function ScenarioClient({ data, currentUserId }: { data: Scenario
 function Header() {
   return (
     <div>
-      <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1">Scenario</p>
+      <Link href="/poules" className="inline-flex items-center gap-1.5 font-mono text-[10px] text-wk-muted tracking-[0.16em] uppercase hover:text-wk-text transition-colors">
+        ← Terug naar dagoverzicht
+      </Link>
+      <p className="font-mono text-[10px] text-wk-red tracking-[0.2em] uppercase mb-1 mt-3">Scenario</p>
       <h1 className="font-display text-3xl text-wk-text uppercase leading-none">Wie wint de poule?</h1>
       <p className="font-mono text-xs text-wk-muted mt-1.5 tracking-[0.12em]">
         Stel de resterende uitslagen in en zie de eindstand van je eigen poule.
@@ -191,10 +203,24 @@ function Header() {
   )
 }
 
-function MatchPick({ label, a, b, value, onPick, teams }: {
-  label: string; a?: string; b?: string; value: string; onPick: (id: string) => void; teams: Record<string, ScenarioTeam>
+function MatchPick({ label, a, b, value, onPick, teams, locked = false }: {
+  label: string; a?: string; b?: string; value: string; onPick: (id: string) => void; teams: Record<string, ScenarioTeam>; locked?: boolean
 }) {
   const opts = [a, b].filter(Boolean) as string[]
+  // Uitslag al bekend → vast tonen (winnaar staat immers vast), niet meer te wijzigen.
+  if (locked && value) {
+    const t = teams[value]
+    return (
+      <div>
+        <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">{label}</p>
+        <div className="flex items-center gap-2 rounded-lg border border-wk-green/40 bg-wk-green/10 px-2.5 py-2">
+          {t && <Image src={t.flag} alt={t.name} width={22} height={15} className="w-[22px] h-[15px] rounded-sm object-cover shrink-0" />}
+          <span className="font-mono text-[11px] font-bold text-wk-green truncate">{t?.name ?? '—'}</span>
+          <span className="ml-auto font-mono text-[8px] text-wk-green/80 uppercase tracking-[0.12em] shrink-0">uitslag ✓</span>
+        </div>
+      </div>
+    )
+  }
   return (
     <div>
       <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-wk-muted">{label}</p>
