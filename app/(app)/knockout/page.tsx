@@ -131,7 +131,10 @@ export default async function KnockoutPage() {
     r32:         [...(teamsInStage['r16']         ?? [])],
     r16:         [...(teamsInStage['qf']          ?? [])],
     qf:          [...(teamsInStage['sf']          ?? [])],
-    sf:          [...(teamsInStage['final']       ?? []), ...(teamsInStage['third_place'] ?? [])],
+    // "Overleefde de halve finale" = door naar de FINALE. De verliezers zakken af naar
+    // de troostfinale; die zijn NIET doorgegaan (worden dus niet als "winnaar elders"
+    // gekleurd) — ze blijven wél actief tot de troostfinale gespeeld is (zie alive-teams).
+    sf:          [...(teamsInStage['final']       ?? [])],
     final:       finalWinner ? [finalWinner] : [],
     third_place: thirdWinner ? [thirdWinner] : [],
   }

@@ -11,6 +11,15 @@
 //    nummer-3) zijn uitgeschakeld.
 //  - Knockout → de verliezer (laagste score) van een gespeelde KO-wedstrijd is
 //    uitgeschakeld.
+//
+// Uitzonderingen aan het einde van het toernooi:
+//  - Halve finale (sf): de verliezer valt NIET af, want hij speelt nog de
+//    troostfinale (wedstrijd om plek 3). Beide halvefinalisten blijven actief
+//    tot de troostfinale gespeeld is.
+//  - Troostfinale (third_place): zodra gespeeld zijn BEIDE ploegen klaar — de
+//    nummer 3 én de nummer 4. Daarna blijven alleen de twee finalisten actief.
+//  - Finale (final): beide finalisten (WK-winnaar én verliezend finalist) blijven
+//    actief, ook nadat de finale gespeeld is. Overige landen zijn dan uitgegrijsd.
 
 import { sortGroupStandings, type TeamStat } from '@/lib/group-standings'
 import { compareThirds, type ThirdEntry } from '@/lib/third-place'
@@ -27,6 +36,7 @@ export type AliveGroupMatch = {
 }
 
 export type AliveKoMatch = {
+  stage?: string | null
   home_team_id: string | null
   away_team_id: string | null
   home_score: number | null
@@ -79,23 +89,98 @@ function computeAdvancingTeamIds(groupMatches: AliveGroupMatch[]): Set<string> {
   return advancing
 }
 
+// Alle team-id's die in de groeps- of KO-wedstrijden voorkomen.
+function collectTeamIds(groupMatches: AliveGroupMatch[], koMatches: AliveKoMatch[]): Set<string> {
+  const ids = new Set<string>()
+  for (const m of groupMatches) {
+    if (m.home_team_id) ids.add(m.home_team_id)
+    if (m.away_team_id) ids.add(m.away_team_id)
+  }
+  for (const m of koMatches) {
+    if (m.home_team_id) ids.add(m.home_team_id)
+    if (m.away_team_id) ids.add(m.away_team_id)
+  }
+  return ids
+}
+
+// Teams die in een afgeronde groepsfase niet doorgingen (leeg zolang de groepsfase loopt).
+function computeGroupEliminatedIds(groupMatches: AliveGroupMatch[]): Set<string> {
+  const eliminated = new Set<string>()
+  const groupComplete = groupMatches.length > 0 && groupMatches.every((m) => m.result_entered)
+  if (!groupComplete) return eliminated
+  const advancing = computeAdvancingTeamIds(groupMatches)
+  for (const m of groupMatches) {
+    for (const id of [m.home_team_id, m.away_team_id]) {
+      if (id && !advancing.has(id)) eliminated.add(id)
+    }
+  }
+  return eliminated
+}
+
+// De twee landen die (voorlopig) in de finale staan — ongeacht of die al gespeeld is.
+function finalistIds(koMatches: AliveKoMatch[]): Set<string> {
+  const ids = new Set<string>()
+  for (const m of koMatches) {
+    if (m.stage !== 'final') continue
+    if (m.home_team_id) ids.add(m.home_team_id)
+    if (m.away_team_id) ids.add(m.away_team_id)
+  }
+  return ids
+}
+
 export function computeAliveTeamIds(
   groupMatches: AliveGroupMatch[],
   koMatches: AliveKoMatch[],
 ): Set<string> {
-  const allTeamIds = new Set<string>()
-  for (const m of groupMatches) {
-    if (m.home_team_id) allTeamIds.add(m.home_team_id)
-    if (m.away_team_id) allTeamIds.add(m.away_team_id)
-  }
-  for (const m of koMatches) {
-    if (m.home_team_id) allTeamIds.add(m.home_team_id)
-    if (m.away_team_id) allTeamIds.add(m.away_team_id)
-  }
-
+  const allTeamIds = collectTeamIds(groupMatches, koMatches)
   const eliminated = new Set<string>()
 
   // Verliezers van gespeelde KO-wedstrijden (gelijkspel → strafschoppen-winnaar)
+  for (const m of koMatches) {
+    if (!m.result_entered || m.home_score == null || m.away_score == null) continue
+    if (!m.home_team_id || !m.away_team_id) continue
+
+    // Finale: beide finalisten blijven actief, ook na afloop. Nooit uitschakelen.
+    if (m.stage === 'final') continue
+
+    // Halve finale: de verliezer valt NIET af — hij speelt nog de troostfinale.
+    if (m.stage === 'sf') continue
+
+    // Troostfinale (plek 3/4): zodra gespeeld zijn BEIDE ploegen uitgeschakeld,
+    // de winnaar (nr. 3) net zo goed als de verliezer (nr. 4). Daarna blijven
+    // enkel de finalisten over.
+    if (m.stage === 'third_place') {
+      eliminated.add(m.home_team_id)
+      eliminated.add(m.away_team_id)
+      continue
+    }
+
+    const loser = koLoserId(m)
+    if (loser) eliminated.add(loser)
+  }
+
+  // Pas zodra de hele groepsfase is gespeeld kunnen niet-doorgegane teams afvallen.
+  for (const id of computeGroupEliminatedIds(groupMatches)) eliminated.add(id)
+
+  const alive = new Set<string>()
+  for (const id of allTeamIds) if (!eliminated.has(id)) alive.add(id)
+  return alive
+}
+
+// Landen die nog wereldkampioen kunnen worden — óf het al zijn. In tegenstelling tot
+// `computeAliveTeamIds` valt hier de verliezer van ELK gespeeld KO-duel af, inclusief de
+// halve finale: wie de halve finale verliest speelt nog wel om plek 3, maar kan geen
+// wereldkampioen meer worden. De twee finalisten blijven altijd kandidaat — ook de
+// verliezend finalist na afloop — zodat op de kampioen-muur enkel de finaleteams
+// (en anders alle nog levende kandidaten) kleur houden.
+export function computeChampionContenderIds(
+  groupMatches: AliveGroupMatch[],
+  koMatches: AliveKoMatch[],
+): Set<string> {
+  const allTeamIds = collectTeamIds(groupMatches, koMatches)
+  const eliminated = new Set<string>()
+
+  // Verliezer van elk gespeeld KO-duel is geen kampioenskandidaat meer.
   for (const m of koMatches) {
     if (!m.result_entered || m.home_score == null || m.away_score == null) continue
     if (!m.home_team_id || !m.away_team_id) continue
@@ -103,18 +188,12 @@ export function computeAliveTeamIds(
     if (loser) eliminated.add(loser)
   }
 
-  // Pas zodra de hele groepsfase is gespeeld kunnen niet-doorgegane teams afvallen.
-  const groupComplete = groupMatches.length > 0 && groupMatches.every((m) => m.result_entered)
-  if (groupComplete) {
-    const advancing = computeAdvancingTeamIds(groupMatches)
-    for (const m of groupMatches) {
-      for (const id of [m.home_team_id, m.away_team_id]) {
-        if (id && !advancing.has(id)) eliminated.add(id)
-      }
-    }
-  }
+  for (const id of computeGroupEliminatedIds(groupMatches)) eliminated.add(id)
 
-  const alive = new Set<string>()
-  for (const id of allTeamIds) if (!eliminated.has(id)) alive.add(id)
-  return alive
+  // Finalisten blijven altijd kandidaat (ook de verliezend finalist).
+  for (const id of finalistIds(koMatches)) eliminated.delete(id)
+
+  const contenders = new Set<string>()
+  for (const id of allTeamIds) if (!eliminated.has(id)) contenders.add(id)
+  return contenders
 }

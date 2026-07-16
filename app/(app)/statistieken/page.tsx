@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { GROUP_STAGE_DEADLINE } from '@/lib/constants'
 import { getActivePlayerIds } from '@/lib/active-players'
-import { computeAliveTeamIds, type AliveGroupMatch, type AliveKoMatch } from '@/lib/alive-teams'
+import { computeAliveTeamIds, computeChampionContenderIds, type AliveGroupMatch, type AliveKoMatch } from '@/lib/alive-teams'
 import StatsClient, { type KampioenverdeligEntry, type BonusQuestionStat } from './stats-client'
 
 // PostgREST levert standaard max. 1000 rijen per query. Met ~65 deelnemers ×
@@ -262,18 +262,15 @@ export default async function StatistiekenPage({
   )
   const eliminatedCountries = (allTeamsForFlags ?? []).filter((t) => !aliveSet.has(t.id)).map((t) => t.name)
 
-  // Landen die (minimaal) de halve finale haalden = deelnemers in een sf/troostfinale/finale.
-  // De toernooiwinnaar haalt historisch altijd minstens de halve finale, dus alleen landen die
-  // VÓÓR de halve finale sneuvelen worden bij de kampioen-muur uitgegrijsd.
-  const reachedSemiIds = new Set<string>()
-  for (const m of (aliveKoM ?? []) as unknown as { stage: string; home_team_id: string | null; away_team_id: string | null }[]) {
-    if (m.stage === 'sf' || m.stage === 'third_place' || m.stage === 'final') {
-      if (m.home_team_id) reachedSemiIds.add(m.home_team_id)
-      if (m.away_team_id) reachedSemiIds.add(m.away_team_id)
-    }
-  }
-  const preSemiEliminatedCountries = (allTeamsForFlags ?? [])
-    .filter((t) => !aliveSet.has(t.id) && !reachedSemiIds.has(t.id))
+  // Kampioen-muur: grijs zodra een land geen wereldkampioen meer kan worden. De verliezer
+  // van élk KO-duel valt af (ook de halvefinalisten die om plek 3 spelen); zodra de finale
+  // vaststaat blijven daardoor enkel de twee finalisten kleur houden — óók na de finale.
+  const championContenders = computeChampionContenderIds(
+    (aliveGroupM ?? []) as unknown as AliveGroupMatch[],
+    (aliveKoM ?? []) as unknown as AliveKoMatch[],
+  )
+  const championGrayCountries = (allTeamsForFlags ?? [])
+    .filter((t) => !championContenders.has(t.id))
     .map((t) => t.name)
 
   return (
@@ -286,7 +283,7 @@ export default async function StatistiekenPage({
       bonusQuestionStats={bonusQuestionStats}
       teamFlags={teamFlags}
       eliminatedCountries={eliminatedCountries}
-      preSemiEliminatedCountries={preSemiEliminatedCountries}
+      championGrayCountries={championGrayCountries}
     />
   )
 }
